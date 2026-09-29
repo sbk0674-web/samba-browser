@@ -949,8 +949,21 @@ def sold_out_option_listed(options: list[str], wanted: str | None) -> bool:
     return bool(sold_out_option_matches(options, wanted))
 
 
-# 스냅샷 스크립트가 주문 수량(args.qty)을 주문서에 반영하는 소싱처(2026-09-30 확인) — 그 밖은 수량 2개 이상을 사지 않는다
-QTY_CAPABLE_SOURCES = frozenset({'cm29', 'fashionplus', 'hmall'})
+def order_qty_problem(want: int, snap: dict[str, object]) -> str | None:
+    """주문서가 열린 스냅샷의 수량이 주문 수량과 다르면 그 사유, 같거나 주문서가 없으면 None.
+
+    실기 2026-09-30: 스크립트가 수량을 무시해 2개 주문에 1개만 결제했다. 수량 2개 이상은 주문서 수량(qty)을
+    읽어 온 경우에만 산다 — 1개 주문은 스크립트 기본이 1개라 그대로 둔다.
+    """
+    if want <= 1 or not (snap.get('order_tab') or snap.get('cost')):
+        return None
+    try:
+        got = int(str(snap.get('qty') or 0))
+    except ValueError:
+        got = 0
+    if got == want:
+        return None
+    return f'주문서 수량 {got or "확인 안 됨"}개 ≠ 주문 수량 {want}개 — 결제하지 않는다'
 
 
 # 계정 견적 건너뜀 사유 중 확정 품절 표시(_quote 가 붙인다)
@@ -1408,6 +1421,14 @@ class BuyerAgent(AgentBase):
         return labels, locked
 
     def _snapshot(self, a: Assignment, account: str) -> dict[str, object]:
+        """그 계정의 스냅샷 — 주문서가 열렸으면 주문서 수량이 주문 수량과 같은지 본다(다르면 사지 않는다)."""
+        snap = self._snapshot_any(a, account)
+        problem = order_qty_problem(a.order.qty, snap)
+        if problem:
+            raise AgentFailure('fail', problem, FailReason.UNKNOWN)
+        return snap
+
+    def _snapshot_any(self, a: Assignment, account: str) -> dict[str, object]:
         """그 계정의 탭 프로필에서 상품 스냅샷(주문서까지)을 만든다.
 
         지정 몰 상품(mall_item)·진입 경로 비교(route_compare)가 켜진 소싱처(SSG)는 그 흐름을 거친다.
@@ -2919,15 +2940,6 @@ class BuyerAgent(AgentBase):
 
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
-        # 수량 2개 이상은 스크립트가 수량을 고르는 소싱처만 산다 — 나머지는 1개만 사 버린다
-        # (실기 2026-09-30 무신사 노스페이스 모자: 주문 2개에 1개 결제, 출고 준비라 취소도 안 됨)
-        key = source_of(self.spec.name).key
-        if a.order.qty > 1 and key not in QTY_CAPABLE_SOURCES:
-            raise AgentFailure(
-                'needs_human',
-                f'수량 {a.order.qty}개 주문 — {key} 구매 스크립트는 수량을 못 고른다(1개만 사게 된다). 사람이 산다',
-                FailReason.UNKNOWN,
-            )
         # 주문마다 비교 기준을 비운다 — 앞 주문의 계정 원가(예: 89,000)가 남아 다음 주문 검사를 잘못 걸었다(실기 2026-09-25)
         self._expect_cost = {}
         self._issued = {}

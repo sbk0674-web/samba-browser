@@ -1649,9 +1649,12 @@ def test_한국_치수_선택지가_품절이면_다른_치수로_바꾸지_않�
     assert matching_options(['260', '270 (품절)', '280'], 'EU 42 · KR 270') == []
 
 
-def test_수량_지원_소싱처_목록():
-    from samba_agent.agents.buyer import QTY_CAPABLE_SOURCES
+def test_주문서_수량이_주문_수량과_다르면_사지_않는다():
+    from samba_agent.agents.buyer import order_qty_problem
 
-    # 무신사·ABC·롯데온 스냅샷은 수량을 못 고른다 — 수량 2개 이상은 사람에게 넘긴다(2026-09-30 사고)
-    assert 'musinsa' not in QTY_CAPABLE_SOURCES and 'lotteon' not in QTY_CAPABLE_SOURCES
-    assert {'cm29', 'fashionplus', 'hmall'} <= QTY_CAPABLE_SOURCES
+    # 실기 2026-09-30 무신사 노스페이스 모자: 2개 주문에 1개 결제
+    assert order_qty_problem(2, {'order_tab': 't', 'qty': 1}) is not None
+    assert order_qty_problem(2, {'order_tab': 't'}) is not None  # 수량을 못 읽었으면 사지 않는다
+    assert order_qty_problem(2, {'order_tab': 't', 'qty': 2}) is None
+    assert order_qty_problem(1, {'order_tab': 't'}) is None
+    assert order_qty_problem(2, {'error': 'sold_out'}) is None  # 주문서가 없으면 다른 사유가 가른다
