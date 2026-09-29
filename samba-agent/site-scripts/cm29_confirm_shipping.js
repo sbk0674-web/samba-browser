@@ -86,7 +86,7 @@ const same = (e, w) => {
 const w = { name: String(args.name || '').trim(), address: String(args.address || '').trim(), address_detail: String(args.address_detail || '') }
 const F = await pickForm()
 if (F.err) return { ok: false, note: F.err + (F.why ? ': ' + F.why : '') }
-const dlg = async () => (await page.get({ selector: '[role=dialog]' })).tree
+const dlg = async () => { const t = (await page.get({ selector: '[role=dialog]' })).tree; return /\] (button|textbox) /.test(t) ? t : (await page.get({})).tree }
 let dl = await dlg()
 const save = lines(dl).find(l => /\] button "저장하기"/.test(l))
 if (!save) return { ok: false, note: '배송지 추가 창(저장하기)이 열려 있지 않음' }

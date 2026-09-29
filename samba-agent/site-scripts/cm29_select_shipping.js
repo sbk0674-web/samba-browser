@@ -96,7 +96,7 @@ if (!ch) return { ok: false, note: '배송지 변경 버튼 없음' }
 await page.click(idOf(ch))
 await page.waitFor(/배송지 추가/, 6000).catch(() => {})
 let dl = ''
-for (let i = 0; i < 10 && !/\(\d{5}\)/.test(dl); i++) { await sleep(200); dl = (await page.get({ selector: '[role=dialog]' })).tree }
+for (let i = 0; i < 10 && !/\(\d{5}\)/.test(dl); i++) { await sleep(200); dl = (await page.get({ selector: '[role=dialog]' })).tree; if (!/\(\d{5}\)/.test(dl)) dl = (await page.get({})).tree }
 const dtx = text(dl).replace(/^.*?배송지 추가\s*/, '')
 // 항목은 '… 수정 (삭제) 선택|선택된 배송지' 로 끝난다 — i 번째 항목 = i 번째 선택 버튼
 const items = dtx.split(/\s선택(?:된 배송지)?(?=\s|$)/).map(s => s.replace(/\s(수정|삭제)(?=\s|$)/g, ' ').trim()).filter(s => /\(\d{5}\)/.test(s)).map(entry)
