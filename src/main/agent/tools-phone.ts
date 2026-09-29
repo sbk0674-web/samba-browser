@@ -19,6 +19,7 @@ import {
 } from '../../shared/phone-snapshot'
 import {
   PHONE_KEYS,
+  ensureAwake,
   isPhoneKey,
   pressKey,
   swipe as adbSwipe,
@@ -385,11 +386,24 @@ export function createPhoneOps(
   return {
     list,
     isSecret,
-    screen: (serial) => dumpScreen(adb, serial),
-    tap: (serial, x, y) => adbTap(adb, serial, x, y),
-    swipe: (serial, from, to, ms) => adbSwipe(adb, serial, from, to, ms),
+    // 폰이 잠들어 있으면 화면을 못 읽고 탭이 헛돈다 — 조작마다 먼저 깨운다(잠들어 있을 때만 WAKEUP)
+    screen: async (serial) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      return dumpScreen(adb, serial)
+    },
+    tap: async (serial, x, y) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      await adbTap(adb, serial, x, y)
+    },
+    swipe: async (serial, from, to, ms) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      await adbSwipe(adb, serial, from, to, ms)
+    },
     typeText: (serial, value) => adbTypeText(adb, serial, value),
-    key: (serial, key) => pressKey(adb, serial, key),
+    key: async (serial, key) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      await pressKey(adb, serial, key)
+    },
     screenshot: async (serial) => {
       const screen = await dumpScreen(adb, serial)
       // 덤프가 실패해 판정할 수 없으면 캡처를 뜨지 않는다(가장 안전한 쪽으로 본다)

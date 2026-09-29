@@ -20,6 +20,7 @@ import { extractCode } from '../ai/visual'
 import type { HandoffResult } from '../agent/handoff'
 import type { PayToolRequest, PhoneOps, SmsCodeOutcome } from '../agent/tools-phone'
 import { execOutArgs, shellArgs, type AdbRunner } from './adb'
+import { ensureAwake } from './input'
 import { runSmsAuth } from './auth-flow'
 import { keypadFromUiTree } from './pay-secret'
 import type { PaySecretVault } from './pay-secret'
@@ -530,15 +531,18 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         // 시험 입력(dry-run)을 취소하고 키패드에서 빠져나올 때만 쓴다
         back: (s) => deps.ops.key(s, 'back')
       },
-      launchApp: createLaunchApp(deps.adb),
+      // 폰이 잠들어 있으면 결제 앱 화면을 못 읽는다 — 앱을 부르기 전에 깨운다(실기 2026-09-30)
+      launchApp: async (serial, link) => {
+        await ensureAwake(deps.adb, serial).catch(() => {})
+        await createLaunchApp(deps.adb)(serial, link)
+      },
       // 결제 요청 알림을 누르는 것이 가장 짧은 길이다. 누를 알림은 알림 기록에서 **그 결제 앱이 올린 것**만 고르고
       // 제목이 정확히 같은 요소만 누른다 — 카카오톡의 "토스" 메시지 같은 남의 알림은 후보가 되지 않는다
       notifications: {
-        open: async (serial) =>
-          void (await deps.adb.run(
-            shellArgs(serial, ['cmd', 'statusbar', 'expand-notifications']),
-            10000
-          )),
+        open: async (serial) => {
+          await ensureAwake(deps.adb, serial).catch(() => {})
+          await deps.adb.run(shellArgs(serial, ['cmd', 'statusbar', 'expand-notifications']), 10000)
+        },
         close: async (serial) =>
           void (await deps.adb.run(shellArgs(serial, ['cmd', 'statusbar', 'collapse']), 10000)),
         list: async (serial, packageName) =>
