@@ -159,3 +159,25 @@ def test_결제_전_단계에서_죽었으면_다시_큐에_들어간다(tmp_pat
     restarted = JobQueue(path)
     assert restarted.get('A1').state == 'queued'
     assert restarted.claim() is not None
+
+
+def test_COMMIT_이_잠금에_막히면_되돌려_다음_트랜잭션이_열린다(tmp_path):
+    import sqlite3
+
+    from samba_agent.queue.db import JobQueue
+
+    path = tmp_path / 'jobs.sqlite'
+    q = JobQueue(path)
+    q.enqueue('A1', 'u', {}, None)
+    # 다른 연결이 읽기 잠금을 쥔 채 놓지 않는다(실기 2026-09-29: 조회 중 느린 HTTP 로 잠금이 길어졌다)
+    reader = sqlite3.connect(path, isolation_level=None)
+    reader.execute('BEGIN')
+    reader.execute('SELECT * FROM jobs').fetchall()
+    with pytest.raises(sqlite3.OperationalError):
+        with q._lock:
+            q._db.execute('BEGIN IMMEDIATE')
+            q._db.execute("UPDATE jobs SET step='x'")
+            q._commit(tries=2, wait_s=0)
+    reader.execute('COMMIT')
+    # 되돌렸으니 다음 집기가 된다
+    assert q.claim() is not None

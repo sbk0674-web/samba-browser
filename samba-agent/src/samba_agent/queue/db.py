@@ -8,6 +8,7 @@ import contextlib
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +25,9 @@ MAX_ATTEMPTS = 2
 # 결제 노드에 들어갔다는 표시. 이 단계에서 죽은 행은 재시작해도 다시 돌리지 않는다
 # (폰 승인이 이미 나갔을 수 있다 — 재결제 금지, 스펙 §6)
 PAY_STARTED_STEP = '결제 진행 중'
+# COMMIT 이 잠금에 막힐 때 다시 해 보는 횟수·간격
+COMMIT_TRIES = 5
+COMMIT_WAIT_S = 1.0
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -114,7 +118,20 @@ class JobQueue:
                 self._db.execute('ROLLBACK')
                 raise
             else:
+                self._commit()
+
+    def _commit(self, tries: int = COMMIT_TRIES, wait_s: float = COMMIT_WAIT_S) -> None:
+        """COMMIT — 다른 연결이 읽기 잠금을 오래 쥐면 'database is locked' 로 실패한다. 몇 번 더 해 보고,
+        끝내 안 되면 되돌린다. 열린 채 두면 이 연결의 다음 BEGIN 이 전부 실패해 워커가 멈춘다(실기 2026-09-29)."""
+        for i in range(tries):
+            try:
                 self._db.execute('COMMIT')
+                return
+            except sqlite3.OperationalError:
+                if i == tries - 1:
+                    self._db.execute('ROLLBACK')
+                    raise
+                time.sleep(wait_s)
 
     def enqueue(
         self, order_no: str, requester: str, options: dict[str, object], thread_ts: str | None
