@@ -1,5 +1,4 @@
-// ABC마트·그랜드스테이지 상품 스냅샷 — 사이즈 골라 바로구매로 주문서까지(결제 없음). 연 탭(tid)만 쓴다.
-// args: sku(prdtNo·URL·검색어), size, profile, account, site
+// ABC마트·그랜드스테이지 스냅샷 — 사이즈·수량 골라 바로구매로 주문서까지(결제 없음). 연 탭(tid)만 쓴다.
 const tabIdOf = r => (String(r).match(/tab (\S+)/) || [])[1] || null
 const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const num = s => (s ? parseInt(String(s).replace(/[^0-9]/g, ''), 10) || 0 : 0)
@@ -10,11 +9,9 @@ const text = async () => ((await page.get({})).tree.split('PAGE TEXT:')[1] || ''
 const isOrderUrl = u => /^https:\/\/(abcmart|grandstage)\.a-rt\.com\/order(?:[?#]|$)/.test(u || '')
 const profile = String(args.profile || '').trim().toLowerCase()
 const withProfile = url => (profile ? { profile: args.profile, url } : { url })
-// 주문서 계정(이메일 아이디)이 profile 인가
 const sameAccount = email => !profile || String(email || '').toLowerCase().split('@')[0] === profile.split('@')[0]
 const emailOnForm = async () => valOf(lines(await page.get({ selector: 'input[name=buyerEmailAddrText]' }))[0])
 
-// 주문 옵션을 화면 사이즈와 맞춘다 — KR 숫자 우선, 숫자가 다르면 고르지 않는다
 function pickOption(want, opts) {
   if (!want || !opts.length) return null
   if (opts.includes(want)) return want
@@ -34,7 +31,6 @@ const HOST = /grand/i.test(String(args.site || '')) || /grandstage\./.test(sku) 
 const prdtNo = (sku.match(/[?&]prdtNo=(\d+)/) || [])[1] || (/^\d{6,}$/.test(sku) ? sku : null)
 const want = String(args.size || '').trim()
 
-// 이 계정의 예전 주문서 탭을 닫는다(197←196 사고)
 for (const t of (await tabs.list()) || []) {
   if (!isOrderUrl(t.url)) continue
   try { await tabs.switch(t.id); if (sameAccount(await emailOnForm())) await tabs.close(t.id) } catch (e) {}
@@ -55,7 +51,6 @@ const product_url = await page.url()
 const pt = await text()
 const productName = ((pt.match(/공유하기 (.{2,120}?) 상품코드 :/) || [])[1] || '').trim()
 
-// 선택지 — 품절(.sold-out) 사이즈는 ' 품절'을 붙여 함께 돌려준다(하네스의 품절 확증)
 const all = lines(await page.get({ selector: '.size-list button' })).map(l => ({ id: parseInt(l.slice(1)), t: labelOf(l) })).filter(o => o.t)
 const soldIds = new Set(lines(await page.get({ selector: '.size-list button.sold-out' })).map(l => parseInt(l.slice(1))))
 const avail = all.filter(o => !soldIds.has(o.id))
@@ -65,7 +60,6 @@ const base = { options, already_ordered: null, coupons: {}, methods: [], cost: n
 const stop = async (note, extra = {}) => { await tabs.close(tid).catch(() => {}); return { ...base, note, ...extra } }
 
 if (!/\bLOGOUT\b/.test(pt)) return await stop('로그인 안 됨', { error: 'login_required' })
-// 판매 종료 화면(job 231) — 주문 옵션 품절
 if (!all.length && /판매 종료 및 중지된 상품/.test(pt)) return await stop('판매 종료 및 중지된 상품', { options: want ? [`${want} 품절`] : [], sale_ended: true })
 // 선택지를 못 읽었으면 품절 글자(추천 배지 등)로 판정하지 않는다
 if (!all.length && want) return await stop('사이즈 선택지를 읽지 못함(품절 판정 아님)')
@@ -82,10 +76,11 @@ if (all.length) {
   await page.waitFor(/총 결제금액\s*[1-9]/, 3000).catch(() => {})
 }
 
+// 수량: 칸에 직접 입력(실측 2026-09-30)
+const WQ=Math.max(1,+args.qty||1);if(WQ>1){const sp=+(((await page.get({interactive:1})).tree.match(/^\[(\d+)\] spinbutton value=/m)||[])[1]||0);if(!sp)return await stop('수량 칸 없음');await page.type(sp,String(WQ),true);await sleep(800)}
 const buy = await page.idOf('바로구매')
 if (buy < 0) return await stop('바로구매 버튼 없음')
 await page.click(buy)
-// 주소가 주문서·로그인으로 바뀔 때까지(본문 글자는 상품 페이지 '로그인'에 먼저 걸린다)
 let orderUrl = ''
 for (let i = 0; i < 40 && !isOrderUrl(orderUrl) && !/login/i.test(orderUrl); i++) { await sleep(300); orderUrl = await page.url() }
 await page.waitFor('결제예정금액', 6000).catch(() => {})
@@ -98,6 +93,7 @@ const email = await emailOnForm()
 const account = email.split('@')[0] || null
 if (!sameAccount(email)) return { ...base, account, order_tab: tid, note: `주문서 계정 ${account} ≠ profile` }
 const cost = num((t.match(/총\s*결제예정금액\s*([\d,]+)\s*원/) || [])[1]) || null
+const qty = +((t.match(/\/\s*(\d+)\s*개/) || [])[1] || 0) || null
 const reward = num((t.match(/([\d,]+)\s*P\s*적립\s*예정/) || [])[1])
 // 주문서 상품 줄 '… 배송 상품 <상품명> 220/ 1 개'
 const line = t.match(/배송 상품 (.{2,160}?) ([^\s\/]{1,20})\s*\/\s*(\d+)\s*개/)
@@ -108,7 +104,6 @@ const ship = lines(await page.get({ selector: '#tabAddress1' }))
 const addr = ship.filter(x => /\] textbox value="/.test(x)).map(valOf)
 const shipping = { name: valOf(ship.find(x => /textbox "이름"/.test(x))).trim(), address: (addr[0] || '').trim(), address_detail: (addr[1] || '').trim() }
 
-// 중복 구매 — 최근 3일 주문내역에 같은 상품·사이즈(취소완료 아님)가 있으면 이미 산 것
 // 확인 못 하면(주문내역 못 읽음·예외) null + note
 let already_ordered = null, existing_order_no = null, dup_note = '중복 확인 못 함'
 const nameKey = ((productName.match(/^[^A-Za-z]{4,}/) || [productName])[0]).trim().split(' ').slice(0, 4).join(' ')
@@ -135,4 +130,4 @@ if (nameKey && selected) {
   await tabs.switch(tid)
 }
 
-return { ...base, already_ordered, existing_order_no, methods, cost, reward, selected, account, shipping, order_tab: tid, note: [cost ? null : '결제예정금액 못 읽음', dup_note].filter(Boolean).join(' · ') || null }
+return { ...base, already_ordered, existing_order_no, methods, cost, qty, reward, selected, account, shipping, order_tab: tid, note: [cost ? null : '결제예정금액 못 읽음', dup_note].filter(Boolean).join(' · ') || null }

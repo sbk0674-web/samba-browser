@@ -45,7 +45,6 @@ function pick(live, w, n) {
   if (!nw) return n === 1 ? live[0] : null
   let r = one(o => o.v === w) || one(o => norm(o.v) === nw) || one(o => norm(o.v).length >= 2 && (nw.includes(norm(o.v)) || norm(o.v).includes(nw)))
   for (const tk of w.split(/\s+/)) if (!r && norm(tk).length >= 2) r = one(o => o.v.split(/[-\s/]+/).map(norm).includes(norm(tk)))
-  // 숫자만 같아도 색·코드 토큰(BLK0 등)이 다르면 고르지 않는다(09-27 실기: BLK0 90 주문에 BEG0 90)
   const wt = w.split(/[\s:/_,·-]+/).filter(x => /[A-Za-z가-힣]/.test(x) && norm(x).length >= 2 && !lets(x))
   const tok = o => !wt.length || wt.some(x => norm(o.v).includes(norm(x)))
   for (const d of (w.match(/\d+(?:\.\d+)?/g) || []).reverse()) if (!r && d.length >= 2) r = one(o => tok(o) && (o.v.match(/\d+(?:\.\d+)?/g) || []).includes(d))
@@ -96,7 +95,7 @@ const nos = [...new Set([...t.matchAll(/\/product\/catalog\/(\d+)/g)].map(m => m
 if (nos.length !== 1 || nos[0] !== String(pno)) return { ...base, options: shown, error: 'order_form_mismatch', note: '주문서 상품번호 ' + nos.join(',') + ' ≠ ' + pno }
 const pname = ((btn(t, new RegExp('\\] link "[^"]+" href=\\S*/product/catalog/' + pno)) || '').match(/link "([^"]+)"/) || [])[1] || ''
 const at = pname ? tx.indexOf(pname) : -1
-const om = at >= 0 ? tx.slice(at + pname.length, at + pname.length + 120).match(/^\s*(.*?)\s*\d+개/) : null
+const om = at >= 0 ? tx.slice(at + pname.length, at + pname.length + 120).match(/^\s*(.*?)\s*(\d+)개/) : null
 const selected = om ? om[1].replace(/\[[^\]]{1,12}\]\s*/g, ' ').replace(/\s+/g, ' ').trim() : null
 const amt = re => num((tx.match(re) || [])[1]), PU = /보유 적립금 사용 -?([\d,]+)원/
 const total = amt(/(?:총|최종) 결제 ?금액 ([\d,]+)원/)
@@ -106,6 +105,6 @@ const methods = ['무신사머니', '무신사페이', '토스페이', '카카�
 if (/다른 결제 방법/.test(payText)) methods.push('페이코')
 return {
   options: shown, account: ac, coupons: { [ck]: amt(/쿠폰 할인 금액 (?:최대 할인 적용 )?-([\d,]+)원/) }, methods, cost,
-  selected: selected || (groups.length ? null : ''), points_used: PU.test(tx) ? amt(PU) : null, product_url, product_no: String(pno), product_name: pname,
+  selected: selected || (groups.length ? null : ''), qty: om ? +om[2] : null, points_used: PU.test(tx) ? amt(PU) : null, product_url, product_no: String(pno), product_name: pname,
   order_tab: tid, note: cost ? null : '총액 못 읽음', warning: '장바구니 옵션남음'
 }
