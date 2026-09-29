@@ -36,6 +36,8 @@ if(typeof sku==='string'&&sku.startsWith('http')){
   await page.click(e.id);await wf('바로 구매하기',8000);
 }
 r.product_url=await page.url();
+// 상품명(TITLE) — 결제 직전 주문서 대조가 포이즌 번역명 대신 이 이름으로도 본다(실기 2026-09-30 웜 캡↔트래퍼햇)
+r.product_name=(((await tx('판매가')).match(/^TITLE: (.*)$/m)||[])[1]||'').replace(/\s*:\s*롯데.*$/,'').trim()||null;
 r.seller=null;for(let k=0;k<8&&!r.seller;k++){const st=await tx('판매자');for(const m of st.matchAll(/(?<!다른\s?)판매자\s*:?\s*([가-힣A-Za-z][가-힣A-Za-z0-9()]{1,19})/g)){if(!/^(서비스|가|에게|정보|센터)/.test(m[1])){r.seller=m[1].trim();break;}}if(!r.seller)await sleep(1500);}
 if(args.required_seller&&!(r.seller||'').includes(String(args.required_seller))){r.coupons[r.account||args.account||'현재 로그인 계정']=0;return{...r,error:'seller-not-allowed',note:'판매자 '+(r.seller||'?')+' — '+args.required_seller+' 아님'};}
 try{let am=(await tx('님')).match(/([\w가-힣*]{2,20})\s*님/);r.account=(am&&am[1])||args.account||null;}catch(e){r.account=args.account||null;}
