@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS export_requests (
   cost INTEGER NOT NULL,
   shipping_fee INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  memo TEXT NOT NULL DEFAULT '',
   fail_reason TEXT,
   detail TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -66,6 +67,8 @@ class ExportRequest:
     next_at: str
     created_at: str
     updated_at: str
+    # 샵마인 추가메모에 넣을 글(도착예정 등, 2026-09-30). 없으면 빈 문자열
+    memo: str = ''
 
 
 def _utc_now() -> datetime:
@@ -87,6 +90,7 @@ def _to_request(row: sqlite3.Row) -> ExportRequest:
         next_at=row['next_at'],
         created_at=row['created_at'],
         updated_at=row['updated_at'],
+        memo=row['memo'] or '',
     )
 
 
@@ -103,6 +107,10 @@ class ExportQueue:
         # 읽는 쪽(하네스 대기)과 쓰는 쪽(작업자)이 서로 막지 않게 한다
         self._db.execute('PRAGMA journal_mode=WAL')
         self._db.executescript(_SCHEMA)
+        # 예전 파일에는 memo 칸이 없다 — 붙인다(2026-09-30)
+        cols = {r[1] for r in self._db.execute('PRAGMA table_info(export_requests)')}
+        if 'memo' not in cols:
+            self._db.execute("ALTER TABLE export_requests ADD COLUMN memo TEXT NOT NULL DEFAULT ''")
         # 한 연결을 여러 스레드가 쓴다(그래프 노드·알림 고리) — BEGIN~COMMIT 구간을 직렬화한다
         self._lock = threading.Lock()
 
@@ -131,7 +139,9 @@ class ExportQueue:
             'SELECT * FROM export_requests WHERE id=?', (request_id,)
         ).fetchone()
 
-    def enqueue(self, order_no: str, target: str, cost: int, shipping_fee: int) -> ExportRequest:
+    def enqueue(
+        self, order_no: str, target: str, cost: int, shipping_fee: int, memo: str = ''
+    ) -> ExportRequest:
         """요청을 넣는다. 같은 (주문번호, 대상) 이 있으면 새 행을 만들지 않는다.
 
         값이 같으면 기존 행을 그대로 돌려준다. 값이 다르면 — 이미 기입했거나(done) 기입 중(running)
@@ -148,9 +158,9 @@ class ExportQueue:
             if row is None:
                 cur = self._db.execute(
                     'INSERT INTO export_requests '
-                    '(order_no, target, cost, shipping_fee, next_at, created_at, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    (order_no, target, cost, shipping_fee, now, now, now),
+                    '(order_no, target, cost, shipping_fee, memo, next_at, created_at, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (order_no, target, cost, shipping_fee, memo, now, now, now),
                 )
                 row = self._row(int(cur.lastrowid or 0))
             elif (row['cost'], row['shipping_fee']) != (cost, shipping_fee):
@@ -164,6 +174,13 @@ class ExportQueue:
                     'fail_reason=NULL, detail=NULL, attempts=0, notified=0, next_at=?, '
                     'updated_at=? WHERE id=?',
                     (cost, shipping_fee, now, now, row['id']),
+                )
+                row = self._row(row['id'])
+            if memo and row is not None and row['memo'] != memo and row['status'] != 'done':
+                # 메모만 새로 왔다 — 값·상태는 그대로 두고 메모만 바꾼다
+                self._db.execute(
+                    'UPDATE export_requests SET memo=?, updated_at=? WHERE id=?',
+                    (memo, now, row['id']),
                 )
                 row = self._row(row['id'])
         assert row is not None

@@ -55,6 +55,9 @@ class FakeUi:
         self.checked = [o for o in order_nos if o in self.rows and o not in self.uncheckable]
         return {o: (1 if o in self.checked else 0) for o in order_nos}
 
+    def write_memo(self, order_no: str, memo: str) -> None:
+        self.calls.append(f'memo {order_no} {memo}')
+
     def set_status(self, status: str, expected_rows: int) -> None:
         self.calls.append(f'done {expected_rows}')
         self.statuses.append(status)
@@ -187,3 +190,20 @@ def test_완료됨은_이미_바뀐_주문을_찾으러_큰_목록을_읽지_않
     ui.marked = ['D1']
     assert ShopMineAdapter(ui).complete_pending(['D1']) == set()
     assert not any(c.startswith('marked') for c in ui.calls)
+
+
+def test_추가메모는_완료됨_전에_그_주문에만_넣는다():
+    ui = FakeUi(rows=('S1', 'S2'))
+    adapter = ShopMineAdapter(ui, collect_timeout_s=90)
+    adapter.use_memos({'S1': '[도착예정] 10/05(일)'})
+    assert adapter.complete_pending(['S1']) == {'S1'}
+    i = ui.calls.index('memo S1 [도착예정] 10/05(일)')
+    assert ui.calls[i + 1] == 'done 1'
+
+
+def test_메모가_없으면_메모_칸을_건드리지_않는다():
+    ui = FakeUi(rows=('S1',))
+    adapter = ShopMineAdapter(ui)
+    adapter.use_memos({})
+    adapter.complete_pending(['S1'])
+    assert not any(c.startswith('memo') for c in ui.calls)

@@ -192,6 +192,10 @@ class ExportWorker:
         # 한 건 때문에 묶음 전체가 실패하지 않는다(사용자 결정 2026-09-29)
         if getattr(adapter, 'one_at_a_time', False):
             order_nos = [req.order_no]
+            # 추가메모를 받는 어댑터에는 그 주문의 메모를 먼저 건넨다
+            use_memos = getattr(adapter, 'use_memos', None)
+            if callable(use_memos):
+                use_memos({req.order_no: req.memo} if req.memo else {})
         else:
             order_nos = [req.order_no, *self._queue.pending_order_nos(req.target)]
         try:

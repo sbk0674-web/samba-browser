@@ -338,3 +338,29 @@ def test_done_orders_는_빈_목록이면_0(queue):
     queue.claim_next(['shopmine'])
     assert queue.done_orders('shopmine', [], '일괄', except_id=req.id) == 0
     assert queue.pending_order_nos('shopmine') == []
+
+
+def test_메모를_함께_넣고_나중에_메모만_바꿀_수_있다(tmp_path):
+    q = ExportQueue(tmp_path / 'm.sqlite')
+    r = q.enqueue('A1', 'shopmine', 100, 0, '[도착예정] 10/05(일)')
+    assert r.memo == '[도착예정] 10/05(일)'
+    r2 = q.enqueue('A1', 'shopmine', 100, 0, '[도착예정] 10/06(월)')
+    assert r2.id == r.id and r2.memo == '[도착예정] 10/06(월)' and r2.status == 'pending'
+    assert q.enqueue('B1', 'emp', 1, 0).memo == ''
+
+
+def test_memo_칸이_없던_옛_파일도_연다(tmp_path):
+    import sqlite3
+
+    path = tmp_path / 'old.sqlite'
+    db = sqlite3.connect(path)
+    db.executescript(
+        'CREATE TABLE export_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, order_no TEXT NOT NULL, '
+        'target TEXT NOT NULL, cost INTEGER NOT NULL, shipping_fee INTEGER NOT NULL, '
+        "status TEXT NOT NULL DEFAULT 'pending', fail_reason TEXT, detail TEXT, "
+        'attempts INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0, next_at TEXT NOT NULL, '
+        'created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(order_no, target));'
+    )
+    db.close()
+    q = ExportQueue(path)
+    assert q.enqueue('A1', 'shopmine', 1, 0, '메모').memo == '메모'
