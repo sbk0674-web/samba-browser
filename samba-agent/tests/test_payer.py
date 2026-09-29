@@ -1538,5 +1538,7 @@ def test_도착예정일이_3일을_넘으면_메모_한_줄():
     assert arrival_memo('배송 10/03(토) 도착 예정', today) is None
     assert arrival_memo('10월 6일(화) 도착 확률 83%', today) == '[도착예정] 10/06(화) — 결제일 기준 6일'
     assert arrival_memo('도착 정보 없음 1,000원', today) is None
+    # 롯데온 표기 '10/6(화) 이내 도착확률 80%'
+    assert arrival_memo('M 옵션변경 10/6(화) 이내 도착확률 80%', today) == '[도착예정] 10/06(화) — 결제일 기준 6일'
     # 연말에 본 1월 날짜는 다음 해다
     assert arrival_eta('01.04(월) 도착', date(2026, 12, 30)) == (date(2027, 1, 4), 5)
