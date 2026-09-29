@@ -19,7 +19,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from ctypes import wintypes
 
 from pywinauto import Desktop
@@ -37,6 +37,8 @@ from samba_agent.export.failures import ExportFail
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE_MARK = 'ShopMine::'
+# 탭을 실제 클릭으로 바꿔도 되는 자리 비움 시간(초) — EMP 조작 조건과 같다
+TAB_SWITCH_MIN_IDLE_S = 180.0
 # 사람이 처리해야 하는 인증 창 제목에 들어 있는 글자(실기 2026-09-29: '관리자 추가인증')
 AUTH_MARKS = ('인증', '로그인', 'OTP')
 ORDER_TAB = '통합주문관리'
@@ -137,6 +139,16 @@ def _post_click(hwnd: int, rect) -> None:
         time.sleep(0.05)
 
 
+def _real_click(element) -> None:
+    """실제 마우스로 누르고 커서를 원래 자리로 돌려놓는다 — 사람이 자리를 비웠을 때만 쓴다."""
+    point = wintypes.POINT()
+    _user32.GetCursorPos(ctypes.byref(point))
+    try:
+        element.click_input()
+    finally:
+        _user32.SetCursorPos(point.x, point.y)
+
+
 def _press_button(button) -> None:
     """버튼을 누른다 — 버튼의 부모(대화상자·패널)에 '이 버튼이 눌렸다'를 보낸다.
 
@@ -179,8 +191,12 @@ def _visible_children(hwnd: int) -> list[int]:
 class PywinautoShopMineUi:
     """ShopMineUi 구현."""
 
-    def __init__(self, *, poll_s: float = 0.5) -> None:
+    def __init__(
+        self, *, poll_s: float = 0.5, user_idle_s: Callable[[], float] | None = None
+    ) -> None:
         self._poll_s = poll_s
+        # 사람이 키보드·마우스를 안 쓴 시간(초). 주면 배경 조작이 안 먹을 때 자리 비움에만 실제로 누른다
+        self._user_idle_s = user_idle_s
         # 메인 창(win32 래퍼) — 핸들·최소화·활성 여부만 본다
         self._main = None
         # automation id → UIA 요소 정보(보이는 컨트롤만)
@@ -349,6 +365,17 @@ class PywinautoShopMineUi:
         else:
             # select() 는 예외 없이 조용히 실패한다(실기: 홈 탭 그대로) — 탭 막대를 눌러 고른다
             _post_click(tab.parent().element_info.handle, tab.rectangle())
+            time.sleep(self._poll_s * 2)
+        if not self._order_page_shown() and tab is not None:
+            # 사람이 샵마인을 다른 탭에 두면 탭 막대는 창 메시지로 안 바뀐다(실기 2026-09-30).
+            # 자리를 3분 넘게 비웠을 때만 실제로 눌러 바꾸고 마우스는 제자리로 돌려놓는다(EMP 와 같은 규칙)
+            idle = self._user_idle_s() if self._user_idle_s is not None else 0.0
+            if idle < TAB_SWITCH_MIN_IDLE_S:
+                raise AdapterRetry(
+                    ExportFail.BUSY,
+                    '샵마인이 다른 탭에 있다 — 자리 비울 때 통합주문관리로 바꾼다',
+                )
+            _real_click(tab)
             time.sleep(self._poll_s * 2)
         if not self._order_page_shown():
             raise AdapterRetry(ExportFail.BLOCKED, '통합주문관리 탭으로 전환하지 못했다')

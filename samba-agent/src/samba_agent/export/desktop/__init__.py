@@ -20,8 +20,9 @@ USER_BACK_S = 3.0
 
 def _shopmine_ui():
     from samba_agent.export.desktop.shopmine_ui import PywinautoShopMineUi
+    from samba_agent.export.idle import user_idle_seconds
 
-    return PywinautoShopMineUi()
+    return PywinautoShopMineUi(user_idle_s=user_idle_seconds)
 
 
 def _emp_ui():
