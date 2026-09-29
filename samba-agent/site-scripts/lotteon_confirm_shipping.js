@@ -7,13 +7,21 @@ const text=async sel=>((await G(null,sel)).tree.split('PAGE TEXT:')[1]||'').repl
 const A=args||{};const name0=String(A.name||'').trim();const name=name0.replace(/\*/g,'O');const addr=String(A.address||'').trim();
 const R={ok:false,name:null,address:null,note:null};
 const dlg=await els(null,'[role=dialog]');
-if(dlg.some(e=>e.role==='button'&&e.text==='저장')){
-  for(const c of dlg.filter(e=>e.role==='checkbox'&&/\(필수\)/.test(e.text)&&e.value!=='on'))await page.click(c.id);
-  const sv=(await els(null,'[role=dialog]')).find(e=>e.role==='button'&&e.text==='저장');
+// 저장 버튼이 [role=dialog] 밖(시트 아래)에 그려지기도 한다(실기 2026-09-30) — 창 안에 없으면 전체에서 찾는다
+const svb=async()=>(await els(null,'[role=dialog]')).find(e=>e.role==='button'&&e.text==='저장')||(await els('저장')).find(e=>e.role==='button'&&e.text==='저장');
+const saved=dlg.length>0&&!!(await svb());
+if(saved){
+  // (필수) 동의 칸은 등록 창 안쪽이라 첫 [role=dialog] 목록에 안 잡힌다 — 전체에서 찾는다(안 누르면 '필수 약관 항목에 동의해 주세요' 알림으로 저장 안 됨, 실기 2026-09-30)
+  const req=(await els('(필수)')).filter(e=>e.role==='checkbox'&&/\(필수\)/.test(e.text));
+  const reqs=req.length?req:dlg.filter(e=>e.role==='checkbox'&&/\(필수\)/.test(e.text));
+  for(const c of reqs.filter(e=>e.value!=='on'))await page.click(c.id);
+  const sv=await svb();
   await page.click(sv.id);await sleep(4000);
   const L=await els(null,'[role=dialog]');
-  const labs=L.filter(e=>e.role==='label'&&e.text.includes(name));
-  if(!labs.length)return{...R,note:'저장 뒤 목록에 없음(이름 거부?)'};
+  // 목록 라벨은 배송지 별칭일 수 있다 — 라벨에 없으면 목록 안 모든 글자에서 받는 분 이름을 찾는다(실기 2026-09-30)
+  let labs=L.filter(e=>e.role==='label'&&e.text.includes(name));
+  if(!labs.length)labs=L.filter(e=>e.role!=='radio'&&e.text&&e.text.includes(name));
+  if(!labs.length){const vt=await text();const er=(vt.match(/[^ ]{0,12}\s?[^ ]{0,12}\s?(?:입력해|선택해|확인해|동의해)\s?주세요/)||[''])[0];return{...R,note:'저장 뒤 목록에 없음'+(er?' — '+er:'')+' 첫 라벨 형태: '+((L.find(e=>e.role==='label')||{}).text||'').replace(/[가-힣]/g,'가').replace(/\d/g,'0').slice(0,60)+' / 첫 라디오: '+((L.find(e=>e.role==='radio')||{}).text||'').replace(/[가-힣]/g,'가').replace(/\d/g,'0').slice(0,60)+' / 새 등록 입력칸 '+(await els(null,'[role=dialog]')).filter(e=>e.role==='textbox').length+'개'};}
   const lid=labs[labs.length-1].id;const rid=Math.max(...L.filter(e=>e.role==='radio'&&e.id<lid).map(e=>e.id),0);
   if(rid){await page.click(rid);await sleep(800);}
   const done=(await els('선택완료')).find(e=>e.role==='button'&&e.text==='선택완료');
@@ -21,7 +29,7 @@ if(dlg.some(e=>e.role==='button'&&e.text==='저장')){
   await page.click(done.id);await sleep(3000);
 }
 const tx=await text();
-if(!tx.includes(name))return{...R,note:'주문서에 받는 분 이름 없음'};
+if(!tx.includes(name))return{...R,note:'주문서에 받는 분 이름 없음'+(saved?'(저장 창 거침)':'(저장 창 없음)')+(tx.includes(name.slice(0,2))?'(앞 두 글자는 있음)':'')+(/받는 분 주소로 보내기/.test(tx)?'(선물 주문서)':'')+' 창'+dlg.length+' 저장버튼 '+(await els('저장')).filter(e=>e.role==='button').map(e=>e.text).slice(0,3).join('/')+' 배송지칸 '+(/새 ?배송지|배송지 ?(선택|변경)/.exec(tx)||[''])[0]};
 let cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');
 if(cb){
   if(cb.value!=='on'){await page.click(cb.id);for(let k=0;k<8&&(!cb||cb.value!=='on');k++){await sleep(800);cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');}}
