@@ -7,7 +7,7 @@
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse, urlsplit
 
 from samba_agent import local_aliases
@@ -317,6 +317,42 @@ def order_form_mismatch(
     return f'상품명 단어 {words[:6]} 가 주문서에 없다' + (
         f'(사이트 상품명 {site_words[:6]} 로도 못 맞춤)' if site_words else ''
     )
+
+
+# 도착예정일 — '10/03(토) 도착'·'10.03(토) 도착 예정'·'10월 3일(토) 도착'. 3일을 넘으면 메모에 남긴다(사용자 2026-09-30)
+ARRIVAL_MEMO_DAYS = 3
+_ARRIVAL_RE = re.compile(
+    r'(\d{1,2})\s*(?:[./]|월\s*)\s*(\d{1,2})\s*일?\s*\(?([월화수목금토일])?\)?\s*(?:까지\s*)?(?:도착|배송\s*완료)'
+)
+
+
+def arrival_eta(page: str, today: date) -> tuple[date, int] | None:
+    """주문서 글자에서 도착예정일과 오늘부터 며칠 뒤인지. 여럿이면 가장 늦은 날, 못 읽으면 None."""
+    found: list[date] = []
+    for m in _ARRIVAL_RE.finditer(re.sub(r'\s+', ' ', page or '')):
+        month, day = int(m.group(1)), int(m.group(2))
+        try:
+            d = date(today.year, month, day)
+        except ValueError:
+            continue
+        if d < today - timedelta(days=30):
+            d = date(today.year + 1, month, day)  # 연말에 본 1월 날짜
+        if today <= d <= today + timedelta(days=60):
+            found.append(d)
+    if not found:
+        return None
+    d = max(found)
+    return d, (d - today).days
+
+
+def arrival_memo(page: str, today: date) -> str | None:
+    """도착예정일이 3일을 넘으면 메모 한 줄, 아니면 None."""
+    eta = arrival_eta(page, today)
+    if eta is None or eta[1] <= ARRIVAL_MEMO_DAYS:
+        return None
+    d, days = eta
+    wd = '월화수목금토일'[d.weekday()]
+    return f'[도착예정] {d.month:02d}/{d.day:02d}({wd}) — 결제일 기준 {days}일'
 
 
 def is_cross_buy(a: Assignment) -> bool:
@@ -738,6 +774,7 @@ class PayerAgent(AgentBase):
         """지금 화면(주문서)에 이 주문의 옵션과 상품명 고유 단어가 있는지 본다. 없으면 결제하지 않고 멈춘다."""
         # sku 는 삼바웨이브 상품명(+[옵션])이다(queue/orders._normalize). 교차 구매면 산 사이트의 상품명
         name, option, selected = expect_name(a), a.order.option, str(a.handoff.get('selected') or '')
+        self._arrival_memo: str | None = None
         if not order_form_keys(name, option, selected):
             return  # 대조할 단어·사이즈가 없다(시험 표본 등)
         # 구매가 만든 주문서 탭을 먼저 앞으로 — 활성 탭이 다른 페이지면 엉뚱한 화면을 대조한다
@@ -746,6 +783,10 @@ class PayerAgent(AgentBase):
         if order_tab:
             self.tool('switch_tab', id=str(order_tab))
         page = self.tool('get_page')
+        # 도착예정일이 3일을 넘으면 기록 단계가 삼바웨이브 메모·샵마인 추가메모에 남긴다(사용자 2026-09-30)
+        self._arrival_memo = arrival_memo(page, datetime.now(_KST).date())
+        if self._arrival_memo:
+            self.note('도착예정', self._arrival_memo)
         # 사이트 상품명(구매 스냅샷이 상품 페이지에서 읽은 이름)·상품번호로도 본다 — 주문서가 영문명만 보이고
         # 모델코드를 안 보이는 사이트에서 같은 상품을 막던 오탐(실기 2026-09-26 ABC job 198·204)
         site_name = str(a.handoff.get('product_name') or '')
@@ -962,6 +1003,8 @@ class PayerAgent(AgentBase):
             'paid_by': paid_by,
             'card': card,
         }
+        if getattr(self, '_arrival_memo', None):
+            payload['arrival_memo'] = self._arrival_memo
         try:
             tabs_now = self.tool('list_tabs')
         except AgentFailure:

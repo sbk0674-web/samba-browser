@@ -1526,3 +1526,17 @@ def test_order_form_mismatch_띄어쓰기만_다른_고유_단어는_같은_상�
     assert order_form_mismatch(page, '노스페이스 폴리에스터 섬유 트래퍼햇 남녀공용', '브라운 M') is None
     # 다른 상품은 여전히 막는다
     assert order_form_mismatch('주문상품 아디다스 아디스타 1개', '나이키 코르테즈 운동화', None) is not None
+
+
+def test_도착예정일이_3일을_넘으면_메모_한_줄():
+    from datetime import date
+
+    from samba_agent.agents.payer import arrival_eta, arrival_memo
+
+    today = date(2026, 9, 30)
+    assert arrival_eta('배송 10/03(토) 도착 예정', today) == (date(2026, 10, 3), 3)
+    assert arrival_memo('배송 10/03(토) 도착 예정', today) is None
+    assert arrival_memo('10월 6일(화) 도착 확률 83%', today) == '[도착예정] 10/06(화) — 결제일 기준 6일'
+    assert arrival_memo('도착 정보 없음 1,000원', today) is None
+    # 연말에 본 1월 날짜는 다음 해다
+    assert arrival_eta('01.04(월) 도착', date(2026, 12, 30)) == (date(2027, 1, 4), 5)

@@ -73,6 +73,15 @@ def wave_notes(a: Assignment, values: dict[str, object]) -> str:
     )
 
 
+def _arrival_memo(a: Assignment, values: dict[str, object]) -> str | None:
+    """결제 단계가 읽은 도착예정 메모(3일 초과만). 외부 기입(샵마인 추가메모)도 values 에서 읽는다."""
+    memo = str(a.handoff.get('arrival_memo') or '').strip()
+    if not memo:
+        return None
+    values['arrival_memo'] = memo
+    return memo
+
+
 def _normalize(field: str, value: object) -> object:
     """되읽기 비교용 타입 정규화 — 숫자 필드는 숫자로, 문자열은 strip 해서 비교한다."""
     if value is None:
@@ -383,8 +392,9 @@ class RecorderAgent(AgentBase):
                 # 주문계정은 실제로 산 계정이다 — 주문에 미리 잡힌 계정과 다를 수 있다(실기: buyer05 주문을
                 # 플레이북대로 buyer01 으로 삼). 못 찾으면 주문이 들고 온 값
                 sourcing_account_id=self._bought_account_id(a),
-                # 간단메모는 정해진 한 줄(계정·수단·실결제·원가) — LLM 문장을 싣지 않는다
-                notes=wave_notes(a, values),
+                # 간단메모는 정해진 한 줄(계정·수단·실결제·원가) — LLM 문장을 싣지 않는다.
+                # 도착예정일이 3일을 넘으면 그 줄을 하나 더 붙인다(사용자 2026-09-30)
+                notes=wave_notes(a, values) + (f'\n{memo}' if (memo := _arrival_memo(a, values)) else ''),
                 order_type=_order_type_value(a.expected.get('order_type')),
                 # 재구매(작업 옵션 rebuy_of) — 취소한 소싱주문번호를 새 번호로 덮어쓴다
                 replace=bool(str(a.options.get('rebuy_of') or '').strip()),
