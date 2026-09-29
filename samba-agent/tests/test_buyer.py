@@ -1211,6 +1211,30 @@ def test_matching_options_품절임박은_품절이_아니고_토큰_하나로�
     assert matching_options(['S 재고있음', 'M 재고있음'], '레드 M') == []
 
 
+def test_matching_options_한_글자_사이즈는_선택지_전체와_같을_때만():
+    from samba_agent.agents.buyer import matching_options, sold_out_option_matches
+
+    # 실기 2026-09-29 무신사 지오다노: 주문 '01올리브/L' ↔ 사이즈 단계 ['M (품절)', 'L (품절)', 'XL'] 를 옵션 불일치로 멈췄다
+    opts = ['M (품절)', 'L (품절)', 'XL']
+    assert matching_options(opts, '01올리브/L') == []
+    assert sold_out_option_matches(opts, '01올리브/L') == ['L (품절)']
+    assert matching_options(['M', 'L', 'XL'], '01올리브/L') == ['L']
+    assert matching_options(['M', 'L', 'XL'], '블랙 XL') == ['XL']
+    # 선택지 글자가 사이즈 하나와 똑같지 않으면 고르지 않는다
+    assert matching_options(['L 재고있음', 'XL 재고있음'], '블랙/L') == []
+
+
+def test_matching_options_모든_선택지에_든_색상_조각은_가르지_않는다():
+    from samba_agent.agents.buyer import matching_options
+
+    # 실기 2026-09-29 패션플러스: 품절 사이즈는 목록에서 빠진다 — 'YEL 270' 은 후보가 없어야 한다
+    opts = ['YEL 230', 'YEL 260', 'YEL 265', 'YEL 275']
+    assert matching_options(opts, 'YEL 270') == []
+    assert matching_options(opts, 'YEL 265') == ['YEL 265']
+    # 선택지가 하나뿐이면 그 조각으로 맞춘다
+    assert matching_options(['YEL 270'], 'YEL 270') == ['YEL 270']
+
+
 def test_cheapest_quotes_결제_가능한_수단만_싼_순으로():
     from samba_agent.agents.buyer import cheapest_quotes, parse_account_payments, quote_provider
 

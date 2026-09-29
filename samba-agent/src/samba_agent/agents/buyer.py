@@ -628,11 +628,21 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
                 continue
             # 경계 일치가 먼저 — "XL" 은 "Black-XL" 에만 맞고 "Black-XXL"·"Black-XLT" 에는 안 맞는다
             by_piece = [o for o in live if nt in [_norm(x) for x in re.split(r'[-\s/]+', o)]]
+            by_tok = [o for o in live if nt in _norm(o)]
+            # 모든 선택지에 든 조각(색상 'YEL' ↔ 'YEL 230'…'YEL 290')은 가르는 힘이 없다 — 다음 조각으로 본다
+            # (실기 2026-09-29 패션플러스: 주문 'YEL 270' 에 12개 전부가 후보가 돼 없는 270 을 골랐다)
+            if len(live) > 1 and len(by_piece or by_tok) == len(live):
+                continue
             if by_piece:
                 return by_piece
-            by_tok = [o for o in live if nt in _norm(o)]
             if by_tok:
                 return by_tok
+        # 한 글자 사이즈 조각('01올리브/L' 의 L)은 선택지 글자 전체와 똑같을 때만, 하나로 정해질 때만 고른다
+        # (실기 2026-09-29 무신사 지오다노: 사이즈 단계 ['M (품절)', 'L (품절)', 'XL'] 를 옵션 불일치로 멈췄다)
+        pieces = {_norm(t) for t in re.split(r'[\s/]+', w) if t}
+        same_piece = [o for o in live if _norm(o) in pieces]
+        if len(same_piece) == 1:
+            return same_piece
     # 글자-숫자 사이즈('S-3'·'M-4' — 라코스테 숫자 사이즈)는 숫자가 선택지의 세 자리 코드다('003(95)').
     # 상품 자체 표기로 맞춘다(사용자 2026-09-29: 사이즈는 그 상품의 사이즈표 기준) — 글자만으로 95·100 을 짐작하지 않는다
     for tok in re.split(r'[\s/]+', w):
