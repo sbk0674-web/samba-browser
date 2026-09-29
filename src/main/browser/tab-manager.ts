@@ -874,12 +874,19 @@ export class TabManager {
     const tab = this.get(id)
     if (!tab || this.win.isDestroyed() || id === this.activeId || !isTabAlive(tab)) return fn()
     const visible = this.activeId !== null ? this.get(this.activeId) : null
+    // 설정·작업 화면처럼 브라우저 영역이 0 크기면 탭도 0 크기로 그려져 캡처·키패드 판정이 안 된다
+    // (실기 2026-09-30 네이버페이 키패드: 칸 크기 0·후보 0) — 그동안만 창 크기를 준다
+    const [w, h] = this.win.getContentSize()
+    const b = computeViewBounds(this.layout, w, h, tab.mobile)
+    const resized = !this.gateHidden && (b.width <= 0 || b.height <= 0) && w > 0 && h > 0
+    if (resized) tab.view.setBounds({ x: 0, y: 0, width: w, height: h })
     this.win.contentView.addChildView(tab.view)
     try {
       return await fn()
     } finally {
-      if (!this.win.isDestroyed() && visible && isTabAlive(visible)) {
-        this.win.contentView.addChildView(visible.view)
+      if (!this.win.isDestroyed()) {
+        if (resized && isTabAlive(tab)) tab.view.setBounds(b)
+        if (visible && isTabAlive(visible)) this.win.contentView.addChildView(visible.view)
       }
     }
   }
