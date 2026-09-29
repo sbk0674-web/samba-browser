@@ -21,6 +21,8 @@ class OrderRef(BaseModel):
     qty: int = Field(default=1, gt=0)  # 0 이하 수량은 애초에 만들 수 없다
     # 옵션(사이즈·색상). 스냅샷 스크립트의 size 인자로 넘긴다 — sku 문자열에서 다시 뽑지 않는다
     option: str | None = None
+    # 마켓 주문의 원래 옵션 글자 — option 을 등록 매칭(소싱처 옵션 이름)으로 바꿨을 때만 남는다(근거·표시용)
+    market_option: str | None = None
     # 소싱처 상품 페이지(삼바웨이브 '원문링크'). 있으면 판매 상품명으로 검색하지 않고 이 상품을 바로 연다
     # (실기: 판매처 상품명을 ABC마트 검색어로 써서 검색 결과 페이지에서 '품절'로 오판)
     product_url: str | None = None

@@ -217,10 +217,57 @@ class WaveOrder(BaseModel):
         )
 
 
+class WaveSourceOption(BaseModel):
+    """상품 등록 때 수집한 소싱처 옵션 — 마켓 옵션은 이것으로 만들었다."""
+
+    model_config = ConfigDict(extra='ignore')
+
+    name: str
+    stock: int | None = None
+    sold_out: bool = False
+
+
+def _opt_key(text: str) -> str:
+    """옵션 이름 비교용 — 공백·구두점을 지우고 소문자로."""
+    return re.sub(r'[\s\-_/·,:()\[\]]+', '', text or '').lower()
+
+
+def registered_source_option(
+    market_option: str | None,
+    source_options: list[WaveSourceOption],
+    registered: str | None = None,
+) -> str | None:
+    """주문의 마켓 옵션이 등록 때 어느 소싱처 옵션이었는가. 하나로 정해질 때만 그 이름, 아니면 None.
+
+    1) 포이즌처럼 입찰번호로 삼바웨이브가 찾아 준 옵션(registered)
+    2) 이름이 공백·구두점만 다르고 같은 등록 옵션 하나(마켓 옵션은 등록 옵션 이름으로 만들었다)
+    사용자 2026-09-30: 등록 때 매칭한 옵션이 있는데 옵션 글자를 새로 짐작하다 틀려 취소했다.
+    """
+    if registered and registered.strip():
+        return registered.strip()
+    key = _opt_key(market_option or '')
+    if not key:
+        return None
+    same = [o.name for o in source_options if _opt_key(o.name) == key]
+    return same[0] if len(set(same)) == 1 else None
+
+
 class WaveOrderDetail(WaveOrder):
     """주문 상세 — 배송지가 더 실린다. 배송지는 받는 즉시 쓰고 버린다."""
 
     shipping: WaveShipping = WaveShipping()
+    # 등록 때 매칭한 소싱처 옵션(삼바웨이브가 실어 주면) — 주문 옵션 대신 이것으로 산다
+    source_options: list[WaveSourceOption] = []
+    poison_sizes: dict[str, str] = {}
+    registered_option: str | None = None
+
+    def to_order_ref(self) -> OrderRef:
+        """등록 매칭으로 소싱처 옵션 이름이 정해지면 그 이름을 주문 옵션으로 쓴다(글자 짐작을 건너뛴다)."""
+        ref = super().to_order_ref()
+        source_option = registered_source_option(ref.option, self.source_options, self.registered_option)
+        if not source_option or source_option == ref.option:
+            return ref
+        return ref.model_copy(update={'option': source_option, 'market_option': ref.option})
 
 
 # 감독자 기대값 키 ← 삼바웨이브 응답 필드. 응답에 그 값이 없으면(None) 빼서 '대조 못 함' 으로 남긴다.

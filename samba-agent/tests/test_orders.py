@@ -112,6 +112,7 @@ def test_결과에_개인정보가_있어도_OrderRef_에는_없다():
         'sku',
         'qty',
         'option',
+        'market_option',
         'product_url',
         'account',
         'account_id',

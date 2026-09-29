@@ -271,3 +271,23 @@ def test_옵션_머리말이_여럿이면_모두_뗀다():
     assert o.option == 'DEEP PEACH(H25)/095'
     assert WaveOrder(order_number='A1', product_option='옵션:230').option == '230'
     assert WaveOrder(order_number='A1', product_option='BLACK / 270').option == 'BLACK / 270'
+
+
+def test_주문_옵션은_등록_매칭된_소싱처_옵션_이름으로_바꾼다():
+    from samba_agent.wave.client import WaveOrderDetail
+
+    base = {'order_number': 'N1', 'source_site': 'MUSINSA', 'seller': 'KT알파쇼핑', 'product_name': '티셔츠'}
+    # 마켓 옵션 '01올리브/L' 은 등록 옵션 '01올리브 / L' 로 만든 것이다
+    d = WaveOrderDetail(
+        **base,
+        product_option='01올리브/L',
+        source_options=[{'name': '01올리브 / M'}, {'name': '01올리브 / L', 'stock': 0}],
+    )
+    ref = d.to_order_ref()
+    assert ref.option == '01올리브 / L' and ref.market_option == '01올리브/L'
+    # 포이즌: 입찰번호로 찾은 등록 옵션이 있으면 그것
+    p = WaveOrderDetail(**base, product_option='블랙 S', registered_option='085(WS)')
+    assert p.to_order_ref().option == '085(WS)'
+    # 매칭이 없거나 둘 이상이면 원래 옵션 그대로
+    n = WaveOrderDetail(**base, product_option='블랙 S', source_options=[{'name': '090'}])
+    assert n.to_order_ref().option == '블랙 S' and n.to_order_ref().market_option is None
