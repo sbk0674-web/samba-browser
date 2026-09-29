@@ -67,6 +67,8 @@ for(let step=0;step<5;step++){
 }
 if(!proceed){r.coupons[r.account||args.account||'현재 로그인 계정']=0;return r;}
 
+// 수량: 주문 수량까지 증가/감소(값을 보며)
+const WQ=Math.max(1,+args.qty||1);for(let k=0,lv=0;k<24&&WQ>1;k++){const qt=await tx('수량');const sv=(qt.match(/spinbutton "[^"]*" value="(\d+)"/)||[])[1];if(!sv){await sleep(500);continue}const v=+sv;if(v===WQ)break;if(v===lv){await sleep(300);continue}lv=v;const b=pe(qt).find(x=>x.text===(v<WQ?'수량 증가':'수량 감소'));if(!b)break;await page.click(b.id);await sleep(300)}
 let bg=await tx(bt);
 let bb=gift?pe(bg).find(x=>/^선물하기$/.test(x.text)):(pe(bg).find(x=>x.text==='바로 구매하기')||pe(bg).find(x=>/^(바로구매|구매하기)$/.test(x.text)));
 r.gift=gift;
@@ -95,5 +97,6 @@ let om=t.match(/([^\s]+(?:\s*\/\s*[^\s]+)+)\s*(?:수량|\d+\s*개)\s*\d/);
 if(!om)om=t.match(/옵션\s*:?\s*([^\n]{1,40}?)\s*(?:수량|\d+\s*개)/);
 if(om)r.selected=om[1].trim();
 else if(picked.length)r.selected=picked.join(' / ');
+const qm=t.match(/수량\s*:?\s*(\d+)\s*개?/);r.qty=qm?+qm[1]:null;
 r.order_tab=((await tabs.list()).find(x=>/orderSheet/.test(x.url||''))||{}).id||null;
 return r;
