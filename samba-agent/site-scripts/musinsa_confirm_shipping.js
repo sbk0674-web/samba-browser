@@ -9,7 +9,7 @@ let list=await tabs.list();
 const __ofs=list.filter(t=>t.url&&t.url.includes('/order/order-form'));const __one=args.tab?__ofs.find(t=>t.id===args.tab):__ofs.length===1?__ofs[0]:null;
 const orderTab=__one;
 if(!orderTab){out.note=__ofs.length?'order forms '+__ofs.length+' open — pass args.tab':'no order-form tab open';return out;}
-let popup=list.find(t=>t.kind==='popup'&&/address/.test(t.url||''));
+let popup=list.find(t=>t.kind==='popup'&&/address/.test(t.url||''));const hadPopup=!!popup;
 if(popup){
   await tabs.switch(popup.id);await sleep(300);
   let g=await G();
@@ -82,5 +82,5 @@ const ad=strip(args.address||'');const nums=ad.match(/\d+/g)||[];
 const st=strip(tx);
 out.address=ad&&st.includes(ad.slice(0,12))?args.address:(nums.length&&st.includes(nums[nums.length-1])?args.address:null);
 out.ok=!!(out.name&&out.address);
-if(!out.ok)out.note='주문서 되읽기 불일치';
+if(!out.ok)out.note='주문서 되읽기 불일치'+(out.name?'':' (이름 없음)')+(out.address?'':' (주소 없음)')+(hadPopup?'':' (주소 창 없었음)');
 return out;
