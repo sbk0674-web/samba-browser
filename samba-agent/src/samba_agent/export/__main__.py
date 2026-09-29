@@ -81,6 +81,13 @@ def _shopmine(dry: bool, order_nos: list[str], queue: ExportQueue) -> int:
     return 0
 
 
+def _auth_toast(program: str, detail: str) -> None:
+    from samba_agent.export.desktop import toast
+
+    name = {'shopmine': '샵마인', 'emp': 'EMP(플레이오토)'}.get(program, program)
+    toast.show(f'{name} 인증 필요', f'{detail}\n인증하면 외부 기입이 이어서 돈다.')
+
+
 def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
     adapters = build_adapters(targets)
     if not adapters:
@@ -100,6 +107,8 @@ def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
         min_idle_s=0.0,
         # EMP 는 조작하면 창이 앞으로 나온다 — 키보드·마우스가 3분 넘게 멈췄을 때만 한다(사용자 지시 2026-09-29)
         min_idle_by_target={t: EMP_MIN_IDLE_S for t in adapters if t.startswith('emp')},
+        # 인증 창은 사람이 처리한다 — 슬랙을 안 보니 윈도우 알림으로 바로 알린다(사용자 2026-09-29)
+        on_auth_required=_auth_toast,
     ).run_forever(stop.is_set)
     return 0
 

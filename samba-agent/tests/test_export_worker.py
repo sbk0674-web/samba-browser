@@ -383,3 +383,22 @@ def test_사람이_돌아와_멈춘_것은_시도_횟수에_넣지_않는다(que
     assert req.status == 'pending'
     assert req.attempts == 0
     assert req.fail_reason == 'busy'
+
+
+def test_인증_창은_시도_횟수에_넣지_않고_한_번만_알린다(queue):
+    adapter = FakeAdapter()
+    adapter.read_error = AdapterRetry(ExportFail.AUTH_REQUIRED, '샵마인 관리자 추가인증 창')
+    queue.enqueue('E1', 'emp', 1000, 0)
+    alerts: list[tuple[str, str]] = []
+    w = worker(
+        queue,
+        adapter,
+        retry_delay_s=0,
+        on_auth_required=lambda program, detail: alerts.append((program, detail)),
+    )
+    for _ in range(8):
+        w.run_once()
+    req = queue.find('E1', 'emp')
+    assert req.status == 'pending'
+    assert req.attempts == 0
+    assert alerts == [('emp', '샵마인 관리자 추가인증 창')]

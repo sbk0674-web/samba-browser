@@ -37,6 +37,8 @@ from samba_agent.export.failures import ExportFail
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE_MARK = 'ShopMine::'
+# 사람이 처리해야 하는 인증 창 제목에 들어 있는 글자(실기 2026-09-29: '관리자 추가인증')
+AUTH_MARKS = ('인증', '로그인', 'OTP')
 ORDER_TAB = '통합주문관리'
 ORDER_MENU = '주문관리'
 NORMAL_ALL = '(정상전체)'
@@ -257,6 +259,9 @@ class PywinautoShopMineUi:
             if w.handle != self._main.handle and w.is_enabled():
                 title = w.window_text() or '(제목 없음)'
                 break
+        if any(mark in title for mark in AUTH_MARKS):
+            # 인증 창은 사람이 처리한다 — 건드리지 않는다(사용자에게 알린다)
+            raise AdapterRetry(ExportFail.AUTH_REQUIRED, f'샵마인 {title[:40]} 창 — 직접 인증 필요')
         raise AdapterRetry(ExportFail.BLOCKED, f'샵마인에 대화상자가 떠 있다: {title[:40]!r}')
 
     # ---- 탭 ----

@@ -62,6 +62,7 @@ class ExportWorker:
         user_idle_s: Callable[[], float],
         min_idle_s: float = 20.0,
         min_idle_by_target: Mapping[str, float] | None = None,
+        on_auth_required: Callable[[str, str], object] | None = None,
         max_attempts: int = 5,
         retry_delay_s: float = 60.0,
     ) -> None:
@@ -71,6 +72,9 @@ class ExportWorker:
         self._min_idle_s = min_idle_s
         # 대상마다 다른 기준 — 화면을 앞으로 가져오는 프로그램(EMP)은 사람이 자리를 비웠을 때만 만진다
         self._min_idle_by_target = dict(min_idle_by_target or {})
+        # 인증 창이 떠 있을 때 사람에게 알리는 함수(프로그램 이름, 설명). 같은 프로그램은 30분에 한 번만
+        self._on_auth_required = on_auth_required
+        self._auth_alerted: dict[str, float] = {}
         self._max_attempts = max_attempts
         self._retry_delay_s = retry_delay_s
 
@@ -124,11 +128,24 @@ class ExportWorker:
                 outcome.reason,
                 outcome.detail,
                 self._retry_delay_s,
-                count_attempt=outcome.reason is not ExportFail.BUSY,
+                count_attempt=outcome.reason not in (ExportFail.BUSY, ExportFail.AUTH_REQUIRED),
             )
+            if outcome.reason is ExportFail.AUTH_REQUIRED:
+                self._alert_auth(req.target, outcome.detail)
         else:
             assert outcome.reason is not None
             self._queue.fail(req.id, outcome.reason, outcome.detail)
+
+    def _alert_auth(self, target: str, detail: str) -> None:
+        program = target.split('_', 1)[0]
+        now = time.monotonic()
+        if self._on_auth_required is None or now - self._auth_alerted.get(program, -1e9) < 1800:
+            return
+        self._auth_alerted[program] = now
+        try:
+            self._on_auth_required(program, detail)
+        except Exception:
+            log.exception('인증 창 알림 실패')
 
     def _decide(self, req: ExportRequest, adapter: Adapter) -> _Outcome:
         """어댑터를 불러 결과를 정한다. 큐는 건드리지 않는다(어댑터 계약 밖 예외만 여기서 잡는다)."""
@@ -149,7 +166,10 @@ class ExportWorker:
                 )
             return _Outcome('done', f'원가 {req.cost:,} · 배송비 {req.shipping_fee:,} 기입 확인')
         except AdapterRetry as e:
-            if e.reason is not ExportFail.BUSY and req.attempts >= self._max_attempts:
+            if (
+                e.reason not in (ExportFail.BUSY, ExportFail.AUTH_REQUIRED)
+                and req.attempts >= self._max_attempts
+            ):
                 return _Outcome('fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason)
             return _Outcome('retry', e.detail, e.reason)
         except AdapterReject as e:
@@ -176,7 +196,10 @@ class ExportWorker:
         try:
             completed = set(adapter.complete_pending(order_nos))
         except AdapterRetry as e:
-            if e.reason is not ExportFail.BUSY and req.attempts >= self._max_attempts:
+            if (
+                e.reason not in (ExportFail.BUSY, ExportFail.AUTH_REQUIRED)
+                and req.attempts >= self._max_attempts
+            ):
                 return _Outcome(
                     'fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason
                 ), set()

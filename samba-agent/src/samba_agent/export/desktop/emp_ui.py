@@ -34,6 +34,8 @@ from samba_agent.export.failures import ExportFail
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE_MARK = 'EMP 1.'
+# 사람이 처리해야 하는 인증 창 제목에 들어 있는 글자
+AUTH_MARKS = ('인증', 'OTP')
 LOGIN_MARK = '로그인'
 GRID_ID = 'grid'
 COL_ORDER_NO = '주문번호'
@@ -241,6 +243,12 @@ class PywinautoEmpUi:
             try:
                 self._wait_enabled(6.0)
             except AdapterRetry as e:
+                titles = [title for _h, title, _k in _process_windows(self._main.process_id())]
+                auth = next((t for t in titles if any(m in t for m in AUTH_MARKS)), None)
+                if auth:
+                    raise AdapterRetry(
+                        ExportFail.AUTH_REQUIRED, f'EMP {auth[:40]} 창 — 직접 인증 필요'
+                    ) from e
                 raise AdapterRetry(ExportFail.BLOCKED, 'EMP 에 대화상자가 떠 있다') from e
         self._refresh()
         if GRID_ID not in self._index:
