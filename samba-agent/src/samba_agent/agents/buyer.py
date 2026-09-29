@@ -2138,8 +2138,9 @@ class BuyerAgent(AgentBase):
             payable = payable & allowed
         if payable is None and allowed is not None:
             # 키마스터 조회가 안 되면(활성 탭 사이트가 달라 거절 — 29CM 는 무신사 통합계정 비밀번호를 쓴다)
-            # 허용된 결제수단 안에서 견적한다. 비밀번호가 없으면 결제 단계가 멈춘다
-            payable = set(allowed)
+            # 허용된 결제수단 안에서 견적한다. 사이트 결제 비밀번호(무신사머니 등)는 키마스터에 있는지 모르니 뺀다
+            # (실기 2026-09-29 hwangnol06: 비밀번호 없는 무신사머니를 골라 결제 단계에서 멈췄다)
+            payable = set(allowed) - {'site'}
             self.note(
                 '결제수단 견적',
                 f'키마스터 결제 항목 조회 실패 — 허용 수단 {sorted(payable)} 로 견적',

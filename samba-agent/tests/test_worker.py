@@ -611,8 +611,8 @@ def test_확정_품절은_근거를_적고_자동으로_취소중(setup):
     assert any('자동 취소중' in s for s in sent)
 
 
-def test_포이즌_품절은_자동으로_취소하지_않는다(setup):
-    """포이즌은 취소 패널티가 있어 사람이 본다."""
+def test_포이즌_품절도_자동으로_취소중(setup):
+    """패널티 금액 확인은 보류 — 포이즌도 근거가 있으면 바로 취소중(사용자 2026-09-30)."""
     marked: list = []
     q, sent, w = _auto_worker(setup, marked)
     job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
@@ -621,8 +621,8 @@ def test_포이즌_품절은_자동으로_취소하지_않는다(setup):
         job,
         {'outcome': 'needs_human', 'fail_reason': 'out_of_stock', 'order': _ref('poison(x)'), 'results': {'buyer.musinsa': result}},
     )
-    assert marked == []
-    assert any('재고X 보류' in s for s in sent)
+    assert len(marked) == 1
+    assert any('자동 취소중' in s for s in sent)
 
 
 def test_마진_미달은_주문서_원가가_있으면_자동으로_취소중(setup):

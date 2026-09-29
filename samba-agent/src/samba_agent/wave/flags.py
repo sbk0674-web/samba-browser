@@ -11,7 +11,6 @@ import logging
 from collections.abc import Callable
 
 from samba_agent.failures import FailReason
-from samba_agent.supervisor.policy import is_poison_seller
 from samba_agent.wave.client import WaveClient, WaveError
 
 log = logging.getLogger(__name__)
@@ -102,12 +101,11 @@ def auto_cancel_evidence(
     """품절·마진 미달을 사람 검수 없이 취소중으로 돌려도 되는가 — 되면 메모에 남길 근거 글자, 안 되면 None.
 
     사용자 2026-09-29: 멈춘 주문이 쌓여 처리가 늦다 → 페이지에서 읽은 근거가 있으면 자동으로 취소중.
-    - 포이즌 판매 주문은 취소 패널티가 있어 사람이 본다(자동 안 함).
+    - 포이즌도 같다 — 패널티 금액 확인은 보류(사용자 2026-09-30: 그것 때문에 너무 멈춘다).
     - 품절: 스크립트가 상품 페이지에서 품절을 확인한 사유(CONFIRMED_NO_STOCK_MARKERS)일 때만.
     - 마진 미달: 구매 단계가 주문서 금액(원가)과 마진을 계산해 넘긴 경우만(견적이 없으면 사람이 본다).
     """
-    seller = str(getattr(order, 'seller', '') or '')
-    if order is None or is_poison_seller(seller):
+    if order is None:
         return None
     source = str(getattr(order, 'source', '') or '')
     url = str(getattr(order, 'product_url', '') or '')
