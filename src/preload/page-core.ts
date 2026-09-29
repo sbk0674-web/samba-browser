@@ -1350,9 +1350,38 @@ function glyphRectOf(
   return { left, top, width: right - left, height: bottom - top }
 }
 
+/** 마지막 keypadUnlabeled 판정 요약(후보 수·묶음 수) — 실패 사유를 남기는 데만 쓴다. 값·위치는 담지 않는다 */
+let keypadDiag = ''
+
+export function lastKeypadDiag(): string {
+  return keypadDiag
+}
+
+/** 버튼 크기(4px 단위 반올림)가 같은 칸 무리 중 가장 큰 것 */
+function largestSameSizeGroup<T extends { bw: number; bh: number }>(cells: T[]): T[] {
+  const groups = new Map<string, T[]>()
+  for (const c of cells) {
+    const key = `${Math.round(c.bw / 4)}x${Math.round(c.bh / 4)}`
+    groups.set(key, [...(groups.get(key) ?? []), c])
+  }
+  let best: T[] = []
+  for (const g of groups.values()) if (g.length > best.length) best = g
+  return best
+}
+
 export function keypadUnlabeled(): KeypadCellDto[] | null {
+  keypadDiag = ''
+
   const visible: VisibilityCache = new Map()
-  const cells: { el: HTMLElement; x: number; y: number; width: number; height: number }[] = []
+  const cells: {
+    el: HTMLElement
+    x: number
+    y: number
+    width: number
+    height: number
+    bw: number
+    bh: number
+  }[] = []
   for (const el of Array.from(document.querySelectorAll<HTMLElement>(KEYPAD_UNLABELED_SELECTOR))) {
     if (singleDigitOf(el) !== null) continue
     if ((el.textContent ?? '').trim() !== '') continue
@@ -1365,11 +1394,23 @@ export function keypadUnlabeled(): KeypadCellDto[] | null {
     // OCR 은 숫자 그림 주변만 읽는 편이 정확하다(130×63 칸 전체를 주면 작은 숫자를 검출 모델이 놓친다 — 실기).
     // 버튼 안에 그림을 담은 작은 요소(스프라이트 span·img·svg)가 하나 있으면 그 사각형에 여백을 둬 쓴다
     const glyph = glyphRectOf(el, r)
-    cells.push({ el, x: glyph.left, y: glyph.top, width: glyph.width, height: glyph.height })
+    cells.push({
+      el,
+      x: glyph.left,
+      y: glyph.top,
+      width: glyph.width,
+      height: glyph.height,
+      bw: r.width,
+      bh: r.height
+    })
   }
-  if (cells.length < KEYPAD_UNLABELED_MIN || cells.length > KEYPAD_UNLABELED_MAX) return null
-  cells.sort((a, b) => a.y - b.y || a.x - b.x)
-  return cells.map((c) => ({
+  // 글자 없는 버튼이 더 있으면(재배열·지우기 아이콘 등) 크기가 같은 칸끼리 묶어 가장 큰 무리만 키패드로 본다
+  // (실기 2026-09-30 네이버페이 비밀번호 확인 창: 10~14개 범위를 넘어 사람에게 넘겼다)
+  const picked = cells.length > KEYPAD_UNLABELED_MAX ? largestSameSizeGroup(cells) : cells
+  keypadDiag = `후보 ${cells.length}개, 같은 크기 무리 ${picked.length}개`
+  if (picked.length < KEYPAD_UNLABELED_MIN || picked.length > KEYPAD_UNLABELED_MAX) return null
+  picked.sort((a, b) => a.y - b.y || a.x - b.x)
+  return picked.map((c) => ({
     id: ensureId(c.el),
     x: c.x,
     y: c.y,

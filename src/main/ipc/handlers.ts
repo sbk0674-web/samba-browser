@@ -1491,6 +1491,8 @@ export function registerIpc(
     // 결제 비밀번호 화면 프레임은 보내지도 저장하지도 않는다
     isSecretScreen: (serial) => phoneSecretGate.isSecret(serial)
   })
+  // 폰 도구가 큰 화면(scrcpy 창)을 열 수 있게 잇는다 — 캡차는 사람이 이 창에서 푼다
+  phoneOps.openWindow = (serial) => phoneScreen.windows.open(serial)
   win.once('closed', () => phoneScreen.dispose())
   // === 폰 화면 끝 ======================================================================
 

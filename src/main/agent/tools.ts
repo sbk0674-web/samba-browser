@@ -1224,7 +1224,8 @@ ${raw}`
       cells = await pageBridge.keypadUnlabeled(tab).catch(() => null)
     }
     if (!cells) {
-      ctx.onStep('키패드 배치(OCR): 글자 없는 버튼 10~14개를 못 찾음', false)
+      const diag = await pageBridge.keypadDiag(tab).catch(() => '')
+      ctx.onStep(`키패드 배치(OCR): 글자 없는 버튼 10~14개를 못 찾음${diag ? ` (${diag})` : ''}`, false)
       return null
     }
     // 못 읽은 사유만 모은다(어느 칸이 어느 숫자인지는 남기지 않는다)

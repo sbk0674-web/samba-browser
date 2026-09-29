@@ -231,3 +231,19 @@ describe('keypadUnlabeled — 글자 없는 보안 키패드(네이버페이)', 
     expect(keypadUnlabeled()).toBeNull()
   })
 })
+
+describe('keypadUnlabeled — 여분 아이콘 버튼', () => {
+  it('글자 없는 버튼이 14개를 넘으면 크기가 같은 무리만 키패드로 본다', async () => {
+    const { keypadUnlabeled } = await import('../src/preload/page-core')
+    document.body.innerHTML = ''
+    const add = (w: number, h: number, x: number, y: number): void => {
+      const b = document.createElement('button')
+      b.getBoundingClientRect = () =>
+        ({ left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, x, y, toJSON: () => ({}) }) as DOMRect
+      document.body.appendChild(b)
+    }
+    for (let i = 0; i < 12; i++) add(60, 50, (i % 3) * 60, Math.floor(i / 3) * 50)
+    for (let i = 0; i < 4; i++) add(24, 24, 500 + i * 30, 0)
+    expect(keypadUnlabeled()).toHaveLength(12)
+  })
+})

@@ -579,6 +579,9 @@ export const pageBridge = {
    * 하위 프레임 칸은 그 iframe 의 화면 위치를 더해 탭 좌표로 바꾸고(앱이 이 자리를 캡처해 OCR),
    * id 에는 프레임 번호를 얹는다(그대로 pressOnce 에 넘긴다). 보안 키패드 모양이 아니면 null
    */
+  /** 마지막 keypadUnlabeled 판정 요약(메인 프레임). 못 읽으면 '' */
+  keypadDiag: async (tab: Tab): Promise<string> =>
+    call(tab.view.webContents, '__samba.keypadDiag()', z.string()).catch(() => ''),
   keypadUnlabeled: async (tab: Tab): Promise<KeypadCellDto[] | null> => {
     const wc = tab.view.webContents
     const main = await call(wc, opToCode({ op: 'keypadUnlabeled' }), keypadUnlabeledSchema)

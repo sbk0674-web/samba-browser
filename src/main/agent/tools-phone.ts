@@ -64,6 +64,7 @@ export const PHONE_TOOL_NAMES = [
   'phone_key',
   'phone_swipe',
   'phone_screenshot',
+  'phone_open_window',
   'wait_for_sms_code'
 ]
 
@@ -97,6 +98,11 @@ export interface PhoneOps {
    * 결제 실행기가 세운 표식(SecretScreenGate)과 결제 앱의 비밀번호 문구를 함께 본다
    */
   isSecret: (serial: string, screen: PhoneScreen) => boolean
+  /**
+   * 폰 큰 화면(scrcpy 창)을 연다. 앱 안 바로보기는 느려 캡차 슬라이더를 사람이 못 민다 —
+   * 캡차가 뜨면 사람이 풀 수 있게 이 창을 띄운다(사용자 제보 2026-09-30). 배선 전이면 없다
+   */
+  openWindow?: (serial: string) => void
 }
 
 export interface PhoneToolContext {
@@ -285,6 +291,18 @@ export function createPhoneTools(ctx: PhoneToolContext): PhoneTool[] {
       })
   )
 
+  const openWindow = tool(
+    'phone_open_window',
+    'Open the large phone screen window (scrcpy) so a person can act on the phone, e.g. to solve a captcha slider. It does not touch the phone.',
+    {},
+    () =>
+      act('폰 큰 화면 열기', false, async (serial) => {
+        if (!ctx.phones.openWindow) return 'refused: phone window is not available'
+        ctx.phones.openWindow(serial)
+        return 'ok'
+      })
+  )
+
   const swipe = tool(
     'phone_swipe',
     'Swipe on the phone between two device coordinates. Use it to scroll a list or open a drawer.',
@@ -362,6 +380,7 @@ export function createPhoneTools(ctx: PhoneToolContext): PhoneTool[] {
     keyTool,
     swipe,
     screenshot,
+    openWindow,
     waitSmsCode
   ] as unknown as PhoneTool[]
 }
