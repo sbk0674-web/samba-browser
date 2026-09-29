@@ -90,8 +90,8 @@ await page.click(idOf(buy))
 let url = ''
 for (let i = 0; i < 40 && !CK.test(url); i++) { await sleep(250); url = await page.url() }
 if (!CK.test(url)) return { ...base, options: shown, error: OUT.test(await tree()) ? 'no_checkout' : 'login_required', note: '주문서 못 감: ' + url.slice(0, 60) }
-await page.waitFor(/총 결제금액/, 10000).catch(() => {})
-for (let i = 0; i < 12; i++) { t = await tree(); tx = text(t); if (/총 결제금액 [\d,]+원/.test(tx)) break; await sleep(250) }
+await page.waitFor(/(?:총|최종) 결제 ?금액/, 10000).catch(() => {})
+for (let i = 0; i < 12; i++) { t = await tree(); tx = text(t); if (/(?:총|최종) 결제 ?금액 [\d,]+원/.test(tx)) break; await sleep(250) }
 const nos = [...new Set([...t.matchAll(/\/product\/catalog\/(\d+)/g)].map(m => m[1]))]
 if (nos.length !== 1 || nos[0] !== String(pno)) return { ...base, options: shown, error: 'order_form_mismatch', note: '주문서 상품번호 ' + nos.join(',') + ' ≠ ' + pno }
 const pname = ((btn(t, new RegExp('\\] link "[^"]+" href=\\S*/product/catalog/' + pno)) || '').match(/link "([^"]+)"/) || [])[1] || ''
@@ -99,7 +99,7 @@ const at = pname ? tx.indexOf(pname) : -1
 const om = at >= 0 ? tx.slice(at + pname.length, at + pname.length + 120).match(/^\s*(.*?)\s*\d+개/) : null
 const selected = om ? om[1].replace(/\[[^\]]{1,12}\]\s*/g, ' ').replace(/\s+/g, ' ').trim() : null
 const amt = re => num((tx.match(re) || [])[1]), PU = /보유 적립금 사용 -?([\d,]+)원/
-const total = amt(/총 결제금액 ([\d,]+)원/)
+const total = amt(/(?:총|최종) 결제 ?금액 ([\d,]+)원/)
 const cost = total ? total + amt(/ㄴ 결제 즉시 할인 [^ㄴ]*?-([\d,]+)원/) + amt(/ㄴ 제휴카드[^ㄴ]*?-([\d,]+)원/) + amt(PU) : null
 const payText = text((await page.get({ selector: 'label:has(input[type=radio])' })).tree)
 const methods = ['무신사머니', '무신사페이', '토스페이', '카카오페이', '카드 결제'].filter(n => payText.includes(n))

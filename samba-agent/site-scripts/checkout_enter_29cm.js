@@ -62,7 +62,7 @@ if (args.tab) c = c.filter(x => x.id === String(args.tab))
 if (args.profile) { const mine = c.filter(x => !x.profile || x.profile === args.profile); if (mine.length) c = mine }
 if (!c.length) return fail('no checkout tab')
 const ok = []; let why = null
-for (const x of c) { await tabs.switch(x.id); await page.waitFor(/총 결제금액/, 8000).catch(() => {}); const f = await formInfo(), m = mismatch(f, E); if (m) why = m; else ok.push({ id: x.id, f }) }
+for (const x of c) { await tabs.switch(x.id); await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {}); const f = await formInfo(), m = mismatch(f, E); if (m) why = m; else ok.push({ id: x.id, f }) }
 if (ok.length !== 1) return fail(ok.length ? 'multiple checkout tabs' : 'order form mismatch', why ? { why } : null)
 const P = ok[0]
 await tabs.switch(P.id)
@@ -107,7 +107,7 @@ if (!CK.test(await page.url())) return fail('주문서를 벗어남')
 const warn = E ? null : 'no expect(dry)'
 const f2 = await formInfo(), m2 = mismatch(f2, E)
 if (m2) return fail('order form mismatch', { why: m2 })
-const total = num((f2.tx.match(/총 결제금액 ([\d,]+)원/) || [])[1])
+const total = num((f2.tx.match(/(?:총|최종) 결제 ?금액 ([\d,]+)원/) || [])[1])
 if (!total) return fail('총액 못 읽음')
 if (amt != null && total > amt) return fail('결제액 ' + total + ' > 예상 ' + amt, { total })
 const pay = lines((await page.get({ query: '결제하기' })).tree).filter(l => /\] (button|clickable) "[^"]*원 ?결제하기/.test(l)).pop()

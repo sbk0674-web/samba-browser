@@ -43,7 +43,7 @@ async function pickForm() {
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/총 결제금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }

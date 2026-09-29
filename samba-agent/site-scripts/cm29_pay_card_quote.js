@@ -42,7 +42,7 @@ async function pickForm() {
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/총 결제금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
@@ -74,7 +74,7 @@ async function settle(prev) {
   return tx
 }
 const row = tx => {
-  const cost = num((tx.match(/총 결제금액 ([\d,]+)원/) || [])[1])
+  const cost = num((tx.match(/(?:총|최종) 결제 ?금액 ([\d,]+)원/) || [])[1])
   const points_used = num((tx.match(/ㄴ 보유 적립금 사용 -?([\d,]+)원/) || [])[1])
   const e = tx.indexOf('총 적립 혜택'), b = e > 0 ? tx.lastIndexOf('적립 혜택', e - 1) : -1
   const rs = b >= 0 ? tx.slice(b, e) : ''

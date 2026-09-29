@@ -1,4 +1,4 @@
-// 29CM 결제수단 견적(09-26) — 라디오를 실제로 골라 총 결제금액·적립을 읽는다. 결제 안 함.
+// 29CM 결제수단 견적 — 라디오를 골라 결제금액·적립을 읽는다. 결제 안 함.
 // 탭: args.tab > 주문서 하나뿐 > args.expect 대조. 페이코·KB Pay 는 '다른 결제 방법' 하위 버튼.
 // reward = 적립 혜택(후기·삼성카드 제외). 무신사페이 기본 카드가 등록 카드 아니면 registered:false.
 // 누른 뒤 선택 표시를 확인 못 하면 그 수단 견적을 버린다.
@@ -41,7 +41,7 @@ async function pickForm() {
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/총 결제금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
@@ -76,7 +76,7 @@ async function settle(prev) {
 const shown = tx => { const s = seg(tx); return { money: /보유 잔액 [\d,]+원/.test(s), pay: /결제수단 추가하기|\(\s*[\d*]{2,6}\s*\)\s*(신용|체크)카드/.test(s), etc: /PIN번호 결제|가상계좌|휴대폰결제/.test(s), cash: /현금 영수증/.test(s) } }
 const dsc = tx => (tx.match(/ㄴ 결제 즉시 할인 ([^ㄴ\d-]+?) ?-[\d,]+원/) || [])[1]
 const row = tx => {
-  const cost = num((tx.match(/총 결제금액 ([\d,]+)원/) || [])[1])
+  const cost = num((tx.match(/(?:총|최종) 결제 ?금액 ([\d,]+)원/) || [])[1])
   const points_used = num((tx.match(/ㄴ 보유 적립금 사용 -?([\d,]+)원/) || [])[1])
   const e = tx.indexOf('총 적립 혜택'), b = e > 0 ? tx.lastIndexOf('적립 혜택', e - 1) : -1
   const rs = b >= 0 ? tx.slice(b, e) : ''
