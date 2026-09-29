@@ -295,6 +295,10 @@ def order_form_mismatch(
     #    ABC 주문서는 스타일코드 없이 'NIKE P-6000' 만 보인다(실기 2026-09-28 B07648: CN0149 로 못 맞춰 결제 안 됨)
     compact_text = re.sub(r'[^0-9a-z가-힣]', '', low)
     compact_name = re.sub(r'[^0-9a-z가-힣]', '', product_name.lower())
+    # 띄어쓰기만 다른 고유 단어(주문 '트래퍼햇' ↔ 주문서 '트래퍼 햇') — 세 자 이상 단어가 공백 없는 주문서에 있다
+    # (실기 2026-09-30 롯데온 포이즌: 색상·상품 모두 맞는데 상품명 단어 대조로 결제를 막았다)
+    if any(len(w) >= 3 and re.sub(r'[^0-9a-z가-힣]', '', w.lower()) in compact_text for w in words):
+        return None
     site_tokens = [
         re.sub(r'[^0-9a-z가-힣]', '', tok)
         for tok in re.split(r'\s+', (site_name or '').lower())

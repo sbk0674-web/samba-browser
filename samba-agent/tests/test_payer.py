@@ -1516,3 +1516,13 @@ def test_완료_문구만_있고_주문내역도_오래된_주문이면_번호_�
     out = agent(reg)._confirm_paid(a, '네이버페이')
     assert out.status == 'ok'
     assert 'source_order_no' not in out.payload
+
+
+def test_order_form_mismatch_띄어쓰기만_다른_고유_단어는_같은_상품():
+    from samba_agent.agents.payer import order_form_mismatch
+
+    # 실기 2026-09-30 롯데온 포이즌: 주문 '트래퍼햇' ↔ 주문서 '트래퍼 햇'
+    page = '주문상품 노스페이스키즈 NE3CR52T 키즈 트래퍼 햇 BRW M 1개'
+    assert order_form_mismatch(page, '노스페이스 폴리에스터 섬유 트래퍼햇 남녀공용', '브라운 M') is None
+    # 다른 상품은 여전히 막는다
+    assert order_form_mismatch('주문상품 아디다스 아디스타 1개', '나이키 코르테즈 운동화', None) is not None
