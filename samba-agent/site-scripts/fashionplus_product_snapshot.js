@@ -122,4 +122,4 @@ if (day && Date.now() - new Date(day + 'T00:00:00+09:00').getTime() < 3 * 864e5 
 await tabs.close(t2)
 }
 if (tid) await tabs.switch(tid)
-return { ...base, product_tab: null, options, selected, cost, pay_amount: cost, reward, points_used, points_balance, coupon, coupons: {}, methods, order_tab: tid, order_item, already_ordered, existing_order_no, note }
+return { ...base, product_tab: null, options, selected, cost, qty: num(it[3]), pay_amount: cost, reward, points_used, points_balance, coupon, coupons: {}, methods, order_tab: tid, order_item, already_ordered, existing_order_no, note }
