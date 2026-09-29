@@ -949,6 +949,10 @@ def sold_out_option_listed(options: list[str], wanted: str | None) -> bool:
     return bool(sold_out_option_matches(options, wanted))
 
 
+# 스냅샷 스크립트가 주문 수량(args.qty)을 주문서에 반영하는 소싱처(2026-09-30 확인) — 그 밖은 수량 2개 이상을 사지 않는다
+QTY_CAPABLE_SOURCES = frozenset({'cm29', 'fashionplus', 'hmall'})
+
+
 # 계정 견적 건너뜀 사유 중 확정 품절 표시(_quote 가 붙인다)
 SOLD_OUT_LISTED_SKIP = '주문 옵션 품절 표시'
 
@@ -2915,6 +2919,15 @@ class BuyerAgent(AgentBase):
 
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
+        # 수량 2개 이상은 스크립트가 수량을 고르는 소싱처만 산다 — 나머지는 1개만 사 버린다
+        # (실기 2026-09-30 무신사 노스페이스 모자: 주문 2개에 1개 결제, 출고 준비라 취소도 안 됨)
+        key = source_of(self.spec.name).key
+        if a.order.qty > 1 and key not in QTY_CAPABLE_SOURCES:
+            raise AgentFailure(
+                'needs_human',
+                f'수량 {a.order.qty}개 주문 — {key} 구매 스크립트는 수량을 못 고른다(1개만 사게 된다). 사람이 산다',
+                FailReason.UNKNOWN,
+            )
         # 주문마다 비교 기준을 비운다 — 앞 주문의 계정 원가(예: 89,000)가 남아 다음 주문 검사를 잘못 걸었다(실기 2026-09-25)
         self._expect_cost = {}
         self._issued = {}

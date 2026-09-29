@@ -1647,3 +1647,11 @@ def test_한국_치수_선택지가_품절이면_다른_치수로_바꾸지_않�
     from samba_agent.agents.buyer import matching_options
 
     assert matching_options(['260', '270 (품절)', '280'], 'EU 42 · KR 270') == []
+
+
+def test_수량_지원_소싱처_목록():
+    from samba_agent.agents.buyer import QTY_CAPABLE_SOURCES
+
+    # 무신사·ABC·롯데온 스냅샷은 수량을 못 고른다 — 수량 2개 이상은 사람에게 넘긴다(2026-09-30 사고)
+    assert 'musinsa' not in QTY_CAPABLE_SOURCES and 'lotteon' not in QTY_CAPABLE_SOURCES
+    assert {'cm29', 'fashionplus', 'hmall'} <= QTY_CAPABLE_SOURCES
