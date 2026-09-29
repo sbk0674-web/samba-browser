@@ -137,14 +137,15 @@ def test_창이_없으면_나중에_다시_한다(queue):
 
 def test_재시도_한도를_넘으면_실패로_끝낸다(queue):
     adapter = FakeAdapter({'A1': EMPTY})
-    adapter.read_error = AdapterRetry(ExportFail.BLOCKED, '인증 대화상자')
+    # 대화상자(BLOCKED)는 기다리는 사유라 횟수에 넣지 않는다 — 한도는 시간 초과 같은 실패에만
+    adapter.read_error = AdapterRetry(ExportFail.TIMEOUT, '화면이 늦게 떴다')
     queue.enqueue('A1', 'emp', 62470, 2300)
     w = worker(queue, adapter, retry_delay_s=0, max_attempts=3)
     assert w.run_once().status == 'pending'
     assert w.run_once().status == 'pending'
     out = w.run_once()
     assert out.status == 'failed'
-    assert out.fail_reason == 'blocked'
+    assert out.fail_reason == 'timeout'
     assert out.attempts == 3
     assert '재시도' in (out.detail or '')
 

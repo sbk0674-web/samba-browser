@@ -85,7 +85,10 @@ def _auth_toast(program: str, detail: str) -> None:
     from samba_agent.export.desktop import toast
 
     name = {'shopmine': '샵마인', 'emp': 'EMP(플레이오토)'}.get(program, program)
-    toast.show(f'{name} 인증 필요', f'{detail}\n인증하면 외부 기입이 이어서 돈다.')
+    if '인증' in detail:
+        toast.show(f'{name} 인증 필요', f'{detail}\n인증하면 외부 기입이 이어서 돈다.')
+    else:
+        toast.show(f'{name} 창이 막혀 있다', f'{detail}\n창을 닫으면 외부 기입이 이어서 돈다.')
 
 
 def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:

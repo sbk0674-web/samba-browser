@@ -23,6 +23,10 @@ from samba_agent.export.store import ExportQueue, ExportRequest
 
 log = logging.getLogger(__name__)
 
+# 사람·창 상태를 기다리는 사유 — 시도 횟수에 넣지 않는다(5번 만에 실패로 끝나 몇 시간 방치되지 않게).
+# 대화상자(BLOCKED)·인증 창은 윈도우 알림으로 사람에게 알린다
+_WAIT_REASONS = (ExportFail.BUSY, ExportFail.AUTH_REQUIRED, ExportFail.BLOCKED)
+
 
 @dataclass(frozen=True)
 class _Outcome:
@@ -128,9 +132,9 @@ class ExportWorker:
                 outcome.reason,
                 outcome.detail,
                 self._retry_delay_s,
-                count_attempt=outcome.reason not in (ExportFail.BUSY, ExportFail.AUTH_REQUIRED),
+                count_attempt=outcome.reason not in _WAIT_REASONS,
             )
-            if outcome.reason is ExportFail.AUTH_REQUIRED:
+            if outcome.reason in (ExportFail.AUTH_REQUIRED, ExportFail.BLOCKED):
                 self._alert_auth(req.target, outcome.detail)
         else:
             assert outcome.reason is not None
@@ -166,10 +170,7 @@ class ExportWorker:
                 )
             return _Outcome('done', f'원가 {req.cost:,} · 배송비 {req.shipping_fee:,} 기입 확인')
         except AdapterRetry as e:
-            if (
-                e.reason not in (ExportFail.BUSY, ExportFail.AUTH_REQUIRED)
-                and req.attempts >= self._max_attempts
-            ):
+            if e.reason not in _WAIT_REASONS and req.attempts >= self._max_attempts:
                 return _Outcome('fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason)
             return _Outcome('retry', e.detail, e.reason)
         except AdapterReject as e:
@@ -196,10 +197,7 @@ class ExportWorker:
         try:
             completed = set(adapter.complete_pending(order_nos))
         except AdapterRetry as e:
-            if (
-                e.reason not in (ExportFail.BUSY, ExportFail.AUTH_REQUIRED)
-                and req.attempts >= self._max_attempts
-            ):
+            if e.reason not in _WAIT_REASONS and req.attempts >= self._max_attempts:
                 return _Outcome(
                     'fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason
                 ), set()

@@ -241,7 +241,9 @@ class PywinautoEmpUi:
         if not self._main.is_enabled():
             # 앞선 시도가 남긴 '저장하시겠습니까' 창이면 닫고 계속한다. 다른 창이면 건드리지 않고 물러난다
             try:
-                self._wait_enabled(6.0)
+                # 대화상자는 UIA 로 늦게 읽힐 때가 있다 — 6초로는 '저장하시겠습니까' 창을 못 읽고 막힘으로
+                # 끝났다(2026-09-29 저녁 EMP 9건이 6시간 멈춤). 넉넉히 기다리며 닫는다
+                self._wait_enabled(40.0)
             except AdapterRetry as e:
                 titles = [title for _h, title, _k in _process_windows(self._main.process_id())]
                 auth = next((t for t in titles if any(m in t for m in AUTH_MARKS)), None)
@@ -249,7 +251,10 @@ class PywinautoEmpUi:
                     raise AdapterRetry(
                         ExportFail.AUTH_REQUIRED, f'EMP {auth[:40]} 창 — 직접 인증 필요'
                     ) from e
-                raise AdapterRetry(ExportFail.BLOCKED, 'EMP 에 대화상자가 떠 있다') from e
+                shown = ', '.join(t[:30] for t in titles if t and WINDOW_TITLE_MARK not in t)
+                raise AdapterRetry(
+                    ExportFail.BLOCKED, f'EMP 에 대화상자가 떠 있다: {shown or "(제목 없음)"}'
+                ) from e
         self._refresh()
         if GRID_ID not in self._index:
             raise AdapterRetry(ExportFail.BLOCKED, 'EMP 주문관리 그리드가 화면에 없다')
