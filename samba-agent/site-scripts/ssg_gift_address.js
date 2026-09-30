@@ -45,8 +45,10 @@ R.entries = bs.length
 let hit = bs.filter(mine)
 R.matched = hit.length
 if (!hit.length) {
-  const add = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] link "배송지 추가"/.test(l))
-  if (!add) return { ...R, note: '주소록에 없고 배송지 추가 버튼도 없음' }
+  const it = (await tree({ interactive: true })).split('\n')
+  const add = it.find(l => /^\[\d+\] (?:link|button) "[^"]*배송지 ?(?:추가|등록)/.test(l))
+  // 못 찾으면 어떤 버튼이 있었는지 남긴다(실기 2026-10-01: 주소록 1개인데 추가 링크를 못 찾음)
+  if (!add) return { ...R, note: '주소록에 없고 배송지 추가 버튼도 없음 — ' + it.filter(l => /(?:link|button) "[^"]*(?:배송지|추가|등록|입력)/.test(l)).map(l => l.replace(/^\[\d+\] /, '')).join(' | ').slice(0, 200) }
   await page.click(idL(add))
   const lp = await waitTab(/shpplocList/, 16)
   return { ...R, need_address: true, note: lp ? '주소록에 없음 — 배송지 추가 목록을 열어 둠' : '배송지 추가 목록이 안 뜸' }
