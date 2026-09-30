@@ -8,8 +8,9 @@ const sq = s => String(s || '').replace(/\s+/g, '')
 const R = { ok: false, order_tab: null, amount: null, gift: false, entries: 0, matched: 0, note: null }
 if (!nz(args.name) || !nz(args.address)) return { ...R, note: 'name·address 필요' }
 const base = nz(args.name).replace(/\*/g, '').trim()
-const rm = sq(args.address).match(/[가-힣0-9]+(?:로|길)\d+(?:-\d+)?/)
-const road = rm ? rm[0] : ''
+// 도로명은 띄어쓴 주소에서 마지막 낱말만 — 공백을 먼저 빼면 '부산 …구 …로' 전체가 잡혀 SSG 의 '부산광역시 …' 항목과 안 맞는다(실기 2026-09-30)
+const rm = nz(args.address).match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/)
+const road = rm ? rm[1] + rm[2] : ''
 const det = sq(args.address_detail).slice(0, 6)
 const mine = b => { const x = sq(b); return (!road || x.includes(road)) && (!det || x.includes(det)) && b.includes(base) }
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(400) } return '' }
@@ -19,19 +20,27 @@ const waitTab = async (re, n) => { for (let i = 0; i < n; i++) { const t = await
 const gift = await findTab(/pay\.ssg\.com\/cart\/giftInfo/)
 if (!gift) return { ...R, note: '선물 정보 화면 없음' }
 await tabs.switch(gift.id)
-const b0 = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] link "배송지 대신 입력하기"/.test(l))
-if (!b0) return { ...R, note: '배송지 대신 입력하기 없음' }
-await page.click(idL(b0))
-const pop = await waitTab(/selectShpploc/, 20)
-if (!pop) return { ...R, note: '주소록 팝업 안 뜸' }
-await tabs.switch(pop.id)
-try { await page.waitFor(/선택완료/, 8000) } catch (e) {}
-await sleep(800)
 const blocks = async () => (await tree({})).split('PAGE TEXT')[0].split(/\n(?=\[\d+\] checkbox)/).filter(x => /^\[\d+\] checkbox/.test(x))
-// 주소록은 늦게 그려진다(실기: 저장 직후 다시 열면 0개로 읽혔다) — 항목이 보일 때까지 몇 번 더 읽는다
-let bs = await blocks()
-// 막 뜬 팝업으로 바로 옮기면 읽기가 계속 빈다(실기 2026-09-30: run_script 에서 0개, 이미 떠 있던 팝업은 73개) — 다시 찾아 옮긴다
-for (let i = 0; i < 8 && !bs.length; i++) { await sleep(1000); const p2 = await findTab(/selectShpploc/); if (p2) await tabs.switch(p2.id); bs = await blocks() }
+// 닫히는 중인 옛 주소록 창과 새 창이 겹치면 새 창이 비거나 사라진다(실기 2026-09-30: 직전에 창을 닫고 바로 열면 0개) —
+// 옛 창을 먼저 닫고 잠시 기다린 뒤 연다. 그래도 비면 한 번 더 연다
+let bs = [], pop = null
+for (let k = 0; k < 2 && !bs.length; k++) {
+  for (const t of await tabs.list()) { if (t.kind === 'popup' && /selectShpploc|member\.ssg\.com/.test(t.url || '')) { try { await tabs.close(t.id) } catch (e) {} } }
+  await sleep(1500)
+  await tabs.switch(gift.id)
+  const b0 = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] link "배송지 대신 입력하기"/.test(l))
+  if (!b0) return { ...R, note: '배송지 대신 입력하기 없음' }
+  await page.click(idL(b0))
+  pop = await waitTab(/selectShpploc/, 20)
+  if (!pop) continue
+  await tabs.switch(pop.id)
+  try { await page.waitFor(/선택완료/, 8000) } catch (e) {}
+  await sleep(800)
+  // 주소록은 늦게 그려진다 — 항목이 보일 때까지 창을 다시 찾아 옮기며 몇 번 더 읽는다
+  bs = await blocks()
+  for (let i = 0; i < 6 && !bs.length; i++) { await sleep(1000); const p2 = await findTab(/selectShpploc/); if (p2) await tabs.switch(p2.id); bs = await blocks() }
+}
+if (!pop) return { ...R, note: '주소록 팝업 안 뜸' }
 R.entries = bs.length
 let hit = bs.filter(mine)
 R.matched = hit.length
@@ -42,7 +51,7 @@ if (!hit.length) {
   const lp = await waitTab(/shpplocList/, 16)
   return { ...R, need_address: true, note: lp ? '주소록에 없음 — 배송지 추가 목록을 열어 둠' : '배송지 추가 목록이 안 뜸' }
 }
-if (hit.length > 1) return { ...R, note: '주소록에 같은 고객 항목이 ' + hit.length + '개 — 하나로 못 정함' }
+// 도로명+상세+이름이 다 맞는 항목이 여럿이면 같은 고객이 중복 저장된 것이다(실기 2026-09-30: 저장 재시도로 2개) — 첫 번째를 쓴다
 // 체크박스라 여러 명이 동시에 체크될 수 있다(실기: 지난 선물 받는 분이 체크된 채 남아 있었다) — 고객 것만 켜고 나머지는 끈다
 // 체크박스 이름이 여러 줄이라 value 는 첫 줄이 아니라 이름 끝 따옴표 뒤에 있다(실기)
 const isOn = b => /^\[\d+\] checkbox "[\s\S]*?" value="on"/.test(b)

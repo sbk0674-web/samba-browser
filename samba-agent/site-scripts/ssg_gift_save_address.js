@@ -12,8 +12,9 @@ const s = String(g.tree || '').split('\n').find(l => /^\[\d+\] button "/.test(l)
 if (!s) return { ok: false, note: '저장 버튼 없음' }
 await Promise.race([page.click(parseInt(s.slice(1))).catch(() => {}), sleep(3000)])
 await sleep(2500)
-// 저장이 알림(예: 상세주소 40자 초과)으로 막히면 폼이 남는다 — 성공으로 돌려주면 주소록에 없는 채로 되읽는다(실기 2026-09-30)
-if ((await tabs.list()).some(t => t.id === form.id)) {
+// 저장이 알림(예: 상세주소 40자 초과)으로 막히면 폼이 남는다 — 성공으로 돌려주면 주소록에 없는 채로 되읽는다(실기 2026-09-30).
+// 저장되면 같은 팝업이 목록(shpplocList)으로 바뀐다 — 창이 남았는지가 아니라 주소가 아직 폼인지 본다
+if ((await tabs.list()).some(t => t.id === form.id && /shpplocForm/.test(t.url || ''))) {
   const ft = String((await page.get({})).tree || '')
   const dlg = (ft.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''
   return { ok: false, note: '저장 뒤에도 배송지 폼이 남음' + (dlg ? '(' + dlg + ')' : ' — 입력값 확인 알림일 수 있음') }
