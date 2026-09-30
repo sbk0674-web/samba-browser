@@ -991,6 +991,15 @@ def single_item_ok(option: str | None, snap: dict[str, object]) -> bool:
 SSG_CART_URL = 'https://pay.ssg.com/cart/dmsShpp.ssg'
 
 
+# 롯데온 선물하기가 막힌 지역 — '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30)
+_GIFT_BLOCKED_RE = re.compile(r'^\s*(제주|울릉|옹진군)|울릉군|옹진군|신안군|백령|연평')
+
+
+def gift_blocked_address(address: str) -> bool:
+    """선물하기로 보낼 수 없는 주소(제주·주요 도서산간)인가."""
+    return bool(_GIFT_BLOCKED_RE.search(address or ''))
+
+
 # 계정 견적 건너뜀 사유 중 확정 품절 표시(_quote 가 붙인다)
 SOLD_OUT_LISTED_SKIP = '주문 옵션 품절 표시'
 
@@ -3290,6 +3299,9 @@ class BuyerAgent(AgentBase):
             # 롯데온·SSG: 포이즌·라자다 배대지는 사무실 수령(까대기), 그 밖은 전부 선물하기 — 정가 비교 없이 정해진다
             # (사용자 2026-09-27 롯데온, 2026-09-29 SSG "까대기 제외하고 선물하기")
             forced = 'kkadaegi' if is_poison_seller(order.seller) or self._is_forwarder(order) else 'gift'
+            if forced == 'gift' and self._gift_blocked_region(order):
+                # 롯데온: '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30) — 그 주소는 직배로 산다
+                forced = 'direct'
         forwarder = not forced and self._is_forwarder(order)
         if not source.normal_price and not forced and not is_poison_seller(order.seller) and not forwarder:
             # 정가 스크립트가 없는 소싱처는 아직 자동 판정을 못 한다 — 삼바웨이브 태그(order_type)를 따른다
@@ -3311,8 +3323,10 @@ class BuyerAgent(AgentBase):
 
         삼바웨이브 배송지를 주문당 한 번만 읽고 참/거짓만 남긴다(원문은 담지 않는다).
         """
-        if self._shipping_fn is None or is_poison_seller(order.seller) or order.order_type == 'gift':
+        if self._shipping_fn is None or is_poison_seller(order.seller):
             return False
+        if self._gift_blocked_seen is None:
+            self._gift_blocked_seen = {}
         seen = self._forwarder_seen if self._forwarder_seen is not None else {}
         self._forwarder_seen = seen
         if order.order_no not in seen:
@@ -3322,7 +3336,18 @@ class BuyerAgent(AgentBase):
                 return False  # 못 읽으면 기존 판정대로 — 직배 입력 단계에서 다시 멈춘다
             text = ' '.join(str(shipping.get(k) or '') for k in ('name', 'address', 'address_detail'))
             seen[order.order_no] = 'lazada' in text.lower()
-        return seen[order.order_no]
+            # 선물이 막힌 지역(제주·도서산간)인지도 같이 남긴다 — 원문은 담지 않는다
+            self._gift_blocked_seen[order.order_no] = gift_blocked_address(str(shipping.get('address') or ''))
+        # 선물 태그 주문은 배대지 판정을 하지 않는다(예전 그대로) — 위에서 지역만 읽어 둔다
+        return False if order.order_type == 'gift' else seen[order.order_no]
+
+    _gift_blocked_seen: dict[str, bool] | None = None
+
+    def _gift_blocked_region(self, order: OrderRef) -> bool:
+        """받는 곳이 선물하기가 안 되는 지역(제주·도서산간)인가. 주소를 못 읽으면 False."""
+        if self._gift_blocked_seen is None or order.order_no not in self._gift_blocked_seen:
+            self._is_forwarder(order)
+        return (self._gift_blocked_seen or {}).get(order.order_no, False)
 
     def _fetch_shipping(self, a: Assignment, snap: dict[str, object]) -> dict[str, object]:
         """배송지 출처 — 삼바웨이브(공급자) > 스냅샷에 실려 온 값 > 전용 스크립트 순.

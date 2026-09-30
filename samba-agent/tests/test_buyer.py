@@ -1678,3 +1678,12 @@ def test_선택란_없는_단일_상품은_프리사이즈_색상이_맞으면_�
     assert not single_item_ok('WHT(WHITE) FREE', snap)  # 색이 다르면 아니다
     assert not single_item_ok('BLK 270', snap)  # 프리사이즈가 아니면 아니다
     assert not single_item_ok('BLK FREE', {'cost': 1000})  # 주문서가 없으면 아니다
+
+
+def test_선물하기가_막힌_지역_주소():
+    from samba_agent.agents.buyer import gift_blocked_address
+
+    # 롯데온 '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30)
+    assert gift_blocked_address('제주특별자치도 제주시 봉개북3길 1')
+    assert gift_blocked_address('경상북도 울릉군 울릉읍 도동리 1')
+    assert not gift_blocked_address('서울특별시 강남구 테헤란로 1')
