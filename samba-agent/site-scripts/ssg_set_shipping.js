@@ -1,6 +1,7 @@
 // SSG 배송지: 목록→추가 폼→우편번호→받는분. gift 는 열린 목록 팝업. 전화는 칸 번호만(fill_secret), 저장은 별도.
 // 인자 {name,address,address_detail?,gift?,tab?} 반환 {ok,name,address(_detail),phone_field_ids,form_popup,note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
+const cl = async id => { try { await tabs.close(id) } catch (e) {} }
 const OF = /pay\.ssg\.com\/(order|payment)|ssg\.com\/order\//
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(500) } return '' }
 const first = async sel => { const l = (await tree({ selector: sel })).split('\n').find(x => /^\[\d+\]/.test(x)); return l ? parseInt(l.slice(1)) : -1 }
@@ -21,12 +22,12 @@ if (!list) {
 }
 if (!list) {
   const lg = (await tabs.list()).find(t => t.kind === 'popup' && /member\.ssg\.com\/member\/login/.test(t.url || ''))
-  if (lg) { try { await tabs.close(lg.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료 — 로그인 팝업' } }
+  if (lg) { await cl(lg.id); return { ...R, error: 'login_required', note: 'SSG 세션 만료' } }
   return { ...R, note: '배송지 목록 팝업 안 뜸' }
 }
 await tabs.switch(list.id)
 try { await page.waitFor(/배송지|로그인/, 5000) } catch (e) {}
-if (/member\/login/.test(await page.url())) { try { await tabs.close(list.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료(목록)' } }
+if (/member\/login/.test(await page.url())) { await cl(list.id); return { ...R, error: 'login_required', note: 'SSG 세션 만료' } }
 let add = -1
 for (const w of ['새 배송지 추가', '배송지 추가', '새 배송지']) { if (add < 0) add = await page.idOf(w, 0) }
 if (add < 0) return { ...R, note: '새 배송지 추가 버튼 없음' }
@@ -36,7 +37,7 @@ if (!form) return { ...R, note: '배송지 폼 팝업 안 뜸' }
 R.form_popup = form.id
 await tabs.switch(form.id)
 try { await page.waitFor(/받는\s*분|수령인|이름|로그인/, 5000) } catch (e) {}
-if (/member\/login/.test(await page.url())) { try { await tabs.close(form.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료(폼)' } }
+if (/member\/login/.test(await page.url())) { await cl(form.id); return { ...R, error: 'login_required', note: 'SSG 세션 만료' } }
 try { await page.waitFor(/우편번호/, 8000) } catch (e) {}
 let zipBtn = await page.idOf('우편번호 검색', 0)
 if (zipBtn < 0) { await sleep(1500); zipBtn = await page.idOf('우편번호 검색', 0) }
@@ -72,17 +73,17 @@ await page.click(pickBtn)
 await sleep(700)
 const dtl = await first('#addrDtlInput, input[name="dtlAddr"]')
 // 상세 없으면 끝 호·동·층; 지번은 번지까지
-const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || [])[1])
+const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || nz(args.address).match(/^.*?[동리가]\s*\d+(?:-\d+)?\s+(.*)$/) || [])[1])
 const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
 const dtlText = (dtlRaw.length > 40 ? nz(dtlRaw.replace(/\([^)]*\)?/g, ' ')) : dtlRaw).slice(0, 40).trim()
 if (dtl >= 0 && dtlText) await page.type(dtl, dtlText, false)
-if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업 아님 — 멈춤' }
+if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업 아님' }
 let ok = await first('#addrDtlBtn')
 if (ok < 0) ok = await page.idOf('저장', 0)
 if (ok < 0) return { ...R, note: '우편번호 팝업 저장 버튼 없음' }
 page.click(ok).catch(() => {})
 for (let i = 0; i < 10 && (await tabs.list()).some(t => t.id === zip.id); i++) await sleep(300)
-if ((await tabs.list()).some(t => t.id === zip.id)) { const zt = await tree({}); const dlg = (zt.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''; try { await tabs.close(zip.id) } catch (e) {} return { ...R, note: '우편번호 팝업 저장이 안 닫힘' + (dlg ? '(' + dlg + ')' : '') + (dtlText ? '' : ' — 상세주소 없음') } }
+if ((await tabs.list()).some(t => t.id === zip.id)) { const zt = await tree({}); const dlg = (zt.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''; await cl(zip.id); return { ...R, note: '우편번호 팝업 저장이 안 닫힘' + (dlg ? '(' + dlg + ')' : '') + (dtlText ? '' : ' — 상세주소 없음') } }
 await tabs.switch(form.id)
 await sleep(500)
 { const V = l => (l.match(/value="([^"]*)"/) || [])[1] || ''
