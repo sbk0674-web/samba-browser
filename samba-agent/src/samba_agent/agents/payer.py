@@ -551,14 +551,19 @@ KAKAO_TAB_WAIT_MS = 1500
 KAKAO_REQUEST_WAIT_MS = 2500
 
 
-def _other_tab_on_host(listed: str, host: str, skip: str) -> str | None:
-    """list_tabs 응답에서 그 호스트의 일반 탭(skip 제외) 하나의 id. 없으면 None."""
+def _other_tab_on_host(listed: str, host: str, skip: str, profile: str = '') -> str | None:
+    """list_tabs 응답에서 그 호스트·그 프로필의 일반 탭(skip 제외) 하나의 id. 없으면 None.
+
+    폰 승인은 앞 탭의 프로필 이름으로 사이트 계정을 고른다 — 프로필이 다른 탭(기본 프로필)을 앞에 두면
+    계정이 여럿인 사이트에서 계정을 못 정해 no-account 로 거절된다(실기 2026-09-30)."""
     try:
         rows = json.loads(listed)
     except ValueError:
         return None
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or str(row.get('id') or '') == skip:
+            continue
+        if profile and str(row.get('profile') or '') != profile:
             continue
         if row.get('kind', 'tab') == 'tab' and host in _host_of(str(row.get('url') or '')):
             return str(row['id'])
@@ -827,12 +832,12 @@ class PayerAgent(AgentBase):
             return None
         src = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source or ''))
         host = (src.login_host if src else '') or ''
-        # 이미 열린 소싱처 탭(주문서 등)이 있으면 그것을 앞에 둔다 — 결제 도구 허용 목록에 new_tab 이 없다
-        other = _other_tab_on_host(listed, host, kakao_tab) if host else None
+        profile = str(a.handoff.get('account') or a.order.account or '')
+        # 같은 프로필로 이미 열린 소싱처 탭(주문서 등)이 있으면 그것을 앞에 둔다 — 결제 도구 허용 목록에 new_tab 이 없다
+        other = _other_tab_on_host(listed, host, kakao_tab, profile) if host else None
         if other:
             self.tool('switch_tab', id=other)
             return kakao_tab, None
-        profile = str(a.handoff.get('account') or a.order.account or '')
         if src is None or not src.home:
             return kakao_tab, None
         opened = self.tool(
