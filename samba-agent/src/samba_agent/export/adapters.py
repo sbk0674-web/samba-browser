@@ -16,6 +16,8 @@ class CellValues:
 
     cost: int | None
     shipping_fee: int | None
+    # 한줄메모 같은 글 칸(EMP). 읽지 않는 프로그램은 None
+    memo: str | None = None
 
 
 class _AdapterError(Exception):
@@ -44,8 +46,8 @@ class Adapter(Protocol):
         """그 주문의 현재 원가·배송비."""
         ...
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
-        """원가·배송비를 입력하고 저장한다. 입력 직전에 선택 행의 주문번호를 다시 확인한다."""
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
+        """원가·배송비(와 memo 가 있으면 글 칸)를 입력하고 저장한다. 입력 직전에 선택 행의 주문번호를 다시 확인한다."""
         ...
 
 

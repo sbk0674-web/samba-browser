@@ -256,3 +256,28 @@ def test_취소_연동은_작업자가_끝내면_완료로_알린다(queue):
         queue, ExportRouting(), lambda _o: '쿠팡(unclehg)', wait_s=10, sleep=sleep
     )
     assert export_cancel('A1') == 'shopmine 취소 연동 완료'
+
+
+def _with_source(no: str) -> AgentResult:
+    return AgentResult(
+        status='ok',
+        reason='기록 완료',
+        payload={
+            'saved': True,
+            'values': {'real_price': 62470, 'shipping_fee': 0, 'source_order_no': no},
+        },
+    )
+
+
+def test_EMP_요청에는_소싱주문번호를_메모로_싣는다(queue):
+    make_exporter(queue, ROUTING, wait_s=0, deferred=('emp',))(
+        state(seller='GS이숍(캐논)', recorder=_with_source('202609291041430002'))
+    )
+    assert queue.find('A1', 'emp').memo == '202609291041430002'
+
+
+def test_샵마인_요청에는_메모를_싣지_않는다(queue):
+    make_exporter(queue, ROUTING, wait_s=0)(
+        state(seller='스마트스토어', recorder=_with_source('X1'))
+    )
+    assert queue.find('A1', 'shopmine').memo == ''

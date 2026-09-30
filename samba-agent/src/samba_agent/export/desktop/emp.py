@@ -33,7 +33,7 @@ class EmpUi(Protocol):
 
     def read(self, order_no: str) -> CellValues: ...
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None: ...
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None: ...
 
     def show_only(self, order_no: str) -> None:
         """그 주문만 그리드에 띄운다. 없으면 AdapterRetry(NOT_FOUND)."""
@@ -67,12 +67,12 @@ class EmpAdapter:
         finally:
             self._ui.clear_keyword()
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
         self._ui.ensure_ready()
         # 그 주문 행만 띄운 채로 넣는다 — 값이 다른 주문 행에 들어갈 자리가 없다(실기 2026-09-29 사고)
         try:
             self._ui.show_only(order_no)
-            self._ui.write(order_no, cost, shipping_fee)
+            self._ui.write(order_no, cost, shipping_fee, memo)
         finally:
             self._ui.clear_keyword()
 

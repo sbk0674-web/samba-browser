@@ -41,8 +41,12 @@ class _Outcome:
 
 
 def _same(current: CellValues, req: ExportRequest) -> bool:
-    """이미 기입할 값이 들어 있는가. 빈 셀과 0 은 같게 본다."""
-    return (current.cost or 0) == req.cost and (current.shipping_fee or 0) == req.shipping_fee
+    """이미 기입할 값이 들어 있는가. 빈 셀과 0 은 같게 본다. 메모는 그 글이 들어 있으면 된다."""
+    return (
+        (current.cost or 0) == req.cost
+        and (current.shipping_fee or 0) == req.shipping_fee
+        and (not req.memo or req.memo in (current.memo or ''))
+    )
 
 
 def _conflict(current: CellValues, req: ExportRequest) -> str | None:
@@ -160,7 +164,10 @@ class ExportWorker:
             conflict = _conflict(current, req)
             if conflict is not None:
                 return _Outcome('fail', f'덮어쓰지 않았다 — {conflict}', ExportFail.VALUE_CONFLICT)
-            adapter.write(req.order_no, req.cost, req.shipping_fee)
+            if req.memo:
+                adapter.write(req.order_no, req.cost, req.shipping_fee, memo=req.memo)
+            else:
+                adapter.write(req.order_no, req.cost, req.shipping_fee)
             after = adapter.read(req.order_no)
             if not _same(after, req):
                 return _Outcome(
@@ -168,7 +175,10 @@ class ExportWorker:
                     f'되읽은 값이 다르다 — 원가 {after.cost} · 배송비 {after.shipping_fee}',
                     ExportFail.VERIFY_MISMATCH,
                 )
-            return _Outcome('done', f'원가 {req.cost:,} · 배송비 {req.shipping_fee:,} 기입 확인')
+            memo = f' · 메모 {req.memo}' if req.memo else ''
+            return _Outcome(
+                'done', f'원가 {req.cost:,} · 배송비 {req.shipping_fee:,}{memo} 기입 확인'
+            )
         except AdapterRetry as e:
             if e.reason not in _WAIT_REASONS and req.attempts >= self._max_attempts:
                 return _Outcome('fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason)

@@ -28,11 +28,15 @@ class FakeAdapter:
             raise AdapterReject(ExportFail.NOT_FOUND, f'{order_no} 없음')
         return self.rows[order_no]
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
-        self.calls.append(f'write {order_no} {cost} {shipping_fee}')
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
+        self.calls.append(f'write {order_no} {cost} {shipping_fee}' + (f' {memo}' if memo else ''))
         if self.write_error is not None:
             raise self.write_error
-        self.rows[order_no] = CellValues(cost + 1 if self.corrupt else cost, shipping_fee)
+        self.rows[order_no] = CellValues(
+            cost + 1 if self.corrupt else cost,
+            shipping_fee,
+            memo or self.rows.get(order_no, EMPTY).memo,
+        )
 
 
 EMPTY = CellValues(None, None)
@@ -403,3 +407,28 @@ def test_인증_창은_시도_횟수에_넣지_않고_한_번만_알린다(queue
     assert req.status == 'pending'
     assert req.attempts == 0
     assert alerts == [('emp', '샵마인 관리자 추가인증 창')]
+
+
+def test_메모가_있으면_함께_넣고_되읽어_확인한다(queue):
+    adapter = FakeAdapter({'A1': EMPTY})
+    queue.enqueue('A1', 'emp', 62470, 2300, '202609291041430002')
+    out = worker(queue, adapter).run_once()
+    assert out.status == 'done'
+    assert adapter.calls[1] == 'write A1 62470 2300 202609291041430002'
+    assert '메모 202609291041430002' in out.detail
+
+
+def test_값은_같고_메모만_없으면_메모를_넣는다(queue):
+    adapter = FakeAdapter({'A1': CellValues(62470, 2300, '')})
+    queue.enqueue('A1', 'emp', 62470, 2300, 'S123')
+    out = worker(queue, adapter).run_once()
+    assert out.status == 'done'
+    assert 'write A1 62470 2300 S123' in adapter.calls
+
+
+def test_메모가_이미_들어_있으면_쓰지_않는다(queue):
+    adapter = FakeAdapter({'A1': CellValues(62470, 2300, '사람 메모 / S123')})
+    queue.enqueue('A1', 'emp', 62470, 2300, 'S123')
+    out = worker(queue, adapter).run_once()
+    assert out.status == 'done'
+    assert not any(c.startswith('write') for c in adapter.calls)

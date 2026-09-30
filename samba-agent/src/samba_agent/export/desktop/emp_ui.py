@@ -44,6 +44,9 @@ COL_SHIPPING = '배송비'
 # 화면에 보이는 셀 요소의 이름 앞머리(열의 내부 이름)
 CELL_COST = 'wprice1'
 CELL_SHIPPING = 'deliv_price'
+# 한줄메모 — 소싱주문번호를 넣는다(사용자 2026-09-30). 그리드 칸 이름은 note(실기)
+COL_NOTE = '한줄메모'
+CELL_NOTE = 'note'
 SAVE_BUTTON = '저장'
 REFRESH_BUTTON = '새로고침'
 TOOLBAR_ID = 'toolStrip2'
@@ -294,7 +297,9 @@ class PywinautoEmpUi:
     def read(self, order_no: str) -> CellValues:
         row = self.find_row(order_no)
         return CellValues(
-            parse_won(row.values.get(COL_COST)), parse_won(row.values.get(COL_SHIPPING))
+            parse_won(row.values.get(COL_COST)),
+            parse_won(row.values.get(COL_SHIPPING)),
+            (row.values.get(COL_NOTE) or '').strip(),
         )
 
     def _cell(self, row: GridRow, prefix: str):
@@ -706,7 +711,7 @@ class PywinautoEmpUi:
             log.info('EMP 그리드로 포커스를 옮기지 못했다')
         time.sleep(self._poll_s)
 
-    def _edit_cell(self, order_no: str, prefix: str, column: str, value: int) -> None:
+    def _edit_cell(self, order_no: str, prefix: str, column: str, value: int | str) -> None:
         """그리드 칸 하나에 값을 넣는다(저장 전).
 
         실제 마우스·전역 키 입력은 쓰지 않는다 — 다른 창이 앞에 있으면 글자가 그 창으로 샌다
@@ -776,14 +781,15 @@ class PywinautoEmpUi:
         _user32.PostMessageW(editor, _WM_KEYUP, _VK_RETURN, 0)
         self._wait_focus(want_edit=False)
         time.sleep(self._poll_s)
-        got = parse_won(self.find_row(order_no).values.get(column))
+        shown = self.find_row(order_no).values.get(column)
+        got = parse_won(shown) if isinstance(value, int) else (shown or '').strip()
         if got != value:
             # 값이 다른 칸에 들어갔을 수 있다(실기 2026-09-29: 다른 주문 행에 찍힘) — 저장하지 않고
             # 그리드를 서버 값으로 되돌린다. 남겨 두면 사람이 저장을 누를 때 함께 저장된다
             self.reload()
             raise AdapterReject(
                 ExportFail.VERIFY_MISMATCH,
-                f'EMP {column} 칸에 {value:,} 을 넣었는데 {got} 로 읽힌다',
+                f'EMP {column} 칸에 {value!r} 을 넣었는데 {got!r} 로 읽힌다',
             )
 
     def _toolbar_button(self, name: str):
@@ -908,14 +914,20 @@ class PywinautoEmpUi:
         time.sleep(self._poll_s * 4)
         self._refresh()
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
-        """원가·배송비 칸에 값을 넣고 저장한 뒤 새로고침한다. 이미 같은 값인 칸은 건드리지 않는다."""
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
+        """원가·배송비(·한줄메모) 칸에 값을 넣고 저장한 뒤 새로고침한다. 이미 같은 값인 칸은 건드리지 않는다.
+
+        한줄메모는 그 글이 이미 들어 있으면 두고, 다른 글이 있으면 ' / ' 로 뒤에 붙인다(사람이 쓴 글을 지우지 않는다).
+        """
         current = self.read(order_no)
         try:
             if (current.cost or 0) != cost:
                 self._edit_cell(order_no, CELL_COST, COL_COST, cost)
             if (current.shipping_fee or 0) != shipping_fee:
                 self._edit_cell(order_no, CELL_SHIPPING, COL_SHIPPING, shipping_fee)
+            note = current.memo or ''
+            if memo and memo not in note:
+                self._edit_cell(order_no, CELL_NOTE, COL_NOTE, f'{note} / {memo}' if note else memo)
             # 저장을 누르기 직전이 마지막 확인이다 — 누른 뒤에는 안내창을 닫는 데까지 끝낸다
             self._stop_if_user_back()
         except AdapterRetry as e:

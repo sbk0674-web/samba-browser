@@ -35,9 +35,9 @@ class FakeUi:
         self.calls.append(f'read {order_no}')
         return self.rows[order_no]
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
-        self.calls.append(f'write {order_no} {cost} {shipping_fee}')
-        self.rows[order_no] = CellValues(cost, shipping_fee)
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
+        self.calls.append(f'write {order_no} {cost} {shipping_fee}' + (f' {memo}' if memo else ''))
+        self.rows[order_no] = CellValues(cost, shipping_fee, memo or None)
 
 
 def test_읽기와_쓰기_앞에_창_상태를_확인한다():
