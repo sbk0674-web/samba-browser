@@ -14,11 +14,13 @@ let ls = await lines({ interactive: true })
 if (ls.some(l => / link "일시품절"/.test(l))) return { ...R, error: 'sold_out', note: '상품 일시품절' }
 // 옵션: '100 (남은수량:4)' 또는 'L' — 주문서 옵션 글자(snap.selected)와 앞부분이 정확히 같은 것 하나
 const opt = nz(args.option).replace(/\s*\(남은수량[^)]*\)\s*$/, '')
-const sel = ls.find(l => / link "선택하세요\."/.test(l))
+// 큰 페이지(신세계백화점)는 전체 목록이 잘린다 — 검색으로 찾고, '사이즈 선택하세요.'처럼 이름 붙은 칸을 먼저(맨 앞은 숨은 칸, 09-30)
+const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l))
+const sel = selAll.find(l => !/ link "선택하세요\."/.test(l)) || selAll[0]
 if (sel) {
   await page.click(idL(sel))
   await sleep(1500)
-  ls = await lines({ interactive: true })
+  ls = [...await lines({ interactive: true }), ...await lines({ query: opt || '선택' })]
   const cand = ls.filter(l => /^\[\d+\] link "/.test(l) && lab(l).replace(/\s*\(남은수량[^)]*\)\s*$/, '') === opt)
   if (cand.length !== 1) {
     const all = ls.filter(l => /^\[\d+\] link "/.test(l) && /남은수량|품절|매진/.test(l)).map(lab).slice(0, 12)
@@ -29,7 +31,7 @@ if (sel) {
   await sleep(1800)
   ls = await lines({ interactive: true })
 }
-const g = ls.find(l => /^\[\d+\] link "선물"/.test(l))
+const g = ls.find(l => /^\[\d+\] link "선물"/.test(l)) || (await lines({ query: '선물' })).find(l => /^\[\d+\] link "선물"/.test(l))
 if (!g) return { ...R, error: 'no_gift_button', note: '선물 버튼 없음' }
 page.click(idL(g)).catch(() => {})
 let loginSeen = null
