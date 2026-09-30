@@ -700,7 +700,11 @@ def size_letters(text: str) -> set[str]:
     upper = re.sub(r'프리\s*사이즈|프리(?=\s|$)|원\s*사이즈', ' FREE ', text.upper())
     # 원사이즈 표기(OSFM·O/S·ONE SIZE·ONE)도 FREE 로 맞춘다(실기 2026-09-27 무신사 287: 주문 '프리 사이즈' ↔ 'OSFM')
     upper = re.sub(r'(?<![A-Z])(?:OSFM|O/S|ONE\s*SIZE|ONE)(?![A-Z])', ' FREE ', upper)
-    return set(_SIZE_LETTER_RE.findall(upper))
+    # 같은 사이즈의 다른 표기 — XXL = 2XL, XXXL = 3XL(실기 2026-09-30 무신사: 주문 '그레이 XXL' ↔ 선택지 '2XL' 을 불일치로 멈췄다)
+    return {_SIZE_LETTER_SAME.get(x, x) for x in _SIZE_LETTER_RE.findall(upper)}
+
+
+_SIZE_LETTER_SAME = {'XXL': '2XL', 'XXXL': '3XL'}
 
 
 def size_letter_options(options: list[str], wanted: str | None) -> list[str]:

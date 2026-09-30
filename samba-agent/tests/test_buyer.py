@@ -1707,3 +1707,10 @@ def test_shipping_matches_when_site_reads_back_detail_in_address():
     assert shipping_matches(expected, applied)
     other_road = {'name': '홍길동', 'address': '경기 성남시 분당구 대왕판교로 99 101동 1203호'}
     assert not shipping_matches(expected, other_road)
+
+
+def test_xxl_matches_2xl_by_size_letters():
+    from samba_agent.agents.buyer import size_letter_options, size_letters
+
+    assert size_letters('그레이 XXL') == size_letters('2XL') == {'2XL'}
+    assert size_letter_options(['S (품절)', 'M (품절)', 'L', 'XL', '2XL'], '그레이 XXL') == ['2XL']
