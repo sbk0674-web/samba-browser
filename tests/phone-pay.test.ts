@@ -163,7 +163,8 @@ describe('PAY_APP_TO_PAYMENT_PROVIDER', () => {
       toss: 'toss',
       payco: 'payco',
       kakaopay: 'kakao',
-      naverpay: 'naver'
+      naverpay: 'naver',
+      alipay: 'alipay'
     })
     // 앱 목록과 매핑표가 어긋나면(새 앱 추가 후 매핑 누락) 여기서 걸린다
     expect(Object.keys(PAY_APP_TO_PAYMENT_PROVIDER).sort()).toEqual(
@@ -267,6 +268,25 @@ describe('runPayApproval', () => {
 
     expect(r).toEqual({ ok: false, reason: 'vault-locked' })
     expect(h.tapPassword).not.toHaveBeenCalled()
+  })
+
+  it('알리페이 결제창이 이미 떠 있으면 앱을 다시 열지 않고 웹 확인 없이 끝낸다', async () => {
+    // 실기 2026-10-01: 得物 앱이 띄운 알리페이 결제창 — 제목은 'CVV를 입력하세요'지만 6자리 결제 비밀번호다
+    const ali = 'com.eg.android.AlipayGphone'
+    const h = harness({
+      screens: [
+        screen(ali, [el(2, 'CVV를 입력하세요', { clickable: false })]),
+        screen(ali, [el(2, 'CVV를 입력하세요', { clickable: false })]),
+        screen(ali, [el(3, '결제 성공', { clickable: false })]),
+        screen(ali, [el(3, '결제 성공', { clickable: false })])
+      ],
+      webSuccess: false
+    })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+
+    expect(r).toEqual({ ok: true })
+    expect(h.deps.launchApp).not.toHaveBeenCalled()
+    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ provider: 'alipay' })
   })
 
   it('결제앱에 맞는 금고 결제 수단을 비밀번호 입력기에 넘긴다', async () => {

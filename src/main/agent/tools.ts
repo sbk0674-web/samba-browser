@@ -290,6 +290,7 @@ const PAYMENT_PROVIDER_NAMES = [
   'kakao',
   'naver',
   'payco',
+  'alipay',
   'samsung',
   'apple',
   'other'

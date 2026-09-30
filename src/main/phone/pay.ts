@@ -24,7 +24,7 @@ import { tr, type MessageKey } from '../i18n'
 
 export type PayState =
   'idle' | 'await_app' | 'app_steps' | 'password' | 'verify' | 'done' | 'failed'
-export type PayProvider = 'toss' | 'payco' | 'kakaopay' | 'naverpay'
+export type PayProvider = 'toss' | 'payco' | 'kakaopay' | 'naverpay' | 'alipay'
 
 export interface PayProviderSpec {
   id: PayProvider
@@ -53,6 +53,12 @@ export interface PayProviderSpec {
    * 알림 클릭이 엉뚱한 곳으로 들어가던 앱(토스)에 쓴다. 생략하면 결제 알림을 먼저 누른다
    */
   openBy?: 'app' | 'notification'
+  /**
+   * 다른 앱(得物)이 띄운 결제창처럼 이미 앞에 떠 있으면 앱을 다시 열지 않는다 — 다시 열면 결제창이 앱 홈에 가린다
+   */
+  keepIfForeground?: boolean
+  /** 웹 결제창 없이 앱 안에서 끝나는 결제(식화·得物 → 알리페이) — 웹 성공 확인을 하지 않는다 */
+  appOnly?: boolean
 }
 
 export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
@@ -95,6 +101,19 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     confirmText: /결제하기|확인|다음/,
     passwordHint: /결제 ?비밀번호|네이버페이 비밀번호|비밀번호/,
     successHint: /결제 ?완료|완료되었습니다/
+  },
+  // 식화·得物(더우) 앱 결제 — 앱이 알리페이 결제창을 띄운다. 6자리 결제 비밀번호 칸 제목이 'CVV를 입력하세요'로
+  // 번역돼 보인다(사용자 2026-10-01: "cvv가 결제 비밀번호다"). 키패드는 숫자가 고정이고 UI 트리에 글자가 있다
+  alipay: {
+    id: 'alipay',
+    packageName: 'com.eg.android.AlipayGphone',
+    deepLink: 'alipays://',
+    confirmText: /^(?:결제|확인|确认付款|立即付款|付款)$/,
+    passwordHint: /CVV를 입력|결제 ?비밀번호|支付密码|请输入/,
+    successHint: /결제 ?(?:완료|성공)|支付成功|付款成功|完成/,
+    openBy: 'app',
+    keepIfForeground: true,
+    appOnly: true
   }
 }
 
@@ -106,7 +125,8 @@ export const PAY_APP_TO_PAYMENT_PROVIDER: Record<PayProvider, PaymentProvider> =
   toss: 'toss',
   payco: 'payco',
   kakaopay: 'kakao',
-  naverpay: 'naver'
+  naverpay: 'naver',
+  alipay: 'alipay'
 }
 
 /**
@@ -115,7 +135,8 @@ export const PAY_APP_TO_PAYMENT_PROVIDER: Record<PayProvider, PaymentProvider> =
  * 토스·카카오·페이코는 전화번호 결제라 구매 사이트 계정의 항목을 그대로 쓴다
  */
 export const PAY_APP_ACCOUNT_HOST: Partial<Record<PayProvider, string>> = {
-  naverpay: PAYMENT_PROVIDER_ACCOUNT_HOST.naver ?? 'naver.com'
+  naverpay: PAYMENT_PROVIDER_ACCOUNT_HOST.naver ?? 'naver.com',
+  alipay: PAYMENT_PROVIDER_ACCOUNT_HOST.alipay ?? 'alipay.com'
 }
 
 /** 앱 화면을 더듬는 최대 스텝(무한 루프 방지) */
@@ -546,7 +567,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
         // 비밀번호 화면이 사라지면 사용자가 직접 끝낸 것으로 본다
         stillBlocked: async () => isSecretScreen(await deps.phones.screen(req.serial), spec)
       })
-      if (result.outcome === 'resumed' && (await deps.webSuccess())) {
+      if (result.outcome === 'resumed' && (spec.appOnly || (await deps.webSuccess()))) {
         deps.onStep(tr('phone.payDoneByUser'), true)
         return finish(true)
       }
@@ -577,7 +598,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
     if (!(await openPayNotification(deps, req.serial, spec))) {
       await deps.launchApp(req.serial, spec.deepLink)
     }
-  } else {
+  } else if (!(spec.keepIfForeground && (await deps.phones.screen(req.serial)).app === spec.packageName)) {
     await deps.launchApp(req.serial, spec.deepLink)
   }
 
@@ -707,7 +728,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
 
   if (state !== 'done') return fail(passwordTried ? 'verify-failed' : 'stuck', screen)
   // 앱 완료 화면만으로는 부족하다 — 웹 팝업이 성공 주소로 넘어갔는지도 확인한다
-  if (!(await deps.webSuccess())) return fail('verify-failed', screen)
+  if (!spec.appOnly && !(await deps.webSuccess())) return fail('verify-failed', screen)
   deps.onStep(tr('phone.payDone'), true)
   return finish(true)
 }

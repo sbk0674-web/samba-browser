@@ -39,7 +39,7 @@ export function normalizeItemType(raw: string): VaultItemType {
 // 카카오페이·페이코). 어느 결제창의 비밀번호인지 구분하는 평문 필드 값이다.
 // 'site' 는 사이트 자체 결제(무신사머니·SSG머니처럼 웹에서 끝나는 결제)다
 export type PaymentProvider =
-  'site' | 'musinsapay' | 'toss' | 'kakao' | 'naver' | 'payco' | 'samsung' | 'apple' | 'other'
+  'site' | 'musinsapay' | 'toss' | 'kakao' | 'naver' | 'payco' | 'alipay' | 'samsung' | 'apple' | 'other'
 
 export const PAYMENT_PROVIDERS: readonly PaymentProvider[] = [
   'site',
@@ -50,6 +50,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProvider[] = [
   'kakao',
   'naver',
   'payco',
+  // 알리페이 — 식화·得物(더우) 앱 결제. 폰 결제창의 6자리 결제 비밀번호(사용자 2026-10-01)
+  'alipay',
   'samsung',
   'apple',
   'other'
@@ -74,7 +76,9 @@ export const PAYMENT_PROVIDER_FIELD_KEY = 'payment.provider'
  */
 export const PAYMENT_PROVIDER_ACCOUNT_HOST: Partial<Record<PaymentProvider, string>> = {
   naver: 'naver.com',
-  payco: 'payco.com'
+  payco: 'payco.com',
+  // 식화·得物은 폰 앱만 있고 결제는 알리페이 계정으로 된다 — 비밀번호는 알리페이 계정(alipay.com) 항목에 둔다
+  alipay: 'alipay.com'
 }
 
 /** 결제 비밀번호 항목에서 "이 앱 계정(아이디)의 비밀번호를 쓴다"를 담는 평문 필드 키 */
