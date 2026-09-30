@@ -1587,3 +1587,12 @@ def test_element_id_of_finds_kakao_fields():
     assert _element_id_of(page, r'textbox "생년월일') == 8
     assert _element_id_of(page, r'button "결제요청"') == 9
     assert _element_id_of(page, r'button "없음"') is None
+
+
+def test_order_done_url_detects_completed_order_pages():
+    from samba_agent.agents.payer import ORDER_DONE_URL_RE
+
+    assert ORDER_DONE_URL_RE.search('https://www.musinsa.com/order/result/202609302054580001')
+    assert ORDER_DONE_URL_RE.search('https://www.lotteon.com/p/order/complete/2026093016657652')
+    assert not ORDER_DONE_URL_RE.search('https://www.musinsa.com/order/order-form')
+    assert not ORDER_DONE_URL_RE.search('https://money.musinsapayments.com/pay')

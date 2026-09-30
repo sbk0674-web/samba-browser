@@ -83,6 +83,10 @@ def payco_card_names(card: str) -> tuple[str, ...]:
     return ('현대',)
 
 PAY_SUCCESS_MARKERS = ('결제 완료', '결제완료', '주문완료', '주문 완료', '주문이 완료', 'approved')
+# 주문 완료 페이지 주소(무신사 /order/result/…, 롯데온 /order/complete/… 등) — 키패드 없이 끝난 결제를 알아보는 데 쓴다
+ORDER_DONE_URL_RE = re.compile(r'/order/(?:result|complete)/\d|orderComplete|order_complete|/order/done', re.IGNORECASE)
+# _press_keypad 가 키패드 없이 결제 완료 화면을 본 경우 돌려주는 값(앱 응답처럼 'ok' 로 시작한다)
+NO_KEYPAD_PAID = 'ok: paid without keypad (order complete page)'
 # 결제 "전" 검사용 — 결제창·주문서에도 흔한 '결제 완료 시 적립' 같은 글자로 멈추지 않게 좁힌다
 # (실기: 무신사페이 결제창 문구에 걸려 결제 전 pay_interrupted). 주문 완료 주소의 탭이 있거나,
 # 화면에 주문 완료 문구와 주문번호가 함께 있어야 이미 결제된 것으로 본다
@@ -1139,6 +1143,18 @@ class PayerAgent(AgentBase):
                 self.note('키패드 없음 화면', mask_text(' , '.join(seen))[:280])
             except (AgentFailure, ValueError):
                 pass
+            # 비밀번호 없이 결제가 끝나는 수단(무신사페이 등록 카드 등)은 키패드 대신 주문 완료 화면이 뜬다 —
+            # 그걸 '결제 안 됨'으로 멈추면 산 주문이 주문접수로 남아 재주문 위험이다(실기 2026-09-30 챔피온 후드).
+            # 완료 화면이면 키패드 없이 성공으로 넘긴다(확인 단계가 주문번호를 읽는다)
+            if dry_run_digits is None:
+                # 결제창 글자('결제 완료 시 적립')로 오판하지 않게 주문 완료 주소의 탭이 있을 때만 본다
+                try:
+                    done_tabs = str(self.tool('list_tabs'))
+                except AgentFailure:
+                    done_tabs = ''
+                if ORDER_DONE_URL_RE.search(done_tabs):
+                    self.note('키패드 입력', '키패드 없이 결제 완료 화면 — 비밀번호 없는 결제로 본다')
+                    return NO_KEYPAD_PAID
             raise AgentFailure(
                 'needs_human',
                 f'결제 비밀번호 키패드가 뜨지 않았다({calls}회 확인) — 비밀번호를 넣지 않았다(결제 안 됨): '
