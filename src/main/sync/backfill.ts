@@ -291,6 +291,10 @@ function scopeWhere(
  */
 function bumpUpdatedAt(db: Db, table: RowTable, ids: number[], now: number): void {
   if (ids.length === 0) return
+  // 계정·금고 항목은 원래 수정 시각을 지킨다 — 옛 사본의 행이 "지금" 시각을 달고 올라가면 다른 기기의
+  // 삭제보다 늦은 것으로 보여 삭제를 이기고 되살아났다(9/30 계정 약 550개). 푸시가 올리기 전에
+  // 서버의 같은 자연 키 삭제 표식과 원래 시각을 비교한다
+  if (table === 'accounts' || table === 'vault_items') return
   const t = tableOf(table)
   db.drizzle.transaction((tx) => {
     for (let i = 0; i < ids.length; i += INSERT_CHUNK) {
