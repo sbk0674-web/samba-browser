@@ -133,7 +133,12 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
         return False
     if a in b or b in a:
         return True
-    return re.findall(r'\d+', a) == re.findall(r'\d+', b) and a[-6:] in b
+    if re.findall(r'\d+', a) == re.findall(r'\d+', b) and a[-6:] in b:
+        return True
+    # 사이트가 상세주소까지 붙여 되읽는 경우(실기 2026-09-30 패션플러스: '도로명 12 101동 1203호') — 넣은 주소+상세의
+    # 숫자 토큰이 되읽은 주소와 같고 도로명 끝부분이 들어 있으면 같은 곳이다
+    full = _norm_address(f'{expected.get("address", "")} {expected.get("address_detail") or ""}')
+    return bool(full) and re.findall(r'\d+', full) == re.findall(r'\d+', b) and a[-6:] in b
 
 
 # 결제수단 이름 → 키마스터 결제 제공자(src/shared/vault.ts PaymentProvider). 앞에서부터 먼저 맞는 것
