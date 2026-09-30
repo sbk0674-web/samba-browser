@@ -32,7 +32,8 @@ if(rr.length){
 }else{
   // 주문서가 늦게 그려지면 버튼이 아직 없다 — 몇 초 다시 찾는다(실기 2026-09-29: change-button-nf 2건)
   const fa=async()=>L(await E('새 배송지 추가'),e=>/새 ?배송지 ?추가/.test(e.text)&&e.role==='button');
-  const fc=async()=>L(await E('변경'),e=>/^(배송지\s*)?변경$/.test(String(e.text).trim()));
+  // '변경'은 배송지·배송요청사항 두 개 — 첫 번째(배송지)를 누른다(마지막 것은 요청사항 창, 실기 2026-09-30)
+  const fc=async()=>(await E('변경')).filter(e=>/^(배송지\s*)?변경$/.test(String(e.text).trim())&&e.role==='button')[0]||null;
   let ch=null;
   for(let i=0;i<8&&!add&&!ch;i++){add=await fa();if(!add)ch=await fc();if(!add&&!ch)await sleep(1000);}
   if(!add){
