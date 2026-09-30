@@ -1668,3 +1668,13 @@ def test_matching_options_XL_은_2XL_에_맞추지_않는다():
     assert matching_options(opts, 'XL') == []
     assert sold_out_option_matches(opts, 'XL') == ['XL 품절']
     assert matching_options(['XL', 'XXL'], 'XL') == ['XL']
+
+
+def test_선택란_없는_단일_상품은_프리사이즈_색상이_맞으면_진행():
+    from samba_agent.agents.buyer import single_item_ok
+
+    snap = {'order_tab': 't', 'cost': 33630, 'product_name': '[노스페이스]린덴 힙색 NN2PS26J_BLK'}
+    assert single_item_ok('BLK(BLACK) FREE', snap)
+    assert not single_item_ok('WHT(WHITE) FREE', snap)  # 색이 다르면 아니다
+    assert not single_item_ok('BLK 270', snap)  # 프리사이즈가 아니면 아니다
+    assert not single_item_ok('BLK FREE', {'cost': 1000})  # 주문서가 없으면 아니다
