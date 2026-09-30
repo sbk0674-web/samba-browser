@@ -63,7 +63,8 @@ for(let step=0;step<5;step++){
   if(!m&&wantsColor&&/색상|컬러|color/i.test(lab(combo))){r.options=opts.map(o=>o.text);r.note='option not matched: 색상 — 주문 옵션과 맞는 색상이 없다';proceed=false;break;}
   if(!m&&!args.size)m=live[0];
   if(m){picked.push(cl(m.text));await page.click(m.id);await sleep(700);}
-  else{r.options=live.map(o=>o.text);r.note='size not available';proceed=false;break;}
+  // 품절 항목도 돌려준다 — 빼면 주문 사이즈가 '[품절] 255' 여도 '품절 미확인'이 된다(실기 2026-09-30)
+  else{r.options=opts.map(o=>o.text);r.note='size not available';proceed=false;break;}
 }
 if(!proceed){r.coupons[r.account||args.account||'현재 로그인 계정']=0;return r;}
 
