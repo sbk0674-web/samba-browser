@@ -25,8 +25,8 @@ if(saved){
   const lid=labs[labs.length-1].id;const rid=Math.max(...L.filter(e=>e.role==='radio'&&e.id<lid).map(e=>e.id),0);
   if(rid){await page.click(rid);await sleep(800);const rv=(await els(null,'[role=dialog]')).find(e=>e.id===rid);if(!rv||rv.value!=='on'){await page.click(lid);await sleep(800);}}
   const done=(await els('선택완료')).find(e=>e.role==='button'&&e.text==='선택완료');
-  if(!done)return{...R,note:'선택완료 없음'};
-  await page.click(done.id);await sleep(3000);
+  // 직배 주문서는 저장하면 바로 반영되고 선택완료가 없다 — 없으면 주문서 되읽기로 넘어간다(실기 2026-09-30)
+  if(done){await page.click(done.id);await sleep(3000);}else await sleep(1500);
 }
 const tx=await text();
 if(!tx.includes(name))return{...R,note:'주문서에 받는 분 이름 없음'+(saved?'(저장 창 거침)':'(저장 창 없음)')+(tx.includes(name.slice(0,2))?'(앞 두 글자는 있음)':'')+(/받는 분 주소로 보내기/.test(tx)?'(선물 주문서)':'')+' 창'+dlg.length+' 저장버튼 '+(await els('저장')).filter(e=>e.role==='button').map(e=>e.text).slice(0,3).join('/')+' 배송지칸 '+(/새 ?배송지|배송지 ?(선택|변경)/.exec(tx)||[''])[0]};
