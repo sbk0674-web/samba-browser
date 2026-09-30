@@ -146,9 +146,15 @@ class VerifierAgent(AgentBase):
         masked_mismatches = mask_value(mismatches)
         self.note('대조 결과', json.dumps(masked_mismatches, ensure_ascii=False) or '없음')
         if mismatches:
-            explain = self.decide_once(
-                f'{a.rules}\n\n다음 불일치를 한 문장으로 설명하라: {masked_mismatches}', Decision
-            )
+            try:
+                explain = self.decide_once(
+                    f'{a.rules}\n\n다음 불일치를 한 문장으로 설명하라: {masked_mismatches}', Decision
+                )
+            except AgentFailure:
+                # AI 설명이 안 돼도(접근 막힘 등) 불일치 사실은 그대로 올린다(실기 2026-09-30)
+                explain = Decision(
+                    choice=json.dumps(masked_mismatches, ensure_ascii=False)[:200], reason='AI 설명 불가'
+                )
             return AgentResult(
                 status='fail',
                 reason=f'불일치 {len(mismatches)}건: {explain.choice}',

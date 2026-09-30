@@ -127,10 +127,17 @@ class RecorderAgent(AgentBase):
             # 산 주문이 주문접수로 남아 재주문된다(실기 2026-09-25: 포이즌 −0.7% 건을 기록하지 않았다). 근거만 남긴다
             self.note('마진', f'{margin}% — 결제된 주문이라 기록한다')
         self.step('recorder: 저장할 값 정리')
-        memo = self.decide_once(
-            f'{a.rules}\n\n주문 {a.order.order_no}({a.order.source})의 메모 한 문장을 쓰라.',
-            Decision,
-        )
+        try:
+            memo_text = self.decide_once(
+                f'{a.rules}\n\n주문 {a.order.order_no}({a.order.source})의 메모 한 문장을 쓰라.',
+                Decision,
+            ).choice
+        except AgentFailure as e:
+            # 메모 한 문장 때문에 결제된 주문의 기록이 멈추면 안 된다(실기 2026-09-30: AI 접근이 막혀 결제 2건이
+            # 주문접수로 남았다 — 재주문 위험). AI 가 안 되면 정해진 문장으로 기록한다
+            self.note('메모', mask_text(f'AI 메모 실패 — 기본 문장 사용({e.reason[:60]})'))
+            memo_text = f'{a.order.source} 자동 이행'
+        memo = Decision(choice=memo_text, reason='기록 메모')
         # account 는 내부 판매 계정 식별자다. 요청자가 지정했으면 그 값을, 아니면 구매
         # 에이전트가 고른 계정을 인계값에서 받는다 — 둘 다 없으면 빈 계정으로 저장된다
         # (리뷰 지적 — I1)
