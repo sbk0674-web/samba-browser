@@ -20,6 +20,9 @@ from samba_agent.supervisor.approval import resume_command
 from samba_agent.wave.flags import auto_cancel_evidence
 
 THREAD_PREFIX = 'job:'
+# 카카오페이 비밀번호를 사람이 끝내 안 넣어 멈춘 결제(payer 문구) — 이때 다시 살 수단
+KAKAO_FALLBACK_MARK = '카카오페이 폰 비밀번호를 기다렸지만'
+KAKAO_FALLBACK_CARD = '네이버페이'
 
 _log = logging.getLogger(__name__)
 
@@ -349,6 +352,20 @@ class Worker:
             job,
             f'{job.order_no} {outcome}' + (f' — 사유 {fail}' if fail else ' — 완료'),
         )
+        if outcome == 'needs_human' and not self.d.dry_run and not job.options.get('card'):
+            reason = _failed_reason(out)
+            if KAKAO_FALLBACK_MARK in reason:
+                # 카카오페이는 비밀번호를 사람이 폰에서 넣어야 한다(보안 키패드) — 기다려도 안 넣었으면 다음으로 싼,
+                # 자동으로 끝낼 수 있는 수단(네이버페이)으로 한 번 다시 산다(사용자 2026-09-30: 최저가로 살 수 있는 수단)
+                self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
+                self.d.queue.enqueue(
+                    job.order_no,
+                    job.requester,
+                    {**job.options, 'card': KAKAO_FALLBACK_CARD},
+                    job.thread_ts,
+                )
+                self.d.report(job, f'{job.order_no} 카카오페이 비밀번호 미입력 — {KAKAO_FALLBACK_CARD}로 다시 산다')
+                return self.d.queue.get(job.order_no)  # type: ignore[return-value]
         export_alert = _export_alert(out)
         if export_alert is not None:
             self.d.report(job, mask_text(f'{job.order_no} 외부 기입 {export_alert}')[:200])
