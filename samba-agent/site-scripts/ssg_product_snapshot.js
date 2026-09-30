@@ -2,7 +2,6 @@
 // 로그아웃 → login_required. 옵션 못 고르면 바로구매 안 누름.
 // 신세계몰(6004)·신세계백화점(6009)만 — 아니면 'not_shinsegaemall'(6009는 allow_department:true 때만). 쿠폰받기 먼저.
 // 인자 {sku: 상품 주소, size?: 주문 옵션('옵션:285'), qty?, account?, profile?, route?: 'direct'|'danawa'|'enuri'|'adpick', entry_url?, adpick_percent?}
-// 반환 {options, selected, cost, pay_amount, adpick_rate, adpick_reward, methods, coupons, product_*, order_tab, mall_ok, note, error?}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const pf = args.profile ? { profile: args.profile } : {}
@@ -27,7 +26,7 @@ const url0 = args.entry_url || args.sku
 if (!/^https:\/\//.test(String(url0 || ''))) return { ...R, error: 'bad-sku', note: 'sku/entry_url 은 https 주소' }
 const tabId = (String(await tabs.open({ ...pf, url: url0 })).match(/tab (\S+)/) || [])[1]
 if (tabId) await tabs.switch(tabId)
-try { await page.waitFor(/바로구매|품절|입고알림/, 12000) } catch (e) {}
+try { await page.waitFor(/바로구매|품절|입고알림/, 25000) } catch (e) {}
 R.product_url = await page.url()
 R.product_no = (R.product_url.match(/itemId=(\d+)/) || [])[1] || null
 R.ckwhere = (R.product_url.match(/[?&]ckwhere=([^&]+)/) || [])[1] || null
@@ -77,7 +76,8 @@ if (!picked.length && chosen.length) R.options = chosen
 if (!chosen.length && !picked.length && /선택하세요\./.test(sec)) { R.coupons[acct] = 0; return { ...R, note: 'option not chosen', product_tab: tabId } }
 
 const beforeTabs = new Set((await tabs.list()).map(x => x.id))
-const buy = await page.idOf('바로구매', 0)
+let buy = await page.idOf('바로구매', 0)
+for (let i = 0; i < 10 && buy < 0; i++) { await sleep(1000); buy = await page.idOf('바로구매', 0) }
 if (buy < 0) return { ...R, error: 'buy-button-not-found', product_tab: tabId }
 await page.click(buy)
 let form = null
