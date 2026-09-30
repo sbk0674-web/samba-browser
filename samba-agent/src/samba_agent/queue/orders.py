@@ -95,14 +95,28 @@ def parse_order_fn(
     """
 
     def parse(order_no: str, options: Mapping[str, str]) -> OrderRef:
+        ref: OrderRef | None = None
         if wave is not None:
             try:
-                return lookup_order_api(wave, order_no)
+                ref = lookup_order_api(wave, order_no)
             except (WaveError, ValueError) as e:
                 log.warning('삼바웨이브 조회 실패 — 앱 스크립트로 넘어간다: %s', e)
-        return lookup_order(bridge, order_no, options)
+        if ref is None:
+            ref = lookup_order(bridge, order_no, options)
+        return with_overrides(ref, options)
 
     return parse
+
+
+# 작업 옵션으로 덮어쓸 수 있는 주문 필드 — 등록 상품이 다른 색상이거나 사이즈 표기가 달라 사람이
+# 상품 링크·옵션을 정해 준 경우(실기 2026-09-30 라코스테: 연결 상품은 베이지, 블랙은 다른 상품)
+OVERRIDE_FIELDS = ('option', 'product_url')
+
+
+def with_overrides(ref: OrderRef, options: Mapping[str, object]) -> OrderRef:
+    """작업 옵션의 option·product_url 이 있으면 주문 참조의 그 필드를 바꾼다."""
+    update = {k: str(options[k]) for k in OVERRIDE_FIELDS if options.get(k)}
+    return ref.model_copy(update=update) if update else ref
 
 
 def focus_orders_page(bridge: BridgeClient) -> None:
