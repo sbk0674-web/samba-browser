@@ -17,10 +17,14 @@ if(saved){
   for(const c of reqs.filter(e=>e.value!=='on'))await page.click(c.id);
   const sv=await svb();
   await page.click(sv.id);await sleep(4000);
-  const L=await els(null,'[role=dialog]');
+  let L=await els(null,'[role=dialog]');
   // 목록 라벨은 배송지 별칭일 수 있다 — 라벨에 없으면 목록 안 모든 글자에서 받는 분 이름을 찾는다(실기 2026-09-30)
-  let labs=L.filter(e=>e.role==='label'&&e.text.includes(name));
-  if(!labs.length)labs=L.filter(e=>e.role!=='radio'&&e.text&&e.text.includes(name));
+  const fl=()=>{let x=L.filter(e=>e.role==='label'&&e.text.includes(name));if(!x.length)x=L.filter(e=>e.role!=='radio'&&e.text&&e.text.includes(name));return x;};
+  let labs=fl();
+  // 목록이 늦게 갱신되면 새 항목이 아직 없다 — 한 번 더 읽는다. 그래도 없으면 도로명+번호로 찾는다(주문서 이름 검사가 뒤에서 다시 거른다)
+  if(!labs.length){await sleep(2500);L=await els(null,'[role=dialog]');labs=fl();}
+  const rd=addr.match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/);
+  if(!labs.length&&rd)labs=L.filter(e=>e.role!=='radio'&&e.text&&e.text.replace(/\s+/g,'').includes(rd[1]+rd[2]));
   if(!labs.length){const vt=await text();const er=(vt.match(/[^ ]{0,12}\s?[^ ]{0,12}\s?(?:입력해|선택해|확인해|동의해)\s?주세요/)||[''])[0];return{...R,note:'저장 뒤 목록에 없음'+(er?' — '+er:'')+' 첫 라벨 형태: '+((L.find(e=>e.role==='label')||{}).text||'').replace(/[가-힣]/g,'가').replace(/\d/g,'0').slice(0,60)+' / 첫 라디오: '+((L.find(e=>e.role==='radio')||{}).text||'').replace(/[가-힣]/g,'가').replace(/\d/g,'0').slice(0,60)+' / 새 등록 입력칸 '+(await els(null,'[role=dialog]')).filter(e=>e.role==='textbox').length+'개'};}
   const lid=labs[labs.length-1].id;const rid=Math.max(...L.filter(e=>e.role==='radio'&&e.id<lid).map(e=>e.id),0);
   if(rid){await page.click(rid);await sleep(800);const rv=(await els(null,'[role=dialog]')).find(e=>e.id===rid);if(!rv||rv.value!=='on'){await page.click(lid);await sleep(800);}}
