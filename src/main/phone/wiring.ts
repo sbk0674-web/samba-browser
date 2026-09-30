@@ -380,6 +380,10 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
     // 담당 폰이 없으면 설정의 기본 폰(붙어 있을 때). 없으면 연결된 폰 전부
     const fallback = deps.settings().defaultPhoneSerial
     if (fallback && list.some((p) => p.serial === fallback)) return [fallback]
+    // 무선 디버깅으로 붙으면 이름이 'adb-<시리얼>-xxxx._adb-tls-connect._tcp' 로 바뀐다 — 정확히 같지 않아
+    // 연결된 폰 전부로 넘어가 득물 전용 폰에서 결제 알림을 기다렸다(실기 2026-09-30). 시리얼을 품은 이름도 같은 폰으로 본다
+    const wireless = fallback ? list.find((p) => p.serial.includes(fallback)) : undefined
+    if (wireless) return [wireless.serial]
     return list.map((p) => p.serial)
   }
 
