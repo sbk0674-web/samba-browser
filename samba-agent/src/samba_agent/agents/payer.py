@@ -549,6 +549,10 @@ def _element_id_of(page: str, pattern: str) -> int | None:
 # 카카오페이 카톡결제 탭을 누른 뒤·결제요청을 누른 뒤 기다리는 시간(ms)
 KAKAO_TAB_WAIT_MS = 1500
 KAKAO_REQUEST_WAIT_MS = 2500
+# 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
+KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck')
+KAKAO_HUMAN_WAIT_TRIES = 36
+KAKAO_HUMAN_WAIT_MS = 5000
 
 
 def _other_tab_on_host(listed: str, host: str, skip: str, profile: str = '') -> str | None:
@@ -770,6 +774,21 @@ class PayerAgent(AgentBase):
             ) from e
         self._last_listed = listed
         return _popups_and_active_tabs(listed)
+
+    def _wait_human_kakao(self, a: Assignment, card: str, why: str) -> AgentResult:
+        """사람이 폰에서 카카오페이 비밀번호를 넣을 때까지 결제창을 열어 두고 완료 화면을 기다린다."""
+        self.step('payer: 카카오페이 — 폰에서 결제 비밀번호를 직접 넣어 주세요(결제창 열어 둠)')
+        self.note('카카오페이', mask_text(f'폰 키패드 자동 입력 실패({why[:60]}) — 사람 입력 대기'))
+        for _ in range(KAKAO_HUMAN_WAIT_TRIES):
+            page = self._success_page(a)
+            if any(m in page for m in PAY_SUCCESS_MARKERS):
+                return self._confirm_paid(a, card, paid_by='human')
+            self.tool('wait', ms=KAKAO_HUMAN_WAIT_MS)
+        raise AgentFailure(
+            'needs_human',
+            '카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인)',
+            FailReason.PAY_INTERRUPTED,
+        )
 
     def _restore_kakao_tab(self, kakao_tab: str, helper_tab: str | None) -> None:
         """폰 승인 뒤 — 앞에 띄웠던 소싱처 탭을 닫고 카카오페이 결제창 탭으로 돌아간다(실패해도 확인 단계가 다시 본다)."""
@@ -1533,14 +1552,22 @@ class PayerAgent(AgentBase):
             # payAccount 는 앱 스키마상 네이버페이 전용이다. 사용자 결정 — 결제 앱이 쇼핑몰
             # 계정에 연결된 네이버 계정으로 스스로 고르게 두고, 어떤 provider 에도 payAccount 를
             # 넘기지 않는다(리뷰 지적 — Critical 1)
-            approved = self.tool(
-                'phone_approve_payment',
-                provider=provider,
-                amountKrw=amount,
-                merchant=a.order.source,
-                methodLabel=card,
-                **({'card': card_hint} if card_hint else {}),
-            )
+            try:
+                approved = self.tool(
+                    'phone_approve_payment',
+                    provider=provider,
+                    amountKrw=amount,
+                    merchant=a.order.source,
+                    methodLabel=card,
+                    **({'card': card_hint} if card_hint else {}),
+                )
+            except AgentFailure as e:
+                if not (kakao_front and any(w in e.reason for w in KAKAO_HUMAN_FALLBACK_WORDS)):
+                    raise
+                # 카카오페이 비밀번호 키패드를 앱이 못 읽었다(보안 키패드) — 결제창을 연 채 사람이 폰에서 비밀번호를
+                # 넣기를 기다린다. 창을 닫고 멈추면 폰에서 승인해도 주문이 안 생긴다(실기 2026-09-30)
+                self._restore_kakao_tab(*kakao_front)
+                return self._wait_human_kakao(a, card, e.reason)
             self.note('폰 승인', mask_text(approved[:200]))
             if kakao_front:
                 # 승인 동안 앞에 둔 소싱처 탭을 닫고, 카카오페이 결제창(승인 뒤 주문 완료로 넘어간다)으로 돌아간다
