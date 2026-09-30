@@ -551,6 +551,20 @@ KAKAO_TAB_WAIT_MS = 1500
 KAKAO_REQUEST_WAIT_MS = 2500
 
 
+def _other_tab_on_host(listed: str, host: str, skip: str) -> str | None:
+    """list_tabs 응답에서 그 호스트의 일반 탭(skip 제외) 하나의 id. 없으면 None."""
+    try:
+        rows = json.loads(listed)
+    except ValueError:
+        return None
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or str(row.get('id') or '') == skip:
+            continue
+        if row.get('kind', 'tab') == 'tab' and host in _host_of(str(row.get('url') or '')):
+            return str(row['id'])
+    return None
+
+
 def _active_tab_id(listed: str) -> str | None:
     """list_tabs 응답(JSON 배열)에서 활성 탭 id. 형식이 아니면 None."""
     try:
@@ -807,18 +821,30 @@ class PayerAgent(AgentBase):
         self.note('카카오페이', '카톡결제 요청 보냄(휴대폰·생년월일은 키마스터 값)')
         # 폰 승인은 지금 앞 탭의 사이트 계정으로 결제 계정을 고른다 — 카카오페이 화면이 앞이면 계정을 못 찾아
         # 'no-account' 로 거절된다(실기 2026-09-30). 승인 동안 구매 계정 프로필로 소싱처 첫 화면을 앞에 둔다
-        kakao_tab = _active_tab_id(self.tool('list_tabs'))
+        listed = self.tool('list_tabs')
+        kakao_tab = _active_tab_id(listed)
         if not kakao_tab:
             return None
         src = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source or ''))
+        host = (src.login_host if src else '') or ''
+        # 이미 열린 소싱처 탭(주문서 등)이 있으면 그것을 앞에 둔다 — 결제 도구 허용 목록에 new_tab 이 없다
+        other = _other_tab_on_host(listed, host, kakao_tab) if host else None
+        if other:
+            self.tool('switch_tab', id=other)
+            return kakao_tab, None
         profile = str(a.handoff.get('account') or a.order.account or '')
-        helper: str | None = None
-        if src is not None and src.home:
-            out = self.tool('new_tab', url=src.home, **({'profile': profile} if profile else {}))
-            m = re.search(r'tab ([0-9a-fA-F-]{8,})', out)
-            helper = m.group(1) if m else None
-            self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
-        return kakao_tab, helper
+        if src is None or not src.home:
+            return kakao_tab, None
+        opened = self.tool(
+            'run_js',
+            code=(
+                f'const t = await tabs.open({json.dumps({"url": src.home, **({"profile": profile} if profile else {})})}); '
+                'return (t && t.id) || ""'
+            ),
+        )
+        self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
+        m = re.search(r'[0-9a-fA-F-]{8,}', opened)
+        return kakao_tab, (m.group(0) if m else None)
 
     def _provider_from_payment_popup(self) -> str | None:
         """지금 열린 결제창(팝업)의 호스트로 결제 앱을 고른다. 결제창이 없거나 아는 결제
