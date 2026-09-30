@@ -987,6 +987,10 @@ def single_item_ok(option: str | None, snap: dict[str, object]) -> bool:
     return not rest or any(t in name for t in rest)
 
 
+# SSG 장바구니 — 바로구매 전에 한 번 열어 기본 배송지를 불러오게 한다(_warm_ssg_cart)
+SSG_CART_URL = 'https://pay.ssg.com/cart/dmsShpp.ssg'
+
+
 # 계정 견적 건너뜀 사유 중 확정 품절 표시(_quote 가 붙인다)
 SOLD_OUT_LISTED_SKIP = '주문 옵션 품절 표시'
 
@@ -1449,12 +1453,28 @@ class BuyerAgent(AgentBase):
             raise AgentFailure('fail', problem, FailReason.UNKNOWN)
         return snap
 
+    def _warm_ssg_cart(self, account: str) -> None:
+        """SSG — 상품 페이지 바로구매 전에 장바구니를 한 번 연다. 안 열면 배송지가 수십 개 있어도
+        '배송지 정보가 없습니다' 알림으로 주문서가 안 열린다(실기 2026-09-30, 장바구니를 연 뒤엔 열림)."""
+        profile = json.dumps(account, ensure_ascii=False) if account else 'undefined'
+        code = (
+            f"const r=await tabs.open({{profile:{profile},url:'{SSG_CART_URL}'}});"
+            r"const id=(String(r).match(/tab (\S+)/)||[])[1];await sleep(4000);"
+            "if(id){try{await tabs.close(id)}catch(e){}}return 'ok'"
+        )
+        try:
+            self.tool('run_js', code=code, safety='no_pay')
+        except AgentFailure as e:
+            self.note('SSG 장바구니', mask_text(f'미리 열기 실패(계속): {e.reason[:60]}'))
+
     def _snapshot_any(self, a: Assignment, account: str) -> dict[str, object]:
         """그 계정의 탭 프로필에서 상품 스냅샷(주문서까지)을 만든다.
 
         지정 몰 상품(mall_item)·진입 경로 비교(route_compare)가 켜진 소싱처(SSG)는 그 흐름을 거친다.
         """
         source = source_of(self.spec.name)
+        if source.key == 'ssg':
+            self._warm_ssg_cart(account)
         if source.mall_item or source.route_compare:
             return self._mall_route_snapshot(a, account)
         if source.entry_route:

@@ -111,6 +111,9 @@ def mock_scripts(responses: dict[str, object], calls: Calls) -> None:
 
     respx.post(f'{URL}/tool/run_script').mock(side_effect=handler)
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    # 바로구매 전 장바구니 미리 열기(_warm_ssg_cart) — 다른 run_js 목(탭 정리 등)이 없을 때만 받는다
+    if 'run_js' not in respx.routes:
+        respx.post(f'{URL}/tool/run_js', name='run_js').mock(return_value=page('ok'))
 
 
 def snapshots(calls: Calls) -> list[dict[str, object]]:
