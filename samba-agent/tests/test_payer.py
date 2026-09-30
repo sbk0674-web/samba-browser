@@ -1542,3 +1542,31 @@ def test_도착예정일이_3일을_넘으면_메모_한_줄():
     assert arrival_memo('M 옵션변경 10/6(화) 이내 도착확률 80%', today) == '[도착예정] 10/06(화) — 결제일 기준 6일'
     # 연말에 본 1월 날짜는 다음 해다
     assert arrival_eta('01.04(월) 도착', date(2026, 12, 30)) == (date(2027, 1, 4), 5)
+
+
+def test_같은_탭_로그인_화면도_결제창_로그인으로_본다():
+    import json as _json
+
+    from samba_agent.agents.base import AgentFailure as _AF
+    from samba_agent.agents.payer import PayerAgent
+
+    agent = PayerAgent.__new__(PayerAgent)
+    agent._popup_login_tried = True  # 로그인 시도는 이미 했다 — 바로 멈춰야 한다
+    agent._last_listed = _json.dumps([
+        {'id': 't1', 'kind': 'tab', 'active': True, 'url': 'https://nid.naver.com/nidlogin.login?url=x'}
+    ])
+    agent.notes = []
+    agent.note = lambda *a, **k: None
+
+    class _A:
+        handoff = {'account': 'acc'}
+
+        class order:
+            account = 'acc'
+
+    try:
+        agent._stop_if_login_popup([], _A())
+    except _AF as e:
+        assert '로그인 화면' in e.reason
+    else:
+        raise AssertionError('같은 탭 로그인 화면을 못 봤다')

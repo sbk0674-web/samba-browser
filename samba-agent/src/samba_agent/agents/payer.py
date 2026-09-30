@@ -724,6 +724,7 @@ class PayerAgent(AgentBase):
                 f'결제창 목록을 확인할 수 없다: {e.reason}',
                 e.fail_reason,
             ) from e
+        self._last_listed = listed
         return _popups_and_active_tabs(listed)
 
     def _provider_from_payment_popup(self) -> str | None:
@@ -874,8 +875,21 @@ class PayerAgent(AgentBase):
         """결제창이 로그인 화면이면 멈춘다 — 결제 비밀번호를 로그인 칸에 넣거나 헛되이 반복하지 않는다.
 
         실기 2026-09-27 ABC 214·218: 프로필의 네이버 로그인이 풀려 네이버페이 창이 nid.naver.com 로그인으로 갔고,
-        payer 는 '결제하기'·키패드를 못 찾은 채 fill_secret 을 10회씩 부른 뒤 '결제 확인 안 됨'으로 멈췄다."""
-        for p in popups:
+        payer 는 '결제하기'·키패드를 못 찾은 채 fill_secret 을 10회씩 부른 뒤 '결제 확인 안 됨'으로 멈췄다.
+
+        롯데온처럼 결제창이 팝업이 아니라 같은 탭에서 넘어가는 경우(keypad_in_tab)도 활성 탭이 로그인 화면이면 같게 본다
+        (실기 2026-09-30: 같은 탭 nid.naver.com 로그인의 '비밀번호' 글자를 키패드로 착각해 fill_secret 거절 10회)."""
+        same_tab: list[dict[str, object]] = []
+        try:
+            listed = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
+            if isinstance(listed, list):
+                same_tab = [
+                    t for t in listed
+                    if isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                ]
+        except ValueError:
+            same_tab = []
+        for p in [*popups, *[t for t in same_tab if t not in popups]]:
             url = str(p.get('url') or '')
             if _is_login_url(url):
                 profile = str(a.handoff.get('account') or a.order.account or '')
@@ -894,7 +908,15 @@ class PayerAgent(AgentBase):
                     if out.lower().startswith(('submitted', 'ok', 'filled')):
                         self.tool('wait', ms=POPUP_LOGIN_SETTLE_MS)
                         popups_now, _active = self._list_tabs_popups()
-                        if not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
+                        try:
+                            now = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
+                        except ValueError:
+                            now = []
+                        tab_login = any(
+                            isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                            for t in (now if isinstance(now, list) else [])
+                        )
+                        if not tab_login and not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
                             return
                 raise AgentFailure(
                     'needs_human',
