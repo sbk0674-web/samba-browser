@@ -1658,3 +1658,13 @@ def test_주문서_수량이_주문_수량과_다르면_사지_않는다():
     assert order_qty_problem(2, {'order_tab': 't', 'qty': 2}) is None
     assert order_qty_problem(1, {'order_tab': 't'}) is None
     assert order_qty_problem(2, {'error': 'sold_out'}) is None  # 주문서가 없으면 다른 사유가 가른다
+
+
+def test_matching_options_XL_은_2XL_에_맞추지_않는다():
+    from samba_agent.agents.buyer import matching_options, sold_out_option_matches
+
+    # 실기 2026-09-30 그랜드스테이지: 선택지 ['M','L','2XL','S 품절','XL 품절'], 주문 XL
+    opts = ['M', 'L', '2XL', 'S 품절', 'XL 품절']
+    assert matching_options(opts, 'XL') == []
+    assert sold_out_option_matches(opts, 'XL') == ['XL 품절']
+    assert matching_options(['XL', 'XXL'], 'XL') == ['XL']

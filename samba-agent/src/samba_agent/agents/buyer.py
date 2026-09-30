@@ -617,6 +617,11 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
             return normed
         # 후보가 주문 옵션 안에 들어 있는 경우는 두 글자 이상만 — 'L' 이 'BLACK' 안에 있다고 L 을 고르면 안 된다
         contains = [o for o in live if _norm(o) and (nw in _norm(o) or (len(_norm(o)) >= 2 and _norm(o) in nw))]
+        # 사이즈 글자가 서로 다르면(주문 XL ↔ 선택지 2XL·XXL) 글자 포함으로 맞추지 않는다
+        # (실기 2026-09-30 그랜드스테이지: XL 품절인데 2XL 을 후보로 봐 품절 확증을 놓쳤다)
+        wl = size_letters(w)
+        if wl:
+            contains = [o for o in contains if not size_letters(o) or size_letters(o) == wl]
         if contains:
             return contains
         # 주문 옵션이 "카키 085(L) NP6KP12C" 처럼 여러 단계·품번이 섞인 경우 — 토큰 하나가 후보 안에 있으면 맞는 것으로
@@ -629,6 +634,10 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
             # 경계 일치가 먼저 — "XL" 은 "Black-XL" 에만 맞고 "Black-XXL"·"Black-XLT" 에는 안 맞는다
             by_piece = [o for o in live if nt in [_norm(x) for x in re.split(r'[-\s/]+', o)]]
             by_tok = [o for o in live if nt in _norm(o)]
+            tl = size_letters(tok)
+            if tl:
+                # 사이즈 글자 조각(XL)은 사이즈 글자가 같은 선택지에만(2XL·XXL 제외)
+                by_tok = [o for o in by_tok if not size_letters(o) or size_letters(o) == tl]
             # 모든 선택지에 든 조각(색상 'YEL' ↔ 'YEL 230'…'YEL 290')은 가르는 힘이 없다 — 다음 조각으로 본다
             # (실기 2026-09-29 패션플러스: 주문 'YEL 270' 에 12개 전부가 후보가 돼 없는 270 을 골랐다)
             if len(live) > 1 and len(by_piece or by_tok) == len(live):
