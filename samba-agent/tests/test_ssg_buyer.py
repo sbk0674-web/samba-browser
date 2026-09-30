@@ -421,3 +421,26 @@ def test_www_ssg_주문_링크가_차단이면_신세계몰에서_같은_모델�
     snap = ssg._snapshot(assignment(www), 'acc1')
     assert 'ssg_find_mall_item' in [n for n, _ in calls]
     assert snap['product_no'] == '1000000000333'
+
+
+def test_선물_결제_전_로그인이_풀려_있으면_다시_로그인하고_한_번_더_본다() -> None:
+    """실기 2026-10-01: 선물 주문서를 만든 뒤 pay.ssg.com 세션이 풀려 결제 전 확인에서 멈췄다."""
+    agent = BuyerAgent.__new__(BuyerAgent)
+    agent.note = lambda *_: None
+    agent._fetch_shipping = lambda a, snap: {'name': '고객', 'address': '서울 강남구 테헤란로 1'}
+    agent._close_order_tabs = lambda account: None
+    logins: list[str] = []
+    agent._login_as = lambda account: logins.append(account)
+    answers = iter(
+        [
+            {'ok': True},  # 선물 진입
+            {'ok': True, 'gift': True, 'order_tab': 'T1', 'amount': 30000},  # 받는 분 지정
+            {'logged_in': False},  # 결제 전 확인 — 풀림
+            {'logged_in': True},  # 다시 로그인한 뒤
+        ]
+    )
+    agent.json_tool = lambda *_, **__: next(answers)
+    snap: dict[str, object] = {'product_url': MALL_B, 'selected': '270', 'cost': 30000}
+    agent._ssg_gift(assignment(MALL_B), snap, 'acc1')
+    assert logins == ['acc1']
+    assert snap['order_tab'] == 'T1'

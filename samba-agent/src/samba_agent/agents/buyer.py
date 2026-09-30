@@ -3538,13 +3538,13 @@ class BuyerAgent(AgentBase):
                 FailReason.MARGIN,
             )
         # 로그인이 풀린 채 결제하면 주문이 안 생긴다(실기 2026-09-29) — 결제 전에 세션을 확인한다
-        check = self.json_tool(
-            'run_script',
-            name=SSG_LOGIN_CHECK_SCRIPT,
-            args=json.dumps(
-                {'back_tab': placed['order_tab'], **({'profile': account} if account else {})}
-            ),
-        )
+        check_args = json.dumps({'back_tab': placed['order_tab'], **({'profile': account} if account else {})})
+        check = self.json_tool('run_script', name=SSG_LOGIN_CHECK_SCRIPT, args=check_args)
+        if not check.get('logged_in') and account:
+            # 주문서를 만드는 사이 pay.ssg.com 세션이 풀렸다(실기 2026-10-01) — 키마스터로 다시 로그인하고 한 번 더 본다
+            self.note('로그인', f'{account}: 결제 전 확인에서 로그인이 풀려 있어 다시 로그인')
+            self._login_as(account)
+            check = self.json_tool('run_script', name=SSG_LOGIN_CHECK_SCRIPT, args=check_args)
         if not check.get('logged_in'):
             raise AgentFailure(
                 'needs_human', 'SSG 로그인이 풀려 있다 — 선물 주문서까지 만들었지만 결제하지 않음', FailReason.UNKNOWN
