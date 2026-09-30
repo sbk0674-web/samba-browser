@@ -3576,6 +3576,14 @@ class BuyerAgent(AgentBase):
             ),
         )
         if not confirmed.get('ok') or not shipping_matches(shipping, confirmed):
+            # 저장은 됐는데(사이트 '등록 완료') 목록에서 방금 항목을 못 찾은 경우 — 기존 배송지 선택으로 한 번 더 고른다
+            # (실기 2026-09-30 롯데온 선물: 다시 돌리면 선택으로 통과했다)
+            account = str(args.get('profile') or '')
+            if '저장 뒤 목록에 없음' in str(confirmed.get('note') or '') and self._select_existing_shipping(
+                dict(shipping), account
+            ):
+                self.note('배송지 확정', '저장 뒤 목록 확인을 놓쳐 기존 배송지 선택으로 반영')
+                return
             raise AgentFailure(
                 'needs_human',
                 f'배송지 확정 검증에 실패했다: {mask_text(str(confirmed.get("note", ""))[:80])}',
