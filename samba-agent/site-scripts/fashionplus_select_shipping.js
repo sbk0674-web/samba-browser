@@ -3,8 +3,10 @@
 // 탭: args.tab > 이 레인의 패션플러스 주문서 탭 하나 · args: name, address, address_detail, profile, tab
 // 반환 {ok,name,address,zip,order_tab,note} — 목록에 없으면 ok:false(창을 닫고 끝)
 const OF = /fashionplus\.co\.kr\/order\/\d+(?:[?#]|$)/
-const lines = async q => (await page.get(q ? { selector: q } : {})).tree.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
-const text = async () => ((await page.get({})).tree.split('PAGE TEXT:')[1] || '').replace(/\s+/g, ' ')
+// 배송지 창(iframe)이 넘어가는 중에 읽으면 프레임 호출이 시간 초과로 던진다(실기 2026-09-30) — 잠깐 쉬고 다시 읽는다
+const get = async q => { for (let i = 0; i < 4; i++) { try { return String((await page.get(q)).tree || '') } catch (e) { await sleep(1500) } } return '' }
+const lines = async q => (await get(q ? { selector: q } : {})).split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
+const text = async () => ((await get({})).split('PAGE TEXT:')[1] || '').replace(/\s+/g, ' ')
 const fail = (note, x) => ({ ok: false, note, ...(x || {}) })
 const sq = s => String(s || '').replace(/\s+/g, '')
 const name = String(args.name || '').trim(), addr = String(args.address || '').trim(), det = String(args.address_detail || '').trim()
@@ -38,12 +40,13 @@ const hits = entries.filter(l => {
   return head === name && road.every(r => s.includes(r)) && nums.every(n => s.includes(n)) && (!ho || s.includes(ho + '호'))
 })
 if (hits.length !== 1) { await closeModal(); return fail(hits.length ? `목록에 같은 배송지 ${hits.length}개` : '목록에 없음', { order_tab: tab }) }
-await page.click(parseInt(hits[0].slice(1)))
+// 항목을 누르면 창(iframe)이 바로 넘어가 클릭 호출이 시간 초과로 던진다 — 던져도 클릭은 된 것이다(실기 2026-09-30)
+try { await page.click(parseInt(hits[0].slice(1))) } catch (e) {}
 for (let i = 0; i < 12 && (await big()).some(l => /link "배송지 선택"/.test(l)); i++) await sleep(300)
 if ((await big()).some(l => /link "배송지 선택"/.test(l))) {
   // 고른 뒤 창이 안 닫히면 '선택/확인' 버튼을 찾아 누른다(저장·등록 버튼은 누르지 않는다)
   const b = (await big()).find(l => /button "(선택|확인|배송지 선택)"/.test(l))
-  if (b) { await page.click(parseInt(b.slice(1))); await sleep(800) }
+  if (b) { try { await page.click(parseInt(b.slice(1))) } catch (e) {} await sleep(800) }
 }
 const t = await text()
 const m = t.match(/배송지 정보 (\S+?)배송지 변경 (\d{5}) (.+?) (?:0\d{1,2}-?\d{3,4}-?\d{4}|배송메모)/)
