@@ -63,7 +63,7 @@ sources:
     required_seller: 롯데백화점
     gift_unless_poison: true
     shipping_confirm: true
-    pay_provider: naver
+    # 결제수단 고정(네이버페이)을 뺀다 — 모든 수단의 원가를 비교해 가장 싼 것으로(사용자 2026-09-27·09-30: 카카오페이 머니 7% 가 더 쌌다)
     buy_accounts: [buyer01]
   # 그랜드스테이지는 ABC마트와 같은 a-rt.com 흐름이다 — 스크립트(key)를 그대로 공유한다
   - id: GrandStage

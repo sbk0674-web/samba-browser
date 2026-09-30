@@ -1570,3 +1570,20 @@ def test_같은_탭_로그인_화면도_결제창_로그인으로_본다():
         assert '로그인 화면' in e.reason
     else:
         raise AssertionError('같은 탭 로그인 화면을 못 봤다')
+
+
+def test_element_id_of_finds_kakao_fields():
+    from samba_agent.agents.payer import _element_id_of
+
+    page = (
+        'URL: https://online-payment.kakaopay.com/bridge/pc/pg/one-time/payment/x\n'
+        '[3] tab "카톡결제"\n'
+        '[6] textbox "휴대폰번호" name=phoneNumber value=""\n'
+        '[8] textbox "생년월일 (6자리)" name=dateOfBirth value=""\n'
+        '[9] button "결제요청"\n'
+    )
+    assert _element_id_of(page, r'tab "카톡결제"') == 3
+    assert _element_id_of(page, r'textbox "휴대폰번호"') == 6
+    assert _element_id_of(page, r'textbox "생년월일') == 8
+    assert _element_id_of(page, r'button "결제요청"') == 9
+    assert _element_id_of(page, r'button "없음"') is None

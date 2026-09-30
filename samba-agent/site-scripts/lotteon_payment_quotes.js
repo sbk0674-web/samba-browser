@@ -83,7 +83,7 @@ try{
     if(best&&!best.on){await page.click(best.id);await sleep(1200);}
     const bl=(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];
     const amt=bl?parseInt((bl.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;
-    if(best&&amt>0)quotes.push({method:'카카오페이',card:'카카오페이 머니'+best.p+'%',cost:base_cost-amt});
+    if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
     const cl=(await Q('닫기',/button "닫기"/)).map(l=>parseInt(l.slice(1))).sort((a,b)=>b-a);
     for(const c of cl.slice(0,2)){await page.click(c);await sleep(400);}
   }

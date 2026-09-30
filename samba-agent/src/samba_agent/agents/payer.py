@@ -540,6 +540,17 @@ def _element_id(found: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _element_id_of(page: str, pattern: str) -> int | None:
+    """get_page 요소 목록에서 `[N] <pattern>` 으로 시작하는 첫 줄의 번호. 없으면 None."""
+    m = re.search(r'^\[(\d+)\] ' + pattern, page, re.MULTILINE)
+    return int(m.group(1)) if m else None
+
+
+# 카카오페이 카톡결제 탭을 누른 뒤·결제요청을 누른 뒤 기다리는 시간(ms)
+KAKAO_TAB_WAIT_MS = 1500
+KAKAO_REQUEST_WAIT_MS = 2500
+
+
 def _amount_krw(value: object) -> int | None:
     """결제 금액(원 단위 양의 정수). 모르거나 0 이하면 None — 앱 스키마가 거절한다."""
     try:
@@ -726,6 +737,51 @@ class PayerAgent(AgentBase):
             ) from e
         self._last_listed = listed
         return _popups_and_active_tabs(listed)
+
+    def _kakao_talk_request(self) -> None:
+        """카카오페이 결제창의 '카톡결제' 탭에서 휴대폰·생년월일을 앱(fill_secret)이 채우고 결제요청을 누른다.
+
+        번호·생년월일은 하네스를 지나가지 않는다. 결제창이 카톡결제 화면이 아니면(이미 요청됨 등) 아무것도 하지 않는다.
+        키마스터에 값이 없으면(not found) 결제하지 않고 사람에게 넘긴다."""
+        self.step('payer: 카카오페이 카톡결제 요청')
+        page = self.tool('get_page')
+        if 'kakaopay.com' not in page.split('\n', 1)[0]:
+            return
+        tab = _element_id_of(page, r'tab "카톡결제"')
+        if tab is not None:
+            self.tool('click', id=tab)
+            self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
+            page = self.tool('get_page')
+        fields = (
+            (r'textbox "휴대폰번호"', 'payment.phone', 'digits'),
+            (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
+        )
+        for pattern, field, fmt in fields:
+            element_id = _element_id_of(page, pattern)
+            if element_id is None:
+                raise AgentFailure(
+                    'needs_human', f'카카오페이 카톡결제 칸 없음({field})', FailReason.UNKNOWN
+                )
+            out = self.tool(
+                'fill_secret',
+                elementId=element_id,
+                itemType='password',
+                provider='kakao',
+                field=field,
+                format=fmt,
+            )
+            if not out.strip().lower().startswith('ok'):
+                raise AgentFailure(
+                    'needs_human',
+                    f'카카오페이 카톡결제 입력 실패({field}): {mask_text(out[:100])}',
+                    FailReason.UNKNOWN,
+                )
+        button = _element_id_of(self.tool('get_page'), r'button "결제요청"')
+        if button is None:
+            raise AgentFailure('needs_human', '카카오페이 결제요청 버튼 없음', FailReason.UNKNOWN)
+        self.tool('click', id=button)
+        self.tool('wait', ms=KAKAO_REQUEST_WAIT_MS)
+        self.note('카카오페이', '카톡결제 요청 보냄(휴대폰·생년월일은 키마스터 값)')
 
     def _provider_from_payment_popup(self) -> str | None:
         """지금 열린 결제창(팝업)의 호스트로 결제 앱을 고른다. 결제창이 없거나 아는 결제
@@ -1392,6 +1448,11 @@ class PayerAgent(AgentBase):
         if provider in PC_PAY_PROVIDERS:
             # PC 결제창에서 비밀번호를 받는 결제(페이코) — 폰 승인이 아니라 웹 키패드 경로로 간다
             provider = None
+
+        if provider == 'kakaopay' and _pay_provider(card) == 'kakaopay':
+            # 카카오페이 PC 결제창은 QR/카톡결제 탭이다 — 카톡결제에 휴대폰·생년월일(키마스터 카카오페이 결제 항목)을 넣고
+            # 결제요청을 눌러야 폰으로 결제 요청이 간다(사용자 2026-09-30 롯데온 카카오페이 머니)
+            self._kakao_talk_request()
 
         if provider is not None:
             self.step('payer: 폰 승인')
