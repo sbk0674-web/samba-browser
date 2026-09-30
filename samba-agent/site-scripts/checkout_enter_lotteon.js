@@ -2,6 +2,9 @@
 const card = args.card || '';
 const cardCompanies=['롯데카드','신한카드','KB국민카드','삼성카드','현대카드','BC카드','하나카드','씨티카드','우리BC카드','우리카드','NH농협카드','카카오뱅크','광주카드'];
 const simplePays=['카카오페이','네이버페이','토스페이','삼성페이','휴대폰결제','충전결제','퀵계좌이체','온누리상품권'];
+// 구매가 만든 주문서 탭(args.tab)으로 먼저 옮긴다 — 주문서 탭이 여럿이면 받는 분을 지정하지 않은 다른 선물 주문서에서
+// 결제하기를 눌러 '이름을 입력해 주세요'로 막혔다(실기 2026-09-30)
+if (args.tab && (await tabs.list()).some(t => t.id === String(args.tab))) await tabs.switch(String(args.tab));
 const url = await page.url();
 if (!/orderSheet/.test(url)) return {ok:false, error:'no lotteon order sheet open in current tab'};
 // 결제 단계가 아니면(선물·직배 주문서 첫 화면) '계속하기'로 넘어간다
