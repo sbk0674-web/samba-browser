@@ -92,6 +92,12 @@ export interface SyncBackend {
    * 커서로 걸러 낼 수 없고 행 수도 기기 수만큼이라 통째로 읽는다
    */
   selectAll(table: string): Promise<RemoteRow[]>
+  /**
+   * 작업공간의 삭제 표식(deleted_at 이 있는 행)만 준다. columns 로 받을 컬럼을 좁힌다(예: 'id,host,username,updated_at,deleted_at').
+   * 최초 업로드 직전에 "같은 자연 키가 이미 서버에서 지워졌는가" 를 보는 데 쓴다 —
+   * 옛 사본이 지운 계정을 새 원격 id 로 다시 올려 되살리는 것을 막는다
+   */
+  selectDeleted(table: string, workspaceId: string, columns: string): Promise<RemoteRow[]>
   upsert(table: string, rows: RemoteRow[]): Promise<void>
   remove(table: string, ids: string[]): Promise<void>
   /**

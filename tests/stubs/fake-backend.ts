@@ -140,6 +140,19 @@ export function createFakeBackend(): FakeBackend {
           .map((r) => ({ ...r }))
       )
     },
+    async selectDeleted(name, workspaceId, columns) {
+      guard()
+      calls.select += 1
+      const wanted = columns.split(',').map((c) => c.trim())
+      return [...table(name).values()]
+        .filter((r) => r.workspace_id === workspaceId)
+        .filter((r) => r.deleted_at !== null && r.deleted_at !== undefined)
+        .map((r) => {
+          const picked: RemoteRow = { id: r.id }
+          for (const c of wanted) picked[c] = r[c]
+          return picked
+        })
+    },
     async selectAll(name) {
       guard()
       calls.select += 1

@@ -16,6 +16,9 @@ import type { SessionStorageAdapter } from './session-store'
 import { readSupabaseEnv, type SupabaseEnv } from './env'
 import { tr } from '../i18n'
 
+// 삭제 표식을 받을 때 넘길 최대 페이지 수(페이지당 DEFAULT_SELECT_LIMIT 행)
+const DELETED_MAX_PAGES = 50
+
 // 인증 만료로 볼 응답 코드/문구
 const AUTH_EXPIRED = ['PGRST301', '401', 'jwt expired', 'invalid refresh token']
 
@@ -162,6 +165,25 @@ export function createSupabaseBackend(
       const { data, error } = await client.from(table).select('*')
       if (error) raise(error.message)
       return (data ?? []) as RemoteRow[]
+    },
+    async selectDeleted(table, workspaceId, columns) {
+      // 삭제 표식은 수천 행일 수 있다 — id 순으로 페이지를 넘기며 모두 받는다(상한을 두어 무한정 돌지 않는다)
+      const out: RemoteRow[] = []
+      for (let page = 0; page < DELETED_MAX_PAGES; page += 1) {
+        const from = page * DEFAULT_SELECT_LIMIT
+        const { data, error } = await client
+          .from(table)
+          .select(columns)
+          .eq('workspace_id', workspaceId)
+          .not('deleted_at', 'is', null)
+          .order('id', { ascending: true })
+          .range(from, from + DEFAULT_SELECT_LIMIT - 1)
+        if (error) raise(error.message)
+        const rows = (data ?? []) as unknown as RemoteRow[]
+        out.push(...rows)
+        if (rows.length < DEFAULT_SELECT_LIMIT) break
+      }
+      return out
     },
     async upsert(table, rows) {
       if (rows.length === 0) return
