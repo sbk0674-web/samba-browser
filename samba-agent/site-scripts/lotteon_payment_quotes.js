@@ -69,4 +69,24 @@ if (rid >= 0) {
   if (!restored) note = 'restore to 롯데카드 failed, please check manually';
 }
 
+// 카카오페이 머니 즉시할인(사용자 2026-09-30: 모든 결제수단 비교) — 결제수단을 누르는 것만으로는 반영되지 않고 '할인변경' 창에서
+// 받아야 한다. 견적은 창의 'N원 할인혜택 받기'(가장 큰 머니 할인)만 읽고 적용하지 않은 채 닫는다. 적용은 결제 진입(checkout)이 한다.
+// 창은 두 벌이 그려져 뒤쪽(번호가 큰 쪽)이 살아 있고, 전체 목록이 잘려 검색으로 찾는다(실기 2026-09-30)
+try{
+  const Q=async(q,re)=>{const x=(await page.get({query:q})).tree.split('\n').filter(l=>re.test(l));return x;};
+  const hb=await page.idOf('할인변경');
+  if(hb>=0){
+    await page.click(hb);await sleep(2000);
+    const rs=(await Q('카카오페이 머니',/radio "카카오페이 머니\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/머니(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
+    const mx=rs.length?Math.max(...rs.map(x=>x.id)):0;
+    const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
+    if(best&&!best.on){await page.click(best.id);await sleep(1200);}
+    const bl=(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];
+    const amt=bl?parseInt((bl.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;
+    if(best&&amt>0)quotes.push({method:'카카오페이',card:'카카오페이 머니'+best.p+'%',cost:base_cost-amt});
+    const cl=(await Q('닫기',/button "닫기"/)).map(l=>parseInt(l.slice(1))).sort((a,b)=>b-a);
+    for(const c of cl.slice(0,2)){await page.click(c);await sleep(400);}
+  }
+}catch(e){note=(note?note+' / ':'')+'카카오페이 머니 견적 실패: '+String(e).slice(0,60);}
+
 return { quotes, base_cost, note };
