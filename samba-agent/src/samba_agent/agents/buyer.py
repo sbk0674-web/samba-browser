@@ -1782,11 +1782,19 @@ class BuyerAgent(AgentBase):
             or is_mall_url(a.order.product_url, source.allow_department)
             or mall_unknown_url(a.order.product_url)
         ):
-            snap = (
-                self._route_compare(a, account, None)
-                if source.route_compare
-                else self._snapshot_once(a, account)
-            )
+            try:
+                snap = (
+                    self._route_compare(a, account, None)
+                    if source.route_compare
+                    else self._snapshot_once(a, account)
+                )
+            except AgentFailure as e:
+                # www.ssg.com 만 막히고 신세계몰 도메인은 열리는 때가 있다(실기 2026-10-01 edelvise06 프로필) —
+                # 몰을 모르는 주소가 막히면 신세계몰에서 같은 상품을 찾아 산다
+                if not (source.mall_item and mall_unknown_url(a.order.product_url) and e.fail_reason == FailReason.CAPTCHA):
+                    raise
+                self.note('신세계몰 상품', '주문 링크(www.ssg.com)가 차단 화면 — 신세계몰에서 같은 모델을 찾는다')
+                snap = {'error': NOT_MALL_ERROR}
             if snap.get('error') == NOT_MALL_ERROR:
                 if not source.mall_item:
                     raise AgentFailure(

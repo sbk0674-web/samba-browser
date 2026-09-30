@@ -392,3 +392,32 @@ def test_애드픽_적립_계산() -> None:
     assert BuyerAgent._adpick_for({'adpick_rate': 1.6}, 50000) == 800
     assert BuyerAgent._adpick_for({'adpick_reward': 700}, 50000) == 700
     assert BuyerAgent._adpick_for({}, 50000) == 0
+
+
+@respx.mock
+def test_www_ssg_주문_링크가_차단이면_신세계몰에서_같은_모델을_찾는다(ssg) -> None:
+    """실기 2026-10-01: edelvise06 프로필은 www.ssg.com 만 차단 화면이고 신세계몰 도메인은 열렸다."""
+    calls: Calls = []
+    www = 'https://www.ssg.com/item/itemView.ssg?itemId=1000000000999'
+
+    def snapshot(args: dict[str, object]) -> dict[str, object]:
+        if args['sku'] == www:
+            return {'error': 'blocked', 'note': 'SSG 봇 차단 화면'}
+        return snap_of(MALL_B, options=['270'], cost=95000)
+
+    mock_scripts(
+        {
+            'ssg_product_snapshot': snapshot,
+            'ssg_route_quotes': lambda args: (
+                {'error': 'blocked', 'note': 'SSG 봇 차단 화면'} if args.get('sku') == www else {'ok': False, 'routes': []}
+            ),
+            'ssg_find_mall_item': {
+                'ok': True,
+                'items': [{'item_id': '1000000000333', 'url': MALL_B, 'name': 'B', 'price': 99000}],
+            },
+        },
+        calls,
+    )
+    snap = ssg._snapshot(assignment(www), 'acc1')
+    assert 'ssg_find_mall_item' in [n for n, _ in calls]
+    assert snap['product_no'] == '1000000000333'
