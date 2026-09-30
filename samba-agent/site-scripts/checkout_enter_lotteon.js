@@ -53,7 +53,10 @@ await sleep(3000);
 if (/네이버페이/.test(method)) {
   for (let i = 0; i < 8; i++) { const ag = await page.idOf('동의하고 결제하기'); if (ag >= 0) { await page.click(ag); await sleep(3000); break; } await sleep(1000); }
 }
-try{const T=String((await page.get({})).tree||'');if(/^URL: [^\n]*orderSheet/.test(T)){const m=T.match(/사업자등록번호[^\n]{0,25}입력해 ?주세요/);if(m)after='주문서에서 막힘: '+m[0]}}catch(e){}
+try{const T=String((await page.get({})).tree||'');if(/^URL: [^\n]*orderSheet/.test(T)){const m=T.match(/사업자등록번호[^\n]{0,25}입력해 ?주세요/);if(m)after='주문서에서 막힘: '+m[0];
+// 네이버페이는 같은 탭이 pay.naver.com 으로 넘어가야 한다 — 결제하기 뒤에도 주문서면 결제창이 안 열린 것이다(실기 2026-09-30: 키패드 없음 2회).
+// 성공으로 돌려주면 하네스가 주문서에서 키패드를 30초 찾다 멈춘다 — 화면의 안내 문구를 붙여 실패로 돌려준다
+else if(/네이버페이/.test(method)){const P=T.split('PAGE TEXT')[1]||'';const g=(P.match(/[^\n.]{0,30}(?:해 ?주세요|하세요|불가|없습니다|초과)[^\n.]{0,10}/)||[''])[0];after='결제하기 뒤에도 주문서(네이버페이 창 안 열림)'+(g?': '+g.trim():'');}}}catch(e){}
 if(after)return{ok:false,error:after,method,receipt};
 const tbs = await tabs.list();
 const popup = tbs.find(t=>t.kind==='popup');
