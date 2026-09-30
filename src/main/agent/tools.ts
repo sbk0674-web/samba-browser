@@ -1971,6 +1971,31 @@ overlays left: ${after.length}${kept}`
       })
   )
 
+  // 프로필 하나의 특정 사이트 쿠키만 지운다 — 그 프로필 세션만 사이트가 차단 화면을 띄울 때 쓴다
+  // (실기 2026-10-01: edelvise06 프로필만 www.ssg.com 차단, 기본 프로필은 정상). 지운 뒤에는 로그인이 풀린다
+  const clearSiteCookies = tool(
+    'clear_site_cookies',
+    'Delete cookies of one site (host and its subdomains) in one profile session. Logs that profile out of the site.',
+    { profile: z.string().min(1), host: z.string().min(3) },
+    ({ profile, host }) =>
+      guard(`쿠키 지우기 ${profile}`, async () => {
+        if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
+        const site = (normalizeHost(host) || host).replace(/^www\./, '').toLowerCase()
+        if (!site.includes('.')) return `error: host 가 도메인이 아니다: ${host}`
+        const ses = ctx.tabs.sessionForProfile(profile)
+        const all = await ses.cookies.get({})
+        const hit = all.filter((c) => {
+          const d = String(c.domain ?? '').replace(/^\./, '').toLowerCase()
+          return d === site || d.endsWith(`.${site}`)
+        })
+        for (const c of hit) {
+          const d = String(c.domain ?? '').replace(/^\./, '')
+          await ses.cookies.remove(`https://${d}${c.path ?? '/'}`, c.name)
+        }
+        return `ok: removed ${hit.length} cookies of ${site} in profile ${profile}`
+      })
+  )
+
   const listAccounts = tool(
     'list_accounts',
     'List saved accounts for a host (usernames are masked). Use it to pick an account label for fill_secret/login.',
@@ -2538,6 +2563,7 @@ ${submittedNote}`
     listTabs,
     switchTab,
     closeTab,
+    clearSiteCookies,
     listAccounts,
     fillSecret,
     login,
@@ -2577,6 +2603,7 @@ export const SAMBA_TOOL_NAMES = [
   'list_tabs',
   'switch_tab',
   'close_tab',
+  'clear_site_cookies',
   'list_accounts',
   'fill_secret',
   'login',
