@@ -236,7 +236,8 @@ export class VaultRepo {
       })
       .from(accounts)
       .innerJoin(sites, eq(accounts.siteId, sites.id))
-      .where(eq(accounts.id, id))
+      // 지운 계정(삭제 표식)은 id 로 찾아도 없는 것으로 본다
+      .where(and(eq(accounts.id, id), isNull(accounts.deletedAt)))
       .all()
     const row = rows[0]
     return row ? toAccountRow(row) : null
@@ -247,13 +248,18 @@ export class VaultRepo {
     const siteId = this.upsertSite(input.host, input.siteName, input.loginUrl)
 
     // id 가 있으면 수정, 없으면 (siteId, username) 조합으로 기존 계정을 찾는다
+    // 같은 (siteId, username) 에 삭제 표식 행과 살아 있는 행이 함께 있으면 살아 있는 행을 고른다
     const existing = input.id
       ? (this.d.select().from(accounts).where(eq(accounts.id, input.id)).get() ?? null)
       : (this.d
           .select()
           .from(accounts)
           .where(and(eq(accounts.siteId, siteId), eq(accounts.username, input.username)))
-          .get() ?? null)
+          .all()
+          .sort((a, b) => Number(a.deletedAt !== null) - Number(b.deletedAt !== null))[0] ?? null)
+    // 지운 계정을 다시 저장하면 **새 원격 id** 로 되살린다. 옛 원격 id 는 서버에 삭제 표식으로 남아
+    // 있어, 같은 id 로 살아 있는 행을 올리면 다른 기기는 삭제가 이긴다고 보고 다시 지운다
+    const revived = existing !== null && existing.deletedAt !== null
 
     if (existing) {
       // label/isDefault 는 명시적으로 넘어온 경우에만 바꾼다 — 자동 저장(capture)·가져오기가
@@ -271,7 +277,8 @@ export class VaultRepo {
           updatedAt: now,
           // 원격에서 지워졌던 계정(tombstone)을 다시 저장하면 되살린다 — 표식을 지우지 않으면
           // 저장은 성공했는데 목록·피커 어디에도 30일 동안 나타나지 않는다
-          deletedAt: null
+          deletedAt: null,
+          ...(revived ? { remoteId: null } : {})
         })
         .where(eq(accounts.id, existing.id))
         .run()
@@ -350,7 +357,12 @@ export class VaultRepo {
   }
 
   getItemRow(id: number): VaultItemRow | null {
-    const row = this.d.select().from(vaultItems).where(eq(vaultItems.id, id)).get()
+    // 지운 항목(삭제 표식)은 id 로 찾아도 없는 것으로 본다
+    const row = this.d
+      .select()
+      .from(vaultItems)
+      .where(and(eq(vaultItems.id, id), isNull(vaultItems.deletedAt)))
+      .get()
     return row ? toItemRow(row) : null
   }
 
@@ -517,8 +529,18 @@ export class VaultRepo {
     this.db.scheduleSave()
   }
 
+  /**
+   * 항목을 지운다 — 행은 남기고 삭제 표식(deleted_at)만 찍는다(soft delete).
+   * 행이 남아 있어야 풀이 다른 기기에서 되살아 올라온 같은 항목을 알아보고 막을 수 있다.
+   * 표식은 30일 뒤 pruneExpiredTombstones 가 물리 삭제한다
+   */
   deleteItem(id: number): void {
-    this.d.delete(vaultItems).where(eq(vaultItems.id, id)).run()
+    const now = Date.now()
+    this.d
+      .update(vaultItems)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(vaultItems.id, id), isNull(vaultItems.deletedAt)))
+      .run()
     this.db.scheduleSave()
   }
 
@@ -533,7 +555,7 @@ export class VaultRepo {
         updatedAt: vaultItems.updatedAt
       })
       .from(vaultItems)
-      .where(eq(vaultItems.id, id))
+      .where(and(eq(vaultItems.id, id), isNull(vaultItems.deletedAt)))
       .all()
     const r = rows[0]
     return r ? toItemMeta(r) : null
@@ -594,9 +616,18 @@ export class VaultRepo {
    * 암호문이 들어 있으므로 이 값은 메인 프로세스 밖으로 나가지 않는다.
    */
   accountSnapshot(id: number): AccountSnapshot | null {
-    const account = this.d.select().from(accounts).where(eq(accounts.id, id)).get()
+    const account = this.d
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.id, id), isNull(accounts.deletedAt)))
+      .get()
     if (!account) return null
-    const items = this.d.select().from(vaultItems).where(eq(vaultItems.accountId, id)).all()
+    // 이미 지운 항목은 되돌리기 대상이 아니다 — 살아 있는 항목만 떠 둔다
+    const items = this.d
+      .select()
+      .from(vaultItems)
+      .where(and(eq(vaultItems.accountId, id), isNull(vaultItems.deletedAt)))
+      .all()
     return {
       account,
       items: items.map((r) => ({ ...r, ciphertext: toBuffer(r.ciphertext), iv: toBuffer(r.iv) }))
@@ -631,9 +662,22 @@ export class VaultRepo {
     return moved
   }
 
+  /**
+   * 계정과 딸린 살아 있는 항목에 삭제 표식을 찍는다(soft delete). 행은 30일 동안 남아
+   * 다른 기기·옛 사본이 같은 계정을 새 원격 id 로 다시 올려도 풀이 알아보고 막는다
+   */
   deleteAccountCascade(id: number): void {
-    this.d.delete(vaultItems).where(eq(vaultItems.accountId, id)).run()
-    this.d.delete(accounts).where(eq(accounts.id, id)).run()
+    const now = Date.now()
+    this.d
+      .update(vaultItems)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(vaultItems.accountId, id), isNull(vaultItems.deletedAt)))
+      .run()
+    this.d
+      .update(accounts)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(accounts.id, id), isNull(accounts.deletedAt)))
+      .run()
     this.db.scheduleSave()
   }
 
@@ -642,9 +686,24 @@ export class VaultRepo {
    * id 를 유지해야 암호문의 AAD(`${itemId}:${fieldKey}`)가 여전히 맞는다
    */
   restoreSnapshot(snapshot: AccountSnapshot): void {
-    this.d.insert(accounts).values(snapshot.account).run()
-    for (const item of snapshot.items) {
-      this.d.insert(vaultItems).values(item).run()
+    // 삭제는 행을 남기는 soft delete 라 같은 id 의 행이 대개 그대로 있다 — 있으면 덮어써 되살린다.
+    // 수정 시각은 지금으로 올린다: 이미 올라간 삭제 표식(삭제 시각)보다 늦어야 다른 기기가 되살린다
+    // 원격 id 는 비운다 — 옛 id 는 서버에 삭제 표식으로 남기고 새 id 로 올린다(service 가 옛 id 에
+    // 삭제 표식을 다시 기록한다)
+    const now = Date.now()
+    const account = { ...snapshot.account, updatedAt: now, deletedAt: null, remoteId: null }
+    this.d
+      .insert(accounts)
+      .values(account)
+      .onConflictDoUpdate({ target: accounts.id, set: account })
+      .run()
+    for (const snap of snapshot.items) {
+      const item = { ...snap, updatedAt: now, deletedAt: null, remoteId: null }
+      this.d
+        .insert(vaultItems)
+        .values(item)
+        .onConflictDoUpdate({ target: vaultItems.id, set: item })
+        .run()
     }
     this.db.scheduleSave()
   }

@@ -228,7 +228,11 @@ export class VaultService {
   // 양쪽에서 종료 정리를 부를 수 있어서 필요하다
   private disposed = false
   // 삭제 되돌리기 버퍼(토큰 → 스냅샷). 암호문이 들어 있어 메인 메모리에만 둔다
-  private undoBuffer = new Map<string, { snapshots: AccountSnapshot[]; timer: NodeJS.Timeout }>()
+  private undoBuffer = new Map<
+    string,
+    // deletedAt: 지운 시각(되돌릴 때 옛 원격 id 에 다시 올리는 삭제 표식의 시각)
+    { snapshots: AccountSnapshot[]; deletedAt: number; timer: NodeJS.Timeout }
+  >()
   // 동기화 변경 로그 훅. 주입하지 않으면 아무 일도 하지 않는다(동기화를 끈 상태)
   private outbox: OutboxRecorder | null = null
   // 서버(계정)의 마스터 키 재료가 이 PC 의 금고와 다를 때 보관해 둔다 — 사용자가 계정 마스터
@@ -255,6 +259,49 @@ export class VaultService {
   /** 삭제는 행이 사라지기 전에 기록해야 한다 — 호출 순서에 주의 */
   private record(table: SyncTable, rowId: number, op: SyncOp): void {
     this.outbox?.(table, String(rowId), op)
+  }
+
+  /**
+   * 되돌린 계정·항목의 옛 원격 id 에 삭제 표식을 올리도록 변경 로그에 적는다.
+   * 로컬 행은 새 원격 id 를 받으므로, 옛 id 는 로컬 행과 무관한 'remote:<id>' 줄로 기록한다
+   * (payload = 원격 삭제 표식을 만들 스냅샷. 비밀값은 담지 않는다)
+   */
+  private recordOldRemoteTombstones(snapshot: AccountSnapshot, deletedAt: number): void {
+    if (!this.outbox) return
+    const accountRemoteId = snapshot.account.remoteId
+    const account = this.repo.getAccount(snapshot.account.id)
+    if (accountRemoteId && account) {
+      const payload = {
+        id: 0,
+        remoteId: accountRemoteId,
+        host: account.host,
+        label: account.label,
+        username: account.username,
+        isDefault: account.isDefault,
+        urls: account.urls,
+        agentAccess: account.agentAccess,
+        tags: account.tags,
+        pausedUntil: snapshot.account.pausedUntil,
+        updatedAt: deletedAt,
+        deletedAt
+      }
+      this.outbox('accounts', `remote:${accountRemoteId}`, 'delete', JSON.stringify(payload))
+    }
+    for (const item of snapshot.items) {
+      if (!item.remoteId) continue
+      const payload = {
+        id: 0,
+        remoteId: item.remoteId,
+        accountId: null,
+        accountRemoteId,
+        type: item.type,
+        label: item.label,
+        fieldsJson: '[]',
+        updatedAt: deletedAt,
+        deletedAt
+      }
+      this.outbox('vault_items', `remote:${item.remoteId}`, 'delete', JSON.stringify(payload))
+    }
   }
 
   /**
@@ -1132,14 +1179,17 @@ export class VaultService {
   deleteAccounts(ids: number[]): { token: string; count: number } {
     this.requireKey()
     const snapshots: AccountSnapshot[] = []
+    const deletedAt = Date.now()
     this.repo.transaction(() => {
       for (const id of ids) {
         const snapshot = this.repo.accountSnapshot(id)
         if (!snapshot) continue
         snapshots.push(snapshot)
-        // 삭제 표식을 만들려면 행이 남아 있어야 한다 — 반드시 지우기 전에 기록한다
+        // 변경 로그의 삭제 스냅샷은 살아 있는 행에서 뜬다 — 반드시 표식을 찍기 전에 기록한다
         for (const item of snapshot.items) this.record('vault_items', item.id, 'delete')
         this.record('accounts', id, 'delete')
+        // 행은 지우지 않고 삭제 표식만 찍는다(soft delete) — 다른 기기가 같은 계정을 새 원격 id 로
+        // 다시 올려도 풀이 이 표식을 보고 되살리지 않는다
         this.repo.deleteAccountCascade(id)
         this.repo.insertAudit({ itemId: null, accountId: id, action: 'delete', source: 'user' })
       }
@@ -1148,7 +1198,7 @@ export class VaultService {
     const token = randomBytes(16).toString('hex')
     const timer = setTimeout(() => this.undoBuffer.delete(token), UNDO_TTL_MS)
     timer.unref?.()
-    this.undoBuffer.set(token, { snapshots, timer })
+    this.undoBuffer.set(token, { snapshots, deletedAt, timer })
     this.touch()
     return { token, count: snapshots.length }
   }
@@ -1167,6 +1217,10 @@ export class VaultService {
     for (const a of rows) byUser.set(a.username, [...(byUser.get(a.username) ?? []), a])
     const types = this.repo.itemTypesByAccount()
     const removeIds: number[] = []
+    // 남길 계정의 이름·주소 바꾸기는 나머지를 지운 **뒤에** 한다. 지운 계정의 삭제 표식이 남긴 계정과
+    // 같은 자연 키(예: a-rt.com)일 수 있는데, 남긴 계정의 수정 시각이 삭제보다 앞서면 다른 기기의 풀이
+    // "삭제 뒤에 고친 적 없는 같은 계정" 으로 보고 함께 지운다
+    const keeperUpdates: (() => void)[] = []
     let kept = 0
     this.repo.transaction(() => {
       for (const group of byUser.values()) {
@@ -1192,24 +1246,32 @@ export class VaultService {
           tags.length !== keeper.tags.length ||
           rest.some((a) => a.isDefault)
         if (changed) {
-          this.repo.upsertAccount({
-            id: keeper.id,
-            host: key,
-            username: keeper.username,
-            urls,
-            tags,
-            isDefault: keeper.isDefault || rest.some((a) => a.isDefault)
+          keeperUpdates.push(() => {
+            this.repo.upsertAccount({
+              id: keeper.id,
+              host: key,
+              username: keeper.username,
+              urls,
+              tags,
+              isDefault: keeper.isDefault || rest.some((a) => a.isDefault)
+            })
+            this.record('accounts', keeper.id, 'upsert')
           })
-          this.record('accounts', keeper.id, 'upsert')
         }
       }
       return null
     })
-    if (removeIds.length === 0) {
+    const del = removeIds.length > 0 ? this.deleteAccounts(removeIds) : null
+    if (keeperUpdates.length > 0) {
+      this.repo.transaction(() => {
+        for (const update of keeperUpdates) update()
+        return null
+      })
+    }
+    if (!del) {
       this.touch()
       return { token: null, kept, removed: 0 }
     }
-    const del = this.deleteAccounts(removeIds)
     this.repo.insertAudit({ itemId: null, accountId: null, action: 'merge', source: 'user' })
     return { token: del.token, kept, removed: del.count }
   }
@@ -1224,6 +1286,10 @@ export class VaultService {
     this.repo.transaction(() => {
       for (const snapshot of entry.snapshots) {
         this.repo.restoreSnapshot(snapshot)
+        // 되살린 행은 **새 원격 id** 로 올린다. 옛 원격 id 의 삭제 표식은 이미 다른 기기에 퍼졌을 수
+        // 있고, 같은 id 로 살아 있는 행을 올리면 그 기기들은 삭제가 이긴다고 보고 다시 지운다.
+        // 옛 id 에는 삭제 표식을 (다시) 올려 두 행이 함께 살아 있는 일이 없게 한다
+        this.recordOldRemoteTombstones(snapshot, entry.deletedAt)
         this.record('accounts', snapshot.account.id, 'upsert')
         for (const item of snapshot.items) this.record('vault_items', item.id, 'upsert')
       }
@@ -1238,8 +1304,9 @@ export class VaultService {
     // 삭제 전에 계정 id 를 스냅샷으로 떠 둔다 — 삭제 후에는 vault_items 조인이 안 되어
     // 계정별 사용 기록에서 삭제 기록 자체가 보이지 않았다
     const meta = this.repo.itemMeta(id)
-    // 삭제 표식을 만들려면 행이 남아 있어야 한다 — 반드시 지우기 전에 기록한다
+    // 변경 로그의 삭제 스냅샷은 살아 있는 행에서 뜬다 — 반드시 표식을 찍기 전에 기록한다
     this.record('vault_items', id, 'delete')
+    // 행은 남기고 삭제 표식만 찍는다(soft delete)
     this.repo.deleteItem(id)
     this.repo.insertAudit({
       itemId: id,
