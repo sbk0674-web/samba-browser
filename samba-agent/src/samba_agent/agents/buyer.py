@@ -3395,6 +3395,9 @@ class BuyerAgent(AgentBase):
 
         원문은 이 함수 밖으로 나가지 않는다 — self.note 에는 마스킹된 요약만 남긴다.
         """
+        # 주문서 탭이 여럿이면 배송지 스크립트가 어느 탭인지 몰라 멈춘다('order forms 2 open — pass args.tab',
+        # 실기 2026-09-30 무신사) — 스냅샷이 만든 주문서 탭을 배송지 스크립트에 넘긴다
+        self._ship_tab = str(snap.get('order_tab') or '')
         if self.order_type_of(a.order, snap) == 'kkadaegi':
             if self._keep_default_shipping(snap):
                 return
@@ -3521,6 +3524,8 @@ class BuyerAgent(AgentBase):
         }
         if account:
             args['profile'] = account
+        if getattr(self, '_ship_tab', ''):
+            args['tab'] = self._ship_tab
         out: dict[str, object] = {}
         for attempt in range(2):
             try:
@@ -3568,6 +3573,8 @@ class BuyerAgent(AgentBase):
             raise AgentFailure('needs_human', '배송지를 받지 못했다', FailReason.UNKNOWN)
         if account:
             args['profile'] = account
+        if getattr(self, '_ship_tab', ''):
+            args['tab'] = self._ship_tab
 
         applied = self._run_set_shipping(shipping, args)
         # 주소 검색 팝업이 첫 시도에 안 뜨는 사이트가 있다(실측 2026-09-29 SSG: 첫 시도 '우편번호 팝업 안 뜸',
@@ -3641,7 +3648,7 @@ class BuyerAgent(AgentBase):
             return
         confirmed = self.script_json(
             spec.confirm_shipping_script,
-            {k: v for k, v in args.items() if k in ('name', 'address', 'profile')},
+            {k: v for k, v in args.items() if k in ('name', 'address', 'profile', 'tab')},
             goal='배송지 폼을 저장·적용해 주문서에 반영하고, 주문서에서 되읽은 이름·주소를 ok:true 와 함께 돌려준다.',
             check=lambda o: (
                 None
