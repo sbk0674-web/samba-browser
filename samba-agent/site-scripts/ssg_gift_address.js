@@ -30,7 +30,8 @@ await sleep(800)
 const blocks = async () => (await tree({})).split('PAGE TEXT')[0].split(/\n(?=\[\d+\] checkbox)/).filter(x => /^\[\d+\] checkbox/.test(x))
 // 주소록은 늦게 그려진다(실기: 저장 직후 다시 열면 0개로 읽혔다) — 항목이 보일 때까지 몇 번 더 읽는다
 let bs = await blocks()
-for (let i = 0; i < 8 && !bs.length; i++) { await sleep(1000); bs = await blocks() }
+// 막 뜬 팝업으로 바로 옮기면 읽기가 계속 빈다(실기 2026-09-30: run_script 에서 0개, 이미 떠 있던 팝업은 73개) — 다시 찾아 옮긴다
+for (let i = 0; i < 8 && !bs.length; i++) { await sleep(1000); const p2 = await findTab(/selectShpploc/); if (p2) await tabs.switch(p2.id); bs = await blocks() }
 R.entries = bs.length
 let hit = bs.filter(mine)
 R.matched = hit.length
