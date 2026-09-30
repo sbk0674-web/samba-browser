@@ -54,7 +54,7 @@ async function pickForm() {
 // 주소 비교: 시·도 머리(경상북도·경북 …)와 표기 차이를 지운다. '숫자 숫자' 사이 공백은 '|'로 남긴다(번호 경계)
 const na = s => String(s || '').replace(/서해구/g, '서구').replace(/^\s*\S+(도|시)(?=\s)|^\s*(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?=\s)/, '').replace(/\([^)]*\)|특별자치도|특별자치시|특별시|광역시|자치/g, '').replace(/(\d)\s+(?=\d)/g, '$1|').replace(/\s+/g, '').toLowerCase()
 const hos = s => (String(s || '').match(/(\d+)\s*호/g) || []).map(x => x.replace(/\D/g, ''))
-// 항목 글자 '사무실 / 임성희 (38069) 경북 … 1층 102호 010-…' → {name, zip, address}(전화는 버린다)
+// 항목 글자 '사무실 / 김사무 (38069) 경북 … 1층 102호 010-…' → {name, zip, address}(전화는 버린다)
 const entry = s => {
   const z = s.match(/\((\d{5})\)\s*(.*?)\s*(?:0\d{1,2}-\d{3,4}-\d{4}|$)/)
   const head = s.split(/\(\d{5}\)/)[0].replace(/기본 배송지|배송지 변경|선택된 배송지/g, ' ')
