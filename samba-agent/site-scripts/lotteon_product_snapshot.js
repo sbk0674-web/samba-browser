@@ -59,7 +59,8 @@ for(let step=0;step<5;step++){
   const live=opts.filter(o=>!so(o.text));
   let m=null;
   if(args.size){let best=0;for(const o of live){const s=sc(o.text,args.size);if(s>best){best=s;m=o;}}}
-  if(!m&&live.length===1&&!(wantsColor&&/색상|컬러|color/i.test(lab(combo))))m=live[0];
+  // 색상이 하나뿐이고 이름이 품번 코드('108542_01')면 그것을 고른다 — 색 글자가 없어 주문 색과 대조할 수 없다(실기 09-30 푸마)
+  if(!m&&live.length===1&&(!(wantsColor&&/색상|컬러|color/i.test(lab(combo)))||!/[가-힣]{2,}|[A-Za-z]{3,}/.test(cl(live[0].text))))m=live[0];
   if(!m&&wantsColor&&/색상|컬러|color/i.test(lab(combo))){r.options=opts.map(o=>o.text);r.note='option not matched: 색상 — 주문 옵션과 맞는 색상이 없다';proceed=false;break;}
   if(!m&&!args.size)m=live[0];
   if(m){picked.push(cl(m.text));await page.click(m.id);await sleep(700);}
