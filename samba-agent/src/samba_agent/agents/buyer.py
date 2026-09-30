@@ -1621,8 +1621,10 @@ class BuyerAgent(AgentBase):
             args['allow_department'] = True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
         if source.required_seller:
             args['required_seller'] = source.required_seller  # 롯데온: 롯데백화점 판매 상품만(사용자 2026-09-27)
-        if source.gift_unless_poison and not is_poison_seller(a.order.seller):
-            args['gift'] = True  # 롯데온: 포이즌 외에는 '선물하기' 주문서로 들어간다(사용자 2026-09-27)
+        if source.gift_unless_poison and not is_poison_seller(a.order.seller) and self.order_type_of(a.order) == 'gift':
+            # 롯데온: 포이즌 외에는 '선물하기' 주문서로 들어간다(사용자 2026-09-27). 제주·도서산간·배대지처럼 직배·까대기로
+            # 판정된 주문은 바로구매 주문서로 연다(실기 2026-09-30 제주 선물 불가)
+            args['gift'] = True
         args.update(extra or {})
         check = snapshot_problem(a.order.option, lambda sel: self._selected_matches(sel, a.order.option))
         base_check = probe_snapshot_problem(a.order.option, check) if probe else check
