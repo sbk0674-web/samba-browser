@@ -23,7 +23,7 @@ if(saved){
   if(!labs.length)labs=L.filter(e=>e.role!=='radio'&&e.text&&e.text.includes(name));
   if(!labs.length){const vt=await text();const er=(vt.match(/[^ ]{0,12}\s?[^ ]{0,12}\s?(?:입력해|선택해|확인해|동의해)\s?주세요/)||[''])[0];return{...R,note:'저장 뒤 목록에 없음'+(er?' — '+er:'')+' 첫 라벨 형태: '+((L.find(e=>e.role==='label')||{}).text||'').replace(/[가-힣]/g,'가').replace(/\d/g,'0').slice(0,60)+' / 첫 라디오: '+((L.find(e=>e.role==='radio')||{}).text||'').replace(/[가-힣]/g,'가').replace(/\d/g,'0').slice(0,60)+' / 새 등록 입력칸 '+(await els(null,'[role=dialog]')).filter(e=>e.role==='textbox').length+'개'};}
   const lid=labs[labs.length-1].id;const rid=Math.max(...L.filter(e=>e.role==='radio'&&e.id<lid).map(e=>e.id),0);
-  if(rid){await page.click(rid);await sleep(800);}
+  if(rid){await page.click(rid);await sleep(800);const rv=(await els(null,'[role=dialog]')).find(e=>e.id===rid);if(!rv||rv.value!=='on'){await page.click(lid);await sleep(800);}}
   const done=(await els('선택완료')).find(e=>e.role==='button'&&e.text==='선택완료');
   if(!done)return{...R,note:'선택완료 없음'};
   await page.click(done.id);await sleep(3000);

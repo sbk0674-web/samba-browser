@@ -19,19 +19,23 @@ let b=(await els('배송지 선택하기')).find(e=>e.role==='button'&&/배송�
 if(!b)return{...R,note:'배송지 선택 버튼 없음'};
 await page.click(b.id);await sleep(2500);
 let L=await els(null,'[role=dialog]');let tx=await text('[role=dialog]');
+// 창 글자가 목록을 다 못 담으면(실기 2026-09-30) 페이지 전체 글자에서 도로명을 본다
+if(!tx.includes(name))tx=await text();
 const labs=L.filter(e=>e.role==='label'&&e.text.includes(name));
 if(!(labs.length&&tx.replace(/\s/g,'').includes(road))){
   const c=L.find(e=>e.role==='button'&&e.text==='닫기');if(c)await page.click(c.id);
-  return{...R,note:'목록에 같은 배송지 없음'};
+  return{...R,note:'목록에 같은 배송지 없음(이름 라벨 '+labs.length+'개, 이름 글자 '+(tx.split(name).length-1)+'곳, 도로명 '+(tx.replace(/\s/g,'').includes(road)?'있음':'없음 '+road.replace(/[가-힣]/g,'가').replace(/\d/g,'0'))+')'};
 }
 const lid=labs[labs.length-1].id;const rid=Math.max(...L.filter(e=>e.role==='radio'&&e.id<lid).map(e=>e.id),0);
 if(!rid)return{...R,note:'배송지 라디오 없음'};
 await page.click(rid);await sleep(800);
+// 라디오가 안 눌리면(숨은 input) 이름 라벨을 누른다(실기 2026-09-30: 선택완료 뒤에도 '배송지 선택하기' 그대로)
+const rv=(await els(null,'[role=dialog]')).find(e=>e.id===rid);if(!rv||rv.value!=='on'){await page.click(lid);await sleep(800);}
 const done=(await els('선택완료')).find(e=>e.role==='button'&&e.text==='선택완료');
 if(!done)return{...R,note:'선택완료 없음'};
 await page.click(done.id);await sleep(3000);
 tx=await text();
-if(!tx.includes(name))return{...R,note:'선택 뒤 주문서에 받는 분 이름 없음'};
+if(!tx.includes(name)){const mk=name[0]+'*'+name.slice(2),i=tx.indexOf('받는 분');if(tx.includes(mk))R.masked=1;return{...R,note:'선택 뒤 주문서에 받는 분 이름 없음(가린 이름 '+(tx.split(mk).length-1)+'곳, 성+별표 '+(tx.split(name[0]+'*').length-1)+'곳, 도로명 '+(tx.replace(/\s/g,'').includes(road)?'있음':'없음')+') '+(()=>{const j=tx.indexOf('주소로 보내기');return tx.slice(j,j+160).replace(/[가-힣]/g,c=>'받는분주소로보내기배송지선택하기수정빠른선물휴대폰번호'.includes(c)?c:'○').replace(/\d/g,'0')})()};return{...R,note:'선택 뒤 주문서에 받는 분 이름 없음 — '+(i<0?'받는 분 글자 없음':tx.slice(i,i+40).replace(/[가-힣]/g,'가').replace(/\d/g,'0'))};}
 let cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');
 if(cb&&cb.value!=='on'){await page.click(cb.id);for(let k=0;k<8&&(!cb||cb.value!=='on');k++){await sleep(800);cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');}}
 if(!cb||cb.value!=='on')return{...R,name:name0,address:addr,note:'빠른 선물 못 켬'};
