@@ -1295,6 +1295,38 @@ class BuyerAgent(AgentBase):
                 except AgentFailure:
                     pass  # 이미 닫혔거나 못 닫아도 로그인 결과는 바꾸지 않는다
 
+    def _login_product_host(self, account: str, product_url: str) -> bool:
+        """상품 도메인이 홈과 다르면 그 도메인 첫 페이지에서 로그인한다. 로그인이 확인되면 True.
+
+        같은 사이트라도 하위 도메인마다 로그인 쿠키가 따로 잡히는 곳이 있다(SSG: pay.ssg.com 로그인 ↔
+        shinsegaemall.ssg.com 비로그인).
+        """
+        host = urlparse(product_url).hostname or ''
+        if not host or host == (urlparse(self._home()).hostname or ''):
+            return False
+        opened: list[str] = []
+        try:
+            out = self.tool('new_tab', url=f'https://{host}/', profile=account)
+            m = re.search(r'tab ([0-9a-fA-F-]{8,})', out)
+            if m:
+                opened.append(m.group(1))
+            self.tool('wait', ms=_LOGIN_SETTLE_MS)
+            out = self.tool('login', accountLabel=account).strip()
+            if out.startswith(LOGIN_SUBMITTED):
+                self.tool('wait', ms=_LOGIN_SETTLE_MS)
+                out = self.tool('login', accountLabel=account).strip()
+            ok = out.startswith(ALREADY_SIGNED_IN)
+            self.note('로그인', f'{account}: {host} 에서 {"로그인됨" if ok else "로그인 실패"}')
+            return ok
+        except AgentFailure:
+            return False
+        finally:
+            for tab_id in opened:
+                try:
+                    self.tool('close_tab', id=tab_id)
+                except AgentFailure:
+                    pass
+
     def _open_home(self, account: str, opened: list[str]) -> None:
         """계정 프로필로 홈 탭을 열고 그 탭 id 를 적어 둔다(끝나면 닫는다)."""
         out = self.tool('new_tab', url=self._home(), profile=account)
@@ -1688,6 +1720,12 @@ class BuyerAgent(AgentBase):
                 snap = self.script_json(
                     source.snapshot_script, {**args, 'size': live[0]}, goal=goal, check=base_check
                 )
+        if snapshot_login_required(snap) and self._login_product_host(account, str(snap.get('product_url') or '')):
+            # 홈(pay.ssg.com)은 로그인돼 있는데 상품 도메인(shinsegaemall.ssg.com)은 따로 로그인해야 했다 — 그 도메인에서
+            # 로그인한 뒤 한 번 더 연다(실기 2026-10-01 SSG 신세계몰 상품: 바로구매가 로그인 팝업을 띄움)
+            if snap.get('product_tab'):
+                self._close_product_tabs(account, str(snap.get('product_url') or ''))
+            snap = self.script_json(source.snapshot_script, args, goal=goal, check=base_check)
         if snap.get('product_tab'):
             # 주문서가 안 열리면 스크립트는 사이트 알림(구매 한도 등)이 결과에 붙도록 상품 탭을 남긴다 — 여기서 닫는다
             self._close_product_tabs(account, str(snap.get('product_url') or ''))

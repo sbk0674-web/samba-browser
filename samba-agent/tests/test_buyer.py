@@ -1714,3 +1714,32 @@ def test_xxl_matches_2xl_by_size_letters():
 
     assert size_letters('그레이 XXL') == size_letters('2XL') == {'2XL'}
     assert size_letter_options(['S (품절)', 'M (품절)', 'L', 'XL', '2XL'], '그레이 XXL') == ['2XL']
+
+
+def test_상품_도메인이_홈과_다르면_그_도메인에서_로그인한다():
+    """실기 2026-10-01 SSG: pay.ssg.com 은 로그인돼 있는데 신세계몰 상품의 바로구매가 로그인 팝업을 띄웠다."""
+    from samba_agent.agents import buyer as buyer_mod
+
+    agent = buyer_mod.BuyerAgent.__new__(buyer_mod.BuyerAgent)
+    agent.spec = type('S', (), {'name': 'buyer.ssg'})()
+    agent.note = lambda *_: None
+    calls: list[tuple[str, dict[str, object]]] = []
+    answers = iter([buyer_mod.LOGIN_SUBMITTED, buyer_mod.ALREADY_SIGNED_IN + ' (로그아웃)'])
+
+    def tool(name: str, /, **args: object) -> str:
+        calls.append((name, args))
+        if name == 'new_tab':
+            return 'ok: tab 0aba7b25-ae69-4d40-ab06-c0aa4d0cfa47'
+        if name == 'login':
+            return next(answers)
+        return 'ok'
+
+    agent.tool = tool
+    url = 'https://shinsegaemall.ssg.com/item/itemView.ssg?itemId=1'
+    assert agent._login_product_host('edelvise06', url) is True
+    assert ('new_tab', {'url': 'https://shinsegaemall.ssg.com/', 'profile': 'edelvise06'}) in calls
+    assert calls[-1] == ('close_tab', {'id': '0aba7b25-ae69-4d40-ab06-c0aa4d0cfa47'})
+    # 홈과 같은 도메인이면 다시 로그인하지 않는다
+    calls.clear()
+    assert agent._login_product_host('edelvise06', 'https://pay.ssg.com/myssg/x') is False
+    assert calls == []
