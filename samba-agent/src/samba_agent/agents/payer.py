@@ -962,6 +962,11 @@ class PayerAgent(AgentBase):
         if not entered:
             # 키패드가 끝내 없었다 — 앱은 아무것도 누르지 않았다. 결제 확인으로 넘기면 '결제 여부 불명'으로 오판한다
             self.note('키패드 입력', mask_text(f'키패드 없음({calls}회 확인): {out[:160]}'))
+            # 그때 화면(주소·제목·앞 글자)을 남긴다 — 로그인 창·확인 버튼 창 등 원인을 바로 알 수 있게(실기 2026-09-30)
+            try:
+                self.note('키패드 없음 화면', mask_text(str(self.tool('list_tabs'))[:400]))
+            except AgentFailure:
+                pass
             raise AgentFailure(
                 'needs_human',
                 f'결제 비밀번호 키패드가 뜨지 않았다({calls}회 확인) — 비밀번호를 넣지 않았다(결제 안 됨): '
