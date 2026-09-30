@@ -12,6 +12,12 @@ const s = String(g.tree || '').split('\n').find(l => /^\[\d+\] button "/.test(l)
 if (!s) return { ok: false, note: '저장 버튼 없음' }
 await Promise.race([page.click(parseInt(s.slice(1))).catch(() => {}), sleep(3000)])
 await sleep(2500)
+// 저장이 알림(예: 상세주소 40자 초과)으로 막히면 폼이 남는다 — 성공으로 돌려주면 주소록에 없는 채로 되읽는다(실기 2026-09-30)
+if ((await tabs.list()).some(t => t.id === form.id)) {
+  const ft = String((await page.get({})).tree || '')
+  const dlg = (ft.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''
+  return { ok: false, note: '저장 뒤에도 배송지 폼이 남음' + (dlg ? '(' + dlg + ')' : ' — 입력값 확인 알림일 수 있음') }
+}
 for (const t of await tabs.list()) {
   if (t.kind === 'popup' && /member\.ssg\.com|selectShpploc/.test(t.url || '')) { try { await tabs.close(t.id) } catch (e) {} }
 }

@@ -73,7 +73,9 @@ await sleep(700)
 const dtl = await first('#addrDtlInput, input[name="dtlAddr"]')
 // 상세 칸이 비면 주소 끝의 호·동·층(실기 2026-09-29)
 const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || [])[1])
-const dtlText = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
+const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
+// SSG 상세주소는 40자까지 — 넘으면 폼 저장이 '상세주소를 40자 이내로' 알림으로 막힌다(실기 2026-09-30). 괄호 참고항목부터 뺀다
+const dtlText = (dtlRaw.length > 40 ? nz(dtlRaw.replace(/\([^)]*\)?/g, ' ')) : dtlRaw).slice(0, 40).trim()
 if (dtl >= 0 && dtlText) await page.type(dtl, dtlText, false)
 if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업이 아닌 곳에서 저장 버튼을 찾으려 했다 — 멈춤' }
 let ok = await first('#addrDtlBtn')
@@ -101,7 +103,7 @@ R.name = val(nmId) || null
 const vals = lines.filter(l => /textbox/.test(l) && !l.startsWith('[' + nmId + ']')).map(l => (l.match(/value="([^"]*)"/) || [])[1]).filter(v => v && v.length >= 2)
 R.address = vals.find(v => /(로|길)\s*\d|(동|읍|면|리)\s+\d/.test(v)) || null
 R.postal_code = vals.find(v => /^\d{5}$/.test(v)) || null
-R.address_detail = (args.address_detail && vals.find(v => v.startsWith(nz(args.address_detail)))) || null
+R.address_detail = (dtlText && vals.find(v => v.startsWith(dtlText))) || null
 R.ok = !!(R.name && R.address)
 if (!R.ok) R.note = '폼 되읽기 실패(이름 또는 주소)'
 return R
