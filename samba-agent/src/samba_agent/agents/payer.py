@@ -986,8 +986,15 @@ class PayerAgent(AgentBase):
             self.note('키패드 입력', mask_text(f'키패드 없음({calls}회 확인): {out[:160]}'))
             # 그때 화면(주소·제목·앞 글자)을 남긴다 — 로그인 창·확인 버튼 창 등 원인을 바로 알 수 있게(실기 2026-09-30)
             try:
-                self.note('키패드 없음 화면', mask_text(str(self.tool('list_tabs'))[:1600]))
-            except AgentFailure:
+                listed = json.loads(str(self.tool('list_tabs')))
+                seen = [
+                    f"{t.get('kind')}{'*' if t.get('active') else ''}:{str(t.get('url') or '').split('//')[-1][:50]}"
+                    f"|{str(t.get('title') or '')[:14]}"
+                    for t in (listed if isinstance(listed, list) else [])
+                    if isinstance(t, dict) and (t.get('kind') == 'popup' or t.get('active'))
+                ]
+                self.note('키패드 없음 화면', mask_text(' , '.join(seen))[:280])
+            except (AgentFailure, ValueError):
                 pass
             raise AgentFailure(
                 'needs_human',

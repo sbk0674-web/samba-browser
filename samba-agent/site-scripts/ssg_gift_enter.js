@@ -21,7 +21,8 @@ if (sel) {
   await page.click(idL(sel))
   await sleep(1500)
   ls = [...await lines({ interactive: true }), ...await lines({ query: opt || '선택' })]
-  const cand = ls.filter(l => /^\[\d+\] link "/.test(l) && lab(l).replace(/\s*\(남은수량[^)]*\)\s*$/, '') === opt)
+  // 전체 목록·검색 결과에 같은 항목이 두 번 잡힌다 — 요소 번호로 하나씩만
+  const cand = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] link "/.test(l) && lab(l).replace(/\s*\(남은수량[^)]*\)\s*$/, '') === opt)
   if (cand.length !== 1) {
     const all = ls.filter(l => /^\[\d+\] link "/.test(l) && /남은수량|품절|매진/.test(l)).map(lab).slice(0, 12)
     return { ...R, error: 'option_not_found', note: '옵션 ' + opt + ' 을 하나로 못 찾음(' + cand.length + ')', options: all }
