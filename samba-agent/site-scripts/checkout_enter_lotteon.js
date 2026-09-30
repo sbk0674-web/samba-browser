@@ -45,6 +45,9 @@ try{
     if(tb&&args.biz_no&&cur!==String(args.biz_no)){await page.type(parseInt(tb.slice(1)),String(args.biz_no),true);await sleep(500);receipt='지출증빙용(번호 입력)';}
   }
 }catch(e){receipt='확인 실패';}
+// 선물 주문서의 '보내는 분 이름'이 비면 결제하기가 '이름을 입력해 주세요'로 막힌다(실기 2026-09-30) — 머리글의 로그인 이름(○○님)으로 채운다
+try{const st=(await page.get({query:'입력한 이름으로 선물'})).tree.split('\n').find(l=>/^\[\d+\] textbox "입력한 이름으로 선물/.test(l));
+  if(st&&!/value="[^"]+"/.test(st)){const hn=((await page.get({query:'님로그아웃'})).tree.match(/([가-힣A-Za-z]{2,10})님\s*로그아웃/)||[])[1];if(hn){await page.type(parseInt(st.slice(1)),hn,false);await sleep(500);}}}catch(e){}
 const payId = await page.idOf('결제하기');
 if (payId<0) return {ok:false, error:'결제하기 button not found', method};
 await page.click(payId);
