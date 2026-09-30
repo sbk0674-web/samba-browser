@@ -5,6 +5,11 @@ const simplePays=['카카오페이','네이버페이','토스페이','삼성페�
 // 구매가 만든 주문서 탭(args.tab)으로 먼저 옮긴다 — 주문서 탭이 여럿이면 받는 분을 지정하지 않은 다른 선물 주문서에서
 // 결제하기를 눌러 '이름을 입력해 주세요'로 막혔다(실기 2026-09-30)
 if (args.tab && (await tabs.list()).some(t => t.id === String(args.tab))) await tabs.switch(String(args.tab));
+// 주문서 탭이 둘 이상이면 배송지가 고른 쪽을 쓴다 — 구매 탭(args.tab)에 '배송지를 선택해 주세요'가 남고 배송지는 다른 주문서 탭에 들어간 적이 있다(실기 2026-09-30)
+{ const ot=(await tabs.list()).filter(t=>/orderSheet/.test(t.url||''));
+  // 좋은 주문서 = '받는 분 주소로 보내기'가 켜져 있고 '배송지를 선택해 주세요'가 없다(전화번호 모드면 배송지가 없는 것)
+  const good=async()=>{const T=String((await page.get({})).tree||'');const r=T.split('\n').find(l=>/radio "받는 분 주소로/.test(l));return !r||(/value="on"/.test(r)&&!/배송지를 선택해 ?주세요/.test(T));};
+  if(ot.length>1&&!(await good())){for(const t of ot){await tabs.switch(t.id);await sleep(300);if(await good())break;}}}
 const url = await page.url();
 if (!/orderSheet/.test(url)) return {ok:false, error:'no lotteon order sheet open in current tab'};
 // 결제 단계가 아니면(선물·직배 주문서 첫 화면) '계속하기'로 넘어간다
@@ -51,6 +56,10 @@ try{
 // 선물 주문서의 '보내는 분 이름'이 비면 결제하기가 '이름을 입력해 주세요'로 막힌다(실기 2026-09-30) — 머리글의 로그인 이름(○○님)으로 채운다
 try{const st=(await page.get({query:'입력한 이름으로 선물'})).tree.split('\n').find(l=>/^\[\d+\] textbox "입력한 이름으로 선물/.test(l));
   if(st&&!/value="[^"]+"/.test(st)){const hn=((await page.get({query:'님로그아웃'})).tree.match(/([가-힣A-Za-z]{2,10})님\s*로그아웃/)||[])[1];if(hn){await page.type(parseInt(st.slice(1)),hn,false);await sleep(500);}}}catch(e){}
+// 선물 주문서는 결제수단·포인트를 바꾸면 '전화번호로 보내기'로 돌아가기도 한다 — 그러면 받는 분 이름 칸이 비어 막힌다(실기 2026-09-30).
+// '받는 분 주소로 보내기'가 꺼져 있으면 다시 켠다(고른 배송지는 그대로 남는다)
+try{const ra=(await page.get({query:'받는 분 주소로 보내기'})).tree.split('\n').find(l=>/^\[\d+\] radio "받는 분 주소로/.test(l));
+  if(ra&&!/value="on"/.test(ra)){await page.click(parseInt(ra.slice(1)));await sleep(1500);}}catch(e){}
 const payId = await page.idOf('결제하기');
 if (payId<0) return {ok:false, error:'결제하기 button not found', method};
 await page.click(payId);
@@ -62,7 +71,12 @@ if (/네이버페이/.test(method)) {
 try{const T=String((await page.get({})).tree||'');if(/^URL: [^\n]*orderSheet/.test(T)){const m=T.match(/사업자등록번호[^\n]{0,25}입력해 ?주세요/);if(m)after='주문서에서 막힘: '+m[0];
 // 네이버페이는 같은 탭이 pay.naver.com 으로 넘어가야 한다 — 결제하기 뒤에도 주문서면 결제창이 안 열린 것이다(실기 2026-09-30: 키패드 없음 2회).
 // 성공으로 돌려주면 하네스가 주문서에서 키패드를 30초 찾다 멈춘다 — 화면의 안내 문구를 붙여 실패로 돌려준다
-else if(/네이버페이/.test(method)){const P=T.split('PAGE TEXT')[1]||'';const g=(P.match(/[^\n.]{0,30}(?:해 ?주세요|하세요|불가|없습니다|초과)[^\n.]{0,10}/)||[''])[0];after='결제하기 뒤에도 주문서(네이버페이 창 안 열림)'+(g?': '+g.trim():'');}}}catch(e){}
+else if(/네이버페이/.test(method)){const P=T.split('PAGE TEXT')[1]||'';const g=(P.match(/[^\n.]{0,30}(?:해 ?주세요|하세요|불가|없습니다|초과)[^\n.]{0,10}/)||[''])[0];after='결제하기 뒤에도 주문서(네이버페이 창 안 열림)'+(g?': '+g.trim():'');
+// 진단: 주문서 탭 수·지금 탭이 구매 탭인지·주소로 라디오·보내는 분/받는 분 칸 값 유무
+const L2=await tabs.list();const os=L2.filter(t=>/orderSheet/.test(t.url||''));const cur=L2.find(t=>t.active);
+const rl=T.split('\n').filter(l=>/radio "(받는 분 주소로|전화번호로)/.test(l)).map(l=>(l.match(/radio "([^"]{0,10})/)||[])[1]+(/value="on"/.test(l)?'=켬':'=끔'));
+const tb=T.split('\n').filter(l=>/textbox "[^"]*(이름|받는 분)/.test(l)).map(l=>(l.match(/textbox "([^"]{0,14})/)||[])[1]+(/value="[^"]+"/.test(l)?'=있음':'=빈칸'));
+after+=' [주문서탭 '+os.length+', 구매탭'+(cur&&args.tab&&cur.id===String(args.tab)?'=지금':'≠지금')+', '+rl.join('/')+', '+tb.join('/')+']';}}}catch(e){}
 if(after)return{ok:false,error:after,method,receipt};
 const tbs = await tabs.list();
 const popup = tbs.find(t=>t.kind==='popup');
