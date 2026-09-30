@@ -958,6 +958,13 @@ def sold_out_option_listed(options: list[str], wanted: str | None) -> bool:
     return bool(sold_out_option_matches(options, wanted))
 
 
+def margin_pct_rounded(raw: float) -> float:
+    """마진율을 소수 첫째 자리로 줄인다. 단 0 이 아닌 값이 0.0 으로 줄면 부호가 사라진다 —
+    (실기 2026-09-30: 정산금이 원가보다 109원 많은 +0.04% 가 0.0 이 되어 '0% 초과' 검사에 걸려 취소됐다) 그때는 더 자세히 둔다."""
+    r = round(raw, 1)
+    return round(raw, 4) if r == 0 and raw != 0 else r
+
+
 def order_qty_problem(want: int, snap: dict[str, object]) -> str | None:
     """주문서가 열린 스냅샷의 수량이 주문 수량과 다르면 그 사유, 같거나 주문서가 없으면 None.
 
@@ -3267,7 +3274,7 @@ class BuyerAgent(AgentBase):
         if cost <= 0 or sale <= 0:
             return snap_margin
         if order.revenue > 0:
-            margin = round((order.revenue - cost) / sale * 100, 1)
+            margin = margin_pct_rounded((order.revenue - cost) / sale * 100)
             self.note(
                 '마진 계산',
                 f'(정산금 {order.revenue:,.0f} - 원가 {cost:,.0f}) ÷ 매출 {sale:,.0f} → {margin}%',
@@ -3275,7 +3282,7 @@ class BuyerAgent(AgentBase):
             return margin
         if snap_margin > 0:
             return snap_margin
-        margin = round((sale - cost) / sale * 100, 1)
+        margin = margin_pct_rounded((sale - cost) / sale * 100)
         self.note(
             '마진 계산',
             f'판매가 {sale:,.0f} - 원가 {cost:,.0f} → {margin}% (정산금 미확인 근사)',

@@ -1687,3 +1687,13 @@ def test_선물하기가_막힌_지역_주소():
     assert gift_blocked_address('제주특별자치도 제주시 봉개북3길 1')
     assert gift_blocked_address('경상북도 울릉군 울릉읍 도동리 1')
     assert not gift_blocked_address('서울특별시 강남구 테헤란로 1')
+
+
+def test_margin_pct_rounded_keeps_tiny_positive():
+    from samba_agent.agents.buyer import margin_pct_rounded
+
+    # 정산금 272,161 - 원가 272,052 = +109원 → 0.035% — 0.0 으로 줄면 '0% 초과' 검사에 걸린다
+    assert margin_pct_rounded((272161 - 272052) / 307700 * 100) > 0
+    assert margin_pct_rounded(-0.03) < 0
+    assert margin_pct_rounded(7.5896) == 7.6
+    assert margin_pct_rounded(0.0) == 0.0
