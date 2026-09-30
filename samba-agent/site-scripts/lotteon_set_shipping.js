@@ -31,9 +31,9 @@ if(rr.length){
   if(!add)return{...R,error:'gift-add-button-nf'};
 }else{
   // 주문서가 늦게 그려지면 버튼이 아직 없다 — 몇 초 다시 찾는다(실기 2026-09-29: change-button-nf 2건)
-  const fa=async()=>L(await E('새 배송지 추가'),e=>/새 ?배송지 ?추가/.test(e.text)&&e.role==='button');
+  const fa=async()=>(await E('새 배송지 추가')).filter(e=>/새 ?배송지 ?추가/.test(e.text)&&e.role==='button')[0]||null;
   // '변경'은 배송지·배송요청사항 두 개 — 첫 번째(배송지)를 누른다(마지막 것은 요청사항 창, 실기 2026-09-30)
-  const fc=async()=>(await E('변경')).filter(e=>/^(배송지\s*)?변경$/.test(String(e.text).trim())&&e.role==='button')[0]||null;
+  const fc=async()=>(await E('변경')).filter(e=>/^(배송지\s*)?변경$/.test(String(e.text).trim())&&e.role==='button').sort((a,b)=>a.id-b.id)[0]||null;
   let ch=null;
   for(let i=0;i<8&&!add&&!ch;i++){add=await fa();if(!add)ch=await fc();if(!add&&!ch)await sleep(1000);}
   if(!add){
@@ -43,7 +43,8 @@ if(rr.length){
       const at=String(await page.url()).replace(/^https?:\/\//,'').split('?')[0].slice(0,60);
       return{...R,error:'change-button-nf @'+at+' ['+seen.join('|')+']'};
     }
-    await page.click(ch.id);await page.waitFor('새 배송지 추가',8000);add=await fa();
+    // '새 배송지 추가'는 글자가 아니라 버튼 이름에만 있어 waitFor(글자)로는 못 기다린다 — 버튼을 몇 번 다시 찾는다
+    await page.click(ch.id);for(let i=0;i<8&&!add;i++){await sleep(800);add=await fa();}
   }
   if(!add)return{...R,error:'add-address-button-nf'};
 }
