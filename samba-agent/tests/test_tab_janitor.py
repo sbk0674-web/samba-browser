@@ -28,3 +28,16 @@ def test_다른_레인_탭은_닫지_않는다():
     bridge.tabs = [{'id': 'old'}, {'id': 'mine'}, {'id': 'fp1', 'lane': 'fp'}, {'id': 'pop', 'lane': 'fp'}]
     assert janitor.close_new(before) == 1
     assert bridge.closed == ['mine']
+
+
+def test_시작_전_정리도_다른_레인_탭은_닫지_않는다(monkeypatch):
+    # 실기 2026-09-30: 새 작업 시작 때 수동 재현 중이던 주문서 탭(mine 레인)이 닫혔다
+    monkeypatch.delenv('SAMBA_KEEP_TAB_HOSTS', raising=False)
+    bridge = _Bridge(
+        [
+            {'id': 'a', 'url': 'https://www.fashionplus.co.kr/order/1'},
+            {'id': 'b', 'url': 'https://www.fashionplus.co.kr/order/2', 'lane': 'mine'},
+        ]
+    )
+    assert TabJanitor(bridge).close_leftovers(keep_hosts=()) == 1  # type: ignore[arg-type]
+    assert bridge.closed == ['a']

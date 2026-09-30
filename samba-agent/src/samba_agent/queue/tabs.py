@@ -86,6 +86,10 @@ class TabJanitor:
             url = str(t.get('url') or '')
             if not tab_id or any(h in url for h in keep_hosts):
                 continue
+            # 다른 레인(사람·다른 세션의 수동 작업)이 연 탭은 건드리지 않는다 — close_new 와 같은 규칙
+            # (실기 2026-09-30: 새 작업 시작 때 수동 재현 중이던 주문서 탭이 닫혀 결과를 못 봤다)
+            if t.get('lane'):
+                continue
             try:
                 self._bridge.call('close_tab', id=tab_id)
                 closed += 1
