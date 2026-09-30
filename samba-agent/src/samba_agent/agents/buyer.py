@@ -1195,6 +1195,8 @@ SHIPPING_ARG_FIELDS = ('name', 'address', 'address_detail', 'postal_code')
 
 # 배송 연락처 — 앱 fill_secret 이 키마스터 신원정보의 이 필드로 전화 칸을 채운다
 PHONE_SECRET_ITEM = 'identity'
+# 기존 배송지 선택이 프레임 시간 초과로 실패했을 때 다시 고르기 전 기다리는 시간(ms)
+SELECT_SHIPPING_RETRY_MS = 3000
 PHONE_SECRET_FIELD = 'identity.phone'
 # 앱 fill_secret 이 아는 전화 형식(src/main/agent/tools.ts FILL_FORMATS)
 PHONE_FILL_FORMATS = ('phone-first', 'phone-mid', 'phone-last', 'phone-rest', 'digits')
@@ -3519,23 +3521,32 @@ class BuyerAgent(AgentBase):
         }
         if account:
             args['profile'] = account
-        try:
-            out = self.script_json(
-                f'{source.key}_select_shipping',
-                args,
-                goal=(
-                    '주문서 배송지 변경 목록에서 이름·주소가 args 와 같은 기존 배송지를 골라 주문서에 반영하고, '
-                    '반영된 이름·주소를 되읽어 ok:true 와 함께 돌려준다. 목록에 정말 없을 때만 ok:false. 새 배송지는 만들지 않는다.'
-                ),
-                check=lambda o: (
-                    None
-                    if o.get('ok') and shipping_matches(shipping, o)
-                    else f'기존 배송지 선택 실패: note={o.get("note")}'
-                ),
-            )
-        except AgentFailure as e:
-            self.note('배송지', mask_text(f'기존 항목 선택 불가({e.reason[:60]}) — 신규 입력으로'))
-            return False
+        out: dict[str, object] = {}
+        for attempt in range(2):
+            try:
+                out = self.script_json(
+                    f'{source.key}_select_shipping',
+                    args,
+                    goal=(
+                        '주문서 배송지 변경 목록에서 이름·주소가 args 와 같은 기존 배송지를 골라 주문서에 반영하고, '
+                        '반영된 이름·주소를 되읽어 ok:true 와 함께 돌려준다. 목록에 정말 없을 때만 ok:false. 새 배송지는 만들지 않는다.'
+                    ),
+                    check=lambda o: (
+                        None
+                        if o.get('ok') and shipping_matches(shipping, o)
+                        else f'기존 배송지 선택 실패: note={o.get("note")}'
+                    ),
+                )
+                break
+            except AgentFailure as e:
+                # 프레임 호출 시간 초과는 PC 가 바쁠 때 난다 — 반쯤 연 배송지 창에 신규 입력을 하면 폼이 꼬인다
+                # (실기 2026-09-30 패션플러스: '폼 이름이 다르다'). 한 번만 다시 고른다
+                if attempt == 0 and 'timed out' in e.reason:
+                    self.note('배송지', '기존 항목 선택 시간 초과 — 한 번 더')
+                    self.tool('wait', ms=SELECT_SHIPPING_RETRY_MS)
+                    continue
+                self.note('배송지', mask_text(f'기존 항목 선택 불가({e.reason[:60]}) — 신규 입력으로'))
+                return False
         if not out.get('ok') or not shipping_matches(shipping, out):
             self.note(
                 '배송지',
