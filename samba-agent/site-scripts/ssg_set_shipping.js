@@ -1,6 +1,5 @@
-// SSG 배송지: 변경 → 목록(shpplocList) → 추가(shpplocForm) → 우편번호(zipcd) → 받는분.
-// gift 는 열린 목록 팝업을 쓴다. 전화는 비우고 칸 번호를 돌려준다(하네스 fill_secret). 저장은 다른 스크립트.
-// 인자 {name,address,address_detail?,gift?,tab?} 반환 {ok,name,address,address_detail,phone_field_ids,form_popup,note}
+// SSG 배송지: 목록→추가 폼→우편번호→받는분. gift 는 열린 목록 팝업. 전화는 칸 번호만(fill_secret), 저장은 별도.
+// 인자 {name,address,address_detail?,gift?,tab?} 반환 {ok,name,address(_detail),phone_field_ids,form_popup,note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const OF = /pay\.ssg\.com\/(order|payment)|ssg\.com\/order\//
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(500) } return '' }
@@ -64,17 +63,17 @@ if (pickBtn < 0) {
   const rm = a0.match(/([가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?)/)
   const parts = a0.split(' ')
   const region = parts.slice(1, 3).filter(p => /(시|군|구|읍|면|동)$/.test(p)).join(' ')
-  const qs = [...new Set([rm && region ? region + ' ' + rm[1] : '', rm ? rm[1] : '', a0.replace(/^\S+\s+/, '')].filter(q => q && q !== nz(args.address)))]
+  const jb = (a0.match(/^(.*?[가-힣\d]+[동리가]\s*\d+(?:-\d+)?)(?=\s|$)/) || [])[1]
+  const qs = [...new Set([rm && region ? region + ' ' + rm[1] : '', rm ? rm[1] : '', jb, jb && jb.replace(/^\S+ /, ''), a0.replace(/^\S+\s+/, '')].filter(q => q && q !== nz(args.address)))]
   for (const q2 of qs) { if (pickBtn >= 0) break; const k2 = await first('input[name="searchKeyword"]'); if (k2 < 0) break; await page.type(k2, q2, true); for (let i = 0; i < 8 && pickBtn < 0; i++) { await sleep(800); pickBtn = await first('button[onclick*="showZipcdDtl"]') } }
 }
 if (pickBtn < 0) return { ...R, note: '주소 검색 결과 없음' }
 await page.click(pickBtn)
 await sleep(700)
 const dtl = await first('#addrDtlInput, input[name="dtlAddr"]')
-// 상세가 비면 주소 끝의 호·동·층
+// 상세 없으면 끝 호·동·층; 지번은 번지까지
 const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || [])[1])
 const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
-// 상세 40자 제한 — 괄호부터 뺀다
 const dtlText = (dtlRaw.length > 40 ? nz(dtlRaw.replace(/\([^)]*\)?/g, ' ')) : dtlRaw).slice(0, 40).trim()
 if (dtl >= 0 && dtlText) await page.type(dtl, dtlText, false)
 if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업 아님 — 멈춤' }
@@ -86,7 +85,6 @@ for (let i = 0; i < 10 && (await tabs.list()).some(t => t.id === zip.id); i++) a
 if ((await tabs.list()).some(t => t.id === zip.id)) { const zt = await tree({}); const dlg = (zt.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''; try { await tabs.close(zip.id) } catch (e) {} return { ...R, note: '우편번호 팝업 저장이 안 닫힘' + (dlg ? '(' + dlg + ')' : '') + (dtlText ? '' : ' — 상세주소 없음') } }
 await tabs.switch(form.id)
 await sleep(500)
-// 폼 상세칸이 40자 넘으면 줄인다
 { const V = l => (l.match(/value="([^"]*)"/) || [])[1] || ''
   const dl = dtlText && (await tree({ interactive: true })).split('\n').find(l => /textbox/.test(l) && V(l).startsWith(dtlText.slice(0, 6)))
   if (dl && V(dl).length > 40) await page.type(parseInt(dl.slice(1)), nz(V(dl).replace(/\([^)]*\)?/g, ' ')).slice(0, 40).trim(), false) }
