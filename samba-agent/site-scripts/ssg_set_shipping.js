@@ -1,6 +1,6 @@
-// SSG 배송지 입력(2026-09-27): 주문서 '배송지 변경' → 목록(shpplocList) → '새 배송지 추가'(shpplocForm) → 우편번호(zipcd: 검색 → 도로명 → 상세 → 저장) → 받는분.
-// 선물하기(args.gift, 2026-09-29)는 이미 열린 목록 팝업을 쓴다. 전화는 비워 두고 칸 번호를 돌려준다(하네스 fill_secret). 폼 저장은 다른 스크립트.
-// 인자 {name, address, address_detail?, gift?, tab?}  반환 {ok, name, address, address_detail, phone_field_ids, phone_formats, form_popup, note}
+// SSG 배송지: 변경 → 목록(shpplocList) → 추가(shpplocForm) → 우편번호(zipcd) → 받는분.
+// gift 는 열린 목록 팝업을 쓴다. 전화는 비우고 칸 번호를 돌려준다(하네스 fill_secret). 저장은 다른 스크립트.
+// 인자 {name,address,address_detail?,gift?,tab?} 반환 {ok,name,address,address_detail,phone_field_ids,form_popup,note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const OF = /pay\.ssg\.com\/(order|payment)|ssg\.com\/order\//
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(500) } return '' }
@@ -12,7 +12,7 @@ let list = args.gift ? (await tabs.list()).find(t => t.kind === 'popup' && /shpp
 if (!list) {
   const ofs = (await tabs.list()).filter(t => t.kind === 'tab' && OF.test(t.url || ''))
   const tab = args.tab ? ofs.find(t => t.id === String(args.tab)) : ofs.length === 1 ? ofs[0] : null
-  if (!tab) return { ...R, note: ofs.length ? 'order forms ' + ofs.length + ' — pass args.tab' : 'no order form' }
+  if (!tab) return { ...R, note: ofs.length ? '주문서 ' + ofs.length + '개 — args.tab 필요' : '주문서 없음' }
   await tabs.switch(tab.id)
   let b = await first('[id^="btnChangeShpploc"], [name="btnChangeShpploc"]')
   if (b < 0) b = await page.idOf('배송지 변경', 0)
@@ -27,7 +27,7 @@ if (!list) {
 }
 await tabs.switch(list.id)
 try { await page.waitFor(/배송지|로그인/, 5000) } catch (e) {}
-if (/member\/login/.test(await page.url())) { try { await tabs.close(list.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료 — 목록 팝업이 로그인 화면' } }
+if (/member\/login/.test(await page.url())) { try { await tabs.close(list.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료(목록)' } }
 let add = -1
 for (const w of ['새 배송지 추가', '배송지 추가', '새 배송지']) { if (add < 0) add = await page.idOf(w, 0) }
 if (add < 0) return { ...R, note: '새 배송지 추가 버튼 없음' }
@@ -37,7 +37,7 @@ if (!form) return { ...R, note: '배송지 폼 팝업 안 뜸' }
 R.form_popup = form.id
 await tabs.switch(form.id)
 try { await page.waitFor(/받는\s*분|수령인|이름|로그인/, 5000) } catch (e) {}
-if (/member\/login/.test(await page.url())) { try { await tabs.close(form.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료 — 배송지 폼이 로그인 화면' } }
+if (/member\/login/.test(await page.url())) { try { await tabs.close(form.id) } catch (e) {} return { ...R, error: 'login_required', note: 'SSG 세션 만료(폼)' } }
 try { await page.waitFor(/우편번호/, 8000) } catch (e) {}
 let zipBtn = await page.idOf('우편번호 검색', 0)
 if (zipBtn < 0) { await sleep(1500); zipBtn = await page.idOf('우편번호 검색', 0) }
@@ -60,7 +60,7 @@ for (let i = 0; i < 4; i++) { const k = i ? await first('input[name="searchKeywo
 let pickBtn = -1
 for (let i = 0; i < 10 && pickBtn < 0; i++) { await sleep(800); pickBtn = await first('button[onclick*="showZipcdDtl"]'); if (i === 4 && pickBtn < 0 && sb >= 0) await page.click(sb) }
 if (pickBtn < 0) {
-  const a0 = nz(args.address).replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+  const a0 = nz(nz(args.address).replace(/\([^)]*\)/g, ' '))
   const rm = a0.match(/([가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?)/)
   const parts = a0.split(' ')
   const region = parts.slice(1, 3).filter(p => /(시|군|구|읍|면|동)$/.test(p)).join(' ')
@@ -71,21 +71,25 @@ if (pickBtn < 0) return { ...R, note: '주소 검색 결과 없음' }
 await page.click(pickBtn)
 await sleep(700)
 const dtl = await first('#addrDtlInput, input[name="dtlAddr"]')
-// 상세 칸이 비면 주소 끝의 호·동·층(실기 2026-09-29)
+// 상세가 비면 주소 끝의 호·동·층
 const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || [])[1])
 const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
-// SSG 상세주소는 40자까지 — 넘으면 폼 저장이 '상세주소를 40자 이내로' 알림으로 막힌다(실기 2026-09-30). 괄호 참고항목부터 뺀다
+// 상세 40자 제한 — 괄호부터 뺀다
 const dtlText = (dtlRaw.length > 40 ? nz(dtlRaw.replace(/\([^)]*\)?/g, ' ')) : dtlRaw).slice(0, 40).trim()
 if (dtl >= 0 && dtlText) await page.type(dtl, dtlText, false)
-if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업이 아닌 곳에서 저장 버튼을 찾으려 했다 — 멈춤' }
+if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업 아님 — 멈춤' }
 let ok = await first('#addrDtlBtn')
 if (ok < 0) ok = await page.idOf('저장', 0)
-if (ok < 0 || !/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업 저장 버튼 없음' }
-if (ok >= 0) page.click(ok).catch(() => {})
+if (ok < 0) return { ...R, note: '우편번호 팝업 저장 버튼 없음' }
+page.click(ok).catch(() => {})
 for (let i = 0; i < 10 && (await tabs.list()).some(t => t.id === zip.id); i++) await sleep(300)
 if ((await tabs.list()).some(t => t.id === zip.id)) { const zt = await tree({}); const dlg = (zt.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''; try { await tabs.close(zip.id) } catch (e) {} return { ...R, note: '우편번호 팝업 저장이 안 닫힘' + (dlg ? '(' + dlg + ')' : '') + (dtlText ? '' : ' — 상세주소 없음') } }
 await tabs.switch(form.id)
 await sleep(500)
+// 폼 상세칸이 40자 넘으면 줄인다
+{ const V = l => (l.match(/value="([^"]*)"/) || [])[1] || ''
+  const dl = dtlText && (await tree({ interactive: true })).split('\n').find(l => /textbox/.test(l) && V(l).startsWith(dtlText.slice(0, 6)))
+  if (dl && V(dl).length > 40) await page.type(parseInt(dl.slice(1)), nz(V(dl).replace(/\([^)]*\)?/g, ' ')).slice(0, 40).trim(), false) }
 const nmId = await first('#rcptpeNm, input[name="rcptpeNm"]')
 if (nmId < 0) return { ...R, note: '받는분 이름칸 없음' }
 await page.type(nmId, nz(args.name), false)
