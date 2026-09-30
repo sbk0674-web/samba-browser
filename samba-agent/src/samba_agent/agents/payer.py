@@ -551,6 +551,20 @@ KAKAO_TAB_WAIT_MS = 1500
 KAKAO_REQUEST_WAIT_MS = 2500
 
 
+def _active_tab_id(listed: str) -> str | None:
+    """list_tabs 응답(JSON 배열)에서 활성 탭 id. 형식이 아니면 None."""
+    try:
+        rows = json.loads(listed)
+    except ValueError:
+        return None
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if isinstance(row, dict) and row.get('active') and row.get('id'):
+            return str(row['id'])
+    return None
+
+
 def _amount_krw(value: object) -> int | None:
     """결제 금액(원 단위 양의 정수). 모르거나 0 이하면 None — 앱 스키마가 거절한다."""
     try:
@@ -738,7 +752,16 @@ class PayerAgent(AgentBase):
         self._last_listed = listed
         return _popups_and_active_tabs(listed)
 
-    def _kakao_talk_request(self) -> None:
+    def _restore_kakao_tab(self, kakao_tab: str, helper_tab: str | None) -> None:
+        """폰 승인 뒤 — 앞에 띄웠던 소싱처 탭을 닫고 카카오페이 결제창 탭으로 돌아간다(실패해도 확인 단계가 다시 본다)."""
+        try:
+            if helper_tab:
+                self.tool('close_tab', id=helper_tab)
+            self.tool('switch_tab', id=kakao_tab)
+        except AgentFailure as e:
+            self.note('카카오페이', mask_text(f'결제창 탭으로 못 돌아감({e.reason[:80]})'))
+
+    def _kakao_talk_request(self, a: Assignment) -> tuple[str, str | None] | None:
         """카카오페이 결제창의 '카톡결제' 탭에서 휴대폰·생년월일을 앱(fill_secret)이 채우고 결제요청을 누른다.
 
         번호·생년월일은 하네스를 지나가지 않는다. 결제창이 카톡결제 화면이 아니면(이미 요청됨 등) 아무것도 하지 않는다.
@@ -746,7 +769,7 @@ class PayerAgent(AgentBase):
         self.step('payer: 카카오페이 카톡결제 요청')
         page = self.tool('get_page')
         if 'kakaopay.com' not in page.split('\n', 1)[0]:
-            return
+            return None
         tab = _element_id_of(page, r'tab "카톡결제"')
         if tab is not None:
             self.tool('click', id=tab)
@@ -782,6 +805,20 @@ class PayerAgent(AgentBase):
         self.tool('click', id=button)
         self.tool('wait', ms=KAKAO_REQUEST_WAIT_MS)
         self.note('카카오페이', '카톡결제 요청 보냄(휴대폰·생년월일은 키마스터 값)')
+        # 폰 승인은 지금 앞 탭의 사이트 계정으로 결제 계정을 고른다 — 카카오페이 화면이 앞이면 계정을 못 찾아
+        # 'no-account' 로 거절된다(실기 2026-09-30). 승인 동안 구매 계정 프로필로 소싱처 첫 화면을 앞에 둔다
+        kakao_tab = _active_tab_id(self.tool('list_tabs'))
+        if not kakao_tab:
+            return None
+        src = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source or ''))
+        profile = str(a.handoff.get('account') or a.order.account or '')
+        helper: str | None = None
+        if src is not None and src.home:
+            out = self.tool('new_tab', url=src.home, **({'profile': profile} if profile else {}))
+            m = re.search(r'tab ([0-9a-fA-F-]{8,})', out)
+            helper = m.group(1) if m else None
+            self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
+        return kakao_tab, helper
 
     def _provider_from_payment_popup(self) -> str | None:
         """지금 열린 결제창(팝업)의 호스트로 결제 앱을 고른다. 결제창이 없거나 아는 결제
@@ -1452,7 +1489,9 @@ class PayerAgent(AgentBase):
         if provider == 'kakaopay' and _pay_provider(card) == 'kakaopay':
             # 카카오페이 PC 결제창은 QR/카톡결제 탭이다 — 카톡결제에 휴대폰·생년월일(키마스터 카카오페이 결제 항목)을 넣고
             # 결제요청을 눌러야 폰으로 결제 요청이 간다(사용자 2026-09-30 롯데온 카카오페이 머니)
-            self._kakao_talk_request()
+            kakao_front = self._kakao_talk_request(a)
+        else:
+            kakao_front = None
 
         if provider is not None:
             self.step('payer: 폰 승인')
@@ -1472,6 +1511,9 @@ class PayerAgent(AgentBase):
                 **({'card': card_hint} if card_hint else {}),
             )
             self.note('폰 승인', mask_text(approved[:200]))
+            if kakao_front:
+                # 승인 동안 앞에 둔 소싱처 탭을 닫고, 카카오페이 결제창(승인 뒤 주문 완료로 넘어간다)으로 돌아간다
+                self._restore_kakao_tab(*kakao_front)
             if any(m in approved for m in DECLINED_MARKERS):
                 # 'refused:' 접두사 없는 과거 형식. 재시도 없음 — 그대로 사람에게 넘긴다(재결제 위험)
                 raise AgentFailure(
