@@ -42,18 +42,6 @@ def export_values(state: RunState) -> tuple[int, int] | None:
     return cost, max(_won(values.get('shipping_fee')) or 0, 0)
 
 
-def export_memo(state: RunState) -> str:
-    """기록 단계가 남긴 추가메모 글(도착예정 3일 초과 등). 없으면 빈 문자열."""
-    recorder = state.get('results', {}).get('recorder')
-    if recorder is None:
-        return ''
-    values = recorder.payload.get('values') or recorder.payload.get('planned')
-    if not isinstance(values, dict):
-        return ''
-    memo = values.get('arrival_memo')
-    return memo.strip() if isinstance(memo, str) else ''
-
-
 def _result(reason: str, payload: dict[str, object]) -> AgentResult:
     return AgentResult(
         status='ok',
@@ -97,9 +85,7 @@ def make_exporter(
                 {'export': 'planned', **plan},
             )
         try:
-            # 추가메모는 샵마인만 넣는다(사용자 지시 2026-09-30) — EMP 는 넘기지 않는다
-            memo = export_memo(state) if target == 'shopmine' else ''
-            req = queue.enqueue(order.order_no, target, cost, shipping_fee, memo)
+            req = queue.enqueue(order.order_no, target, cost, shipping_fee)
         except ExportConflict as e:
             return _result(f'외부 기입 충돌({target}) — {e}', {'export': 'conflict', **plan})
         # 그 대상을 맡은 작업자가 떠 있고, 이 요청보다 먼저 온 대기 건이 없을 때만 기다린다 —

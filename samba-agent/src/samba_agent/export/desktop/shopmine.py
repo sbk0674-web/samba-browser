@@ -79,10 +79,6 @@ class ShopMineUi(Protocol):
         """전체 선택을 풀고, 목록의 주문번호와 맞는 행만 체크한다. 주문번호 → 체크한 행 수."""
         ...
 
-    def write_memo(self, order_no: str, memo: str) -> None:
-        """체크한 그 주문의 추가메모에 memo 를 넣는다(이미 들어 있으면 그대로). 못 하면 AdapterRetry."""
-        ...
-
     def set_status(self, status: str, expected_rows: int) -> None:
         """작업상태지정 → status(완료됨·지연됨). 확인 대화상자의 '선택한 N개' 가 expected_rows 와 같을 때만 누른다."""
         ...
@@ -108,11 +104,6 @@ class ShopMineAdapter:
         self._status = status
         # 실기 시험용 — 행 체크까지만 하고 완료됨은 누르지 않는다
         self._dry_run = dry_run
-        # 이번에 넘겨받은 주문의 추가메모(작업자가 complete_pending 전에 건넨다)
-        self._memos: dict[str, str] = {}
-
-    def use_memos(self, memos: Mapping[str, str]) -> None:
-        self._memos = {o: m for o, m in memos.items() if m}
 
     def complete_pending(self, order_nos: Sequence[str]) -> set[str]:
         wanted = [o for o in dict.fromkeys(order_nos) if o]
@@ -155,12 +146,6 @@ class ShopMineAdapter:
             )
         if self._dry_run:
             return set(found) | already
-        # 추가메모(도착예정 등)는 완료됨으로 바꾸기 전에 넣는다 — 바꾸면 행이 이 목록에서 빠진다.
-        # 메모를 못 넣으면 완료됨도 누르지 않고 다시 한다(메모가 빠진 채 끝나지 않게)
-        for order_no in found:
-            memo = self._memos.get(order_no)
-            if memo:
-                ui.write_memo(order_no, memo)
         ui.set_status(self._status, sum(checked.get(o, 0) for o in found))
         # 되읽기 — 처리한 주문은 같은 필터에 남아 있으면 안 된다
         ui.set_filters()
