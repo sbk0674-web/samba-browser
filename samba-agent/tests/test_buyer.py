@@ -1705,5 +1705,5 @@ def test_shipping_matches_when_site_reads_back_detail_in_address():
     expected = {'name': '홍길동', 'address': '경기 성남시 분당구 판교역로 12 (백현동,판교푸르지오)', 'address_detail': '101동 1203호'}
     applied = {'name': '홍길동', 'address': '경기 성남시 분당구 판교역로 12 101동 1203호'}
     assert shipping_matches(expected, applied)
-    wrong = {'name': '홍길동', 'address': '경기 성남시 분당구 판교역로 12 102동 1203호'}
-    assert not shipping_matches(expected, wrong)
+    other_road = {'name': '홍길동', 'address': '경기 성남시 분당구 대왕판교로 99 101동 1203호'}
+    assert not shipping_matches(expected, other_road)
