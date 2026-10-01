@@ -56,6 +56,8 @@ export interface DeviceRepo {
    * 실제 시리얼 줄이 없으면 그 줄의 시리얼만 바꾸고(이름·담당 계정 유지), 있으면 담당 계정을 옮긴 뒤 지운다
    */
   mergeAlias?: (aliasSerial: string, realSerial: string) => void
+  /** 고정 포트 접속 주소(ip:5555)를 기억한다 — 끊긴 뒤 그 주소로 다시 붙인다 */
+  setWifiAddress?: (id: number, address: string | null) => void
 }
 
 export interface DeviceManagerDeps {
@@ -131,6 +133,10 @@ export class DeviceManager {
   private recovered = new Set<string>()
   // 발견된 와이파이 접속점(ip:port) → 다음 connect 시도 시각
   private wifiRetryAt = new Map<string, number>()
+  // ip:port 전송 이름 → 폰의 실제 시리얼(폰에 물어 본 값). mDNS 에 안 나오는 고정 포트 접속을 같은 폰으로 알아본다
+  private serialByAddress = new Map<string, string>()
+  // 고정 포트 전환을 이미 시도한 폰(실제 시리얼) — 한 번 실패한 폰을 5초마다 두드리지 않는다
+  private fixedPortTried = new Set<string>()
 
   constructor(private deps: DeviceManagerDeps) {}
 
@@ -177,10 +183,14 @@ export class DeviceManager {
     // 경로가 비어 있으면 adb 를 부르지 않는다(부르면 곧바로 던진다)
     if (!this.hasAdb()) return this.phones
     const first = await this.deps.adb.run(['devices', '-l'])
-    const services = await this.discover()
+    const found = await this.discover()
+    // 고정 포트(adb tcpip 5555) 접속은 mDNS 에 안 나오는 폰이 있다(실기: SM-A426N) — 폰에 시리얼을 물어 주인을 안다
+    const services = [...found, ...(await this.askSerials(parseDevices(first.stdout), found))]
+    // 기억해 둔 고정 주소로 끊긴 폰을 다시 붙인다(무선 디버깅이 꺼져도 이 포트는 살아 있다)
+    const rejoined = await this.connectRemembered(parseDevices(first.stdout), services)
     // 같은 와이파이에서 발견된 폰은 주소를 몰라도 알아서 붙인다. 새로 붙인 게 있으면 목록을 다시 읽는다
     const connected = await this.connectDiscovered(parseDevices(first.stdout), services)
-    const res = connected ? await this.deps.adb.run(['devices', '-l']) : first
+    const res = connected || rejoined ? await this.deps.adb.run(['devices', '-l']) : first
     // 한 폰이 여러 전송 이름으로 보이면 하나만 남긴다(저장은 실제 시리얼로, 명령은 전송 이름으로)
     const seen = parseDevices(res.stdout)
     // 고르지 않은 전송 이름으로 예전에 만들어진 줄도 실제 줄로 합친다(한 폰이 두 이름으로 동시에 보일 때)
@@ -212,6 +222,8 @@ export class DeviceManager {
       // 다시 붙었으면 다음에 끊길 때 또 한 번 복구할 수 있게 표시를 지운다
       if (d.state === 'online') this.recovered.delete(d.serial)
     }
+    // 무선 디버깅으로만 붙은 폰은 고정 포트로도 붙여 둔다(와이파이가 끊겨도 다시 붙을 수 있게)
+    await this.keepFixedPort(seen, services)
     // 저장된 폰 중 이번에 안 보인 것은 끊김으로 본다
     const rows = this.deps.repo.list()
     // 동시 연결 상한은 두지 않는다 — 붙어 있는 폰은 모두 쓴다(사용자 요청, 예전에는 3대)
@@ -255,6 +267,92 @@ export class DeviceManager {
     }
   }
 
+  /**
+   * ip:port 로 붙은 장치 가운데 mDNS 로 주인을 모르는 것은 폰에 실제 시리얼을 물어 본다(한 번 알면 기억한다).
+   * 이렇게 안 하면 같은 폰이 "192.168.x.x:5555" 라는 다른 폰으로 보여 담당 폰 연결이 끊긴 것으로 판정된다
+   */
+  private async askSerials(current: RawDevice[], found: MdnsService[]): Promise<MdnsService[]> {
+    const out: MdnsService[] = []
+    for (const d of current) {
+      if (d.state !== 'online' || !isWifiSerial(d.serial)) continue
+      if (found.some((sv) => sv.address === d.serial)) continue
+      let real = this.serialByAddress.get(d.serial)
+      if (!real) {
+        try {
+          real = (await this.deps.adb.run(['-s', d.serial, 'shell', 'getprop', 'ro.serialno'], 5_000)).stdout.trim()
+        } catch {
+          real = ''
+        }
+        if (!real || /\s/.test(real)) continue
+        this.serialByAddress.set(d.serial, real)
+      }
+      out.push({ serial: real, address: d.serial })
+    }
+    return out
+  }
+
+  /** 저장된 폰 가운데 지금 안 붙어 있고 고정 주소(ip:5555)를 기억하는 것은 그 주소로 connect 를 시도한다 */
+  private async connectRemembered(current: RawDevice[], services: MdnsService[]): Promise<boolean> {
+    const now = this.deps.now()
+    const ignored = this.deps.ignored?.() ?? []
+    let connected = false
+    for (const row of this.deps.repo.list()) {
+      const address = row.wifiAddress
+      // ip:port 꼴 주소만 — 다른 값이 들어 있는 옛 줄은 건드리지 않는다
+      if (!address || !isWifiSerial(address) || ignored.includes(row.serial)) continue
+      if (current.some((d) => d.state === 'online' && realSerialOf(d.serial, services) === row.serial)) continue
+      if ((this.wifiRetryAt.get(address) ?? 0) > now) continue
+      this.wifiRetryAt.set(address, now + WIFI_CONNECT_COOLDOWN_MS)
+      try {
+        const res = await this.deps.adb.run(['connect', address], 10_000)
+        if (/connected to/i.test(res.stdout) && !/failed|cannot|unable/i.test(res.stdout)) connected = true
+      } catch {
+        // 폰이 꺼져 있거나 다른 망에 있다 — 다음 주기에 다시 본다
+      }
+    }
+    return connected
+  }
+
+  /**
+   * 무선 디버깅(TLS)으로만 붙은 폰을 고정 포트(5555)로도 붙인다.
+   * 안드로이드는 와이파이가 끊기면 무선 디버깅을 스스로 끄고 다시 켜 주지 않는다(실기 2026-10-01: 하루 2~3회 끊김 →
+   * 폰 결제 승인이 그때마다 멈춤). `adb tcpip` 로 연 포트는 와이파이가 다시 붙으면 그대로 살아 있다(폰 재부팅 전까지).
+   * 이미 고정 포트로 붙어 있으면 그 주소만 기억한다
+   */
+  private async keepFixedPort(seen: RawDevice[], services: MdnsService[]): Promise<void> {
+    const rows = this.deps.repo.list()
+    const live = seen.filter((d) => d.state === 'online')
+    const byPhone = new Map<string, RawDevice[]>()
+    for (const d of live) {
+      const real = realSerialOf(d.serial, services)
+      byPhone.set(real, [...(byPhone.get(real) ?? []), d])
+    }
+    for (const [real, transports] of byPhone) {
+      const row = rows.find((r) => r.serial === real)
+      if (!row) continue
+      const fixed = transports.find((d) => isWifiSerial(d.serial) && d.serial.endsWith(`:${WIFI_DEFAULT_PORT}`))
+      if (fixed) {
+        if (row.wifiAddress !== fixed.serial) this.deps.repo.setWifiAddress?.(row.id, fixed.serial)
+        continue
+      }
+      // USB 로 붙은 폰은 건드리지 않는다. 무선 디버깅(서비스 이름·ip:임의포트)으로만 붙은 폰만 전환한다
+      if (transports.some((d) => d.transport === 'usb') || this.fixedPortTried.has(real)) continue
+      this.fixedPortTried.add(real)
+      const via = transports[0]
+      const ip = services.find((sv) => sv.serial === real)?.address.split(':')[0]
+      if (!via || !ip) continue
+      try {
+        await this.deps.adb.run(['-s', via.serial, 'tcpip', String(WIFI_DEFAULT_PORT)], 10_000)
+        const address = `${ip}:${WIFI_DEFAULT_PORT}`
+        // adbd 가 다시 뜰 틈을 준 뒤 붙인다. 못 붙어도 주소는 기억해 다음 주기에 다시 시도한다
+        this.deps.repo.setWifiAddress?.(row.id, address)
+        this.wifiRetryAt.set(address, this.deps.now() + 3_000)
+      } catch {
+        // 전환 실패 — 무선 디버깅 연결은 그대로다
+      }
+    }
+  }
+
   private async connectDiscovered(current: RawDevice[], services: MdnsService[]): Promise<boolean> {
     const now = this.deps.now()
     let connected = false
@@ -286,11 +384,11 @@ export class DeviceManager {
   async recover(serial: string): Promise<boolean> {
     if (!this.hasAdb()) return false
     const isBack = async (): Promise<{ back: boolean; others: number }> => {
-      const services = await this.discover()
-      const live = pickOnePerPhone(
-        parseDevices((await this.deps.adb.run(['devices', '-l'])).stdout),
-        services
-      ).filter((d) => d.state === 'online')
+      const found = await this.discover()
+      const current = parseDevices((await this.deps.adb.run(['devices', '-l'])).stdout)
+      // 고정 포트로 붙은 폰은 mDNS 에 없을 수 있다 — 폰에 물어 본 시리얼도 함께 본다
+      const services = [...found, ...(await this.askSerials(current, found))]
+      const live = pickOnePerPhone(current, services).filter((d) => d.state === 'online')
       const back = live.some((d) => d.realSerial === serial || d.serial === serial)
       return { back, others: live.filter((d) => d.realSerial !== serial).length }
     }
