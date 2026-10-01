@@ -1,0 +1,96 @@
+"""교차 검증 — 하네스 기입 장부와 삼바웨이브 값 대조."""
+
+from samba_agent.ops.crosscheck import CrossChecker, Ledger, backfill, compare, is_void
+from samba_agent.wave.client import WaveOrder
+
+
+def _order(**kw: object) -> WaveOrder:
+    base = {'order_number': 'A1', 'status': 'wait_ship', 'sourcing_order_number': 'S1', 'cost': 108690,
+            'shipping_fee': 0, 'sourcing_account_username': 'edelvise06'}  # fmt: skip
+    return WaveOrder.model_validate({**base, **kw})
+
+
+def _ledger(tmp_path) -> Ledger:
+    ledger = Ledger(tmp_path / 'ledger.sqlite')
+    ledger.put('A1', 'S1', 108690, 0, 'edelvise06', 'MUSINSA')
+    return ledger
+
+
+def test_덮어쓴_실구매가와_주문계정을_찾는다(tmp_path):
+    row = _ledger(tmp_path).recent()[0]
+    found = compare(row, _order(cost=147970, sourcing_account_username='roasterydg'))
+    assert [f.field for f in found] == ['cost', 'account']
+
+
+def test_몇백원_보정과_같은_값은_지나간다(tmp_path):
+    row = _ledger(tmp_path).recent()[0]
+    assert compare(row, _order()) == []
+    assert compare(row, _order(cost=108540)) == []
+
+
+def test_소싱주문번호가_바뀌면_그것만_알린다(tmp_path):
+    row = _ledger(tmp_path).recent()[0]
+    found = compare(row, _order(sourcing_order_number='S2', cost=1))
+    assert [f.field for f in found] == ['source_order_no']
+
+
+def test_취소_원복된_주문은_대조하지_않는다():
+    assert is_void(_order(status='cancelled'))
+    assert is_void(_order(status='pending', sourcing_order_number='', cost=0))
+    assert not is_void(_order())
+
+
+class _Wave:
+    def __init__(self, order: WaveOrder) -> None:
+        self.order = order
+        self.written: list[dict[str, object]] = []
+
+    def get_order(self, order_no, order_type=None, sourcing_order_number=None):
+        return self.order
+
+    def sourcing_account_id(self, site, username):
+        return f'sa_{username}'
+
+    def record_sourcing(self, order_no, **kw):
+        self.written.append({'order_no': order_no, **kw})
+
+
+def test_덮어쓴_값은_한_번만_되돌리고_알린다(tmp_path):
+    ledger = _ledger(tmp_path)
+    wave = _Wave(_order(cost=147970, shipping_fee=92, sourcing_account_username='roasterydg'))
+    alerts: list[str] = []
+    checker = CrossChecker(ledger, wave, alerts.append)  # type: ignore[arg-type]
+    assert len(checker.run_once()) == 2
+    assert wave.written == [{
+        'order_no': 'A1', 'sourcing_order_number': 'S1', 'cost': 108690.0, 'shipping_fee': 92.0,
+        'sourcing_account_id': 'sa_edelvise06',
+    }]  # fmt: skip
+    assert len(alerts) == 1 and '되돌림' in alerts[0]
+    # 또 덮어써지면 다시 되돌리지 않는다(사람이 고친 값과 싸우지 않는다) — 같은 내용은 다시 알리지도 않는다
+    checker.run_once()
+    assert len(wave.written) == 1 and len(alerts) == 1
+
+
+def test_취소된_주문은_장부에서_끝난_것으로_표시한다(tmp_path):
+    ledger = _ledger(tmp_path)
+    wave = _Wave(_order(status='cancelled', cost=0))
+    assert CrossChecker(ledger, wave).run_once() == []  # type: ignore[arg-type]
+    assert ledger.recent() == [] and wave.written == []
+
+
+def test_로그에서_장부를_채운다(tmp_path):
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    (logs / 'harness-20261001-195830.log').write_text(
+        '20:36:00.000 INFO:samba_agent.agents.base:buyer.cm29 근거 [계정 선택] rbf1 — 원가 최저\n'
+        '20:36:10.000 INFO:samba_agent.agents.base:buyer.musinsa 근거 [계정 선택] edelvise06 — 원가 최저 108,690원\n'
+        '20:36:50.000 INFO:httpx:HTTP Request: PUT https://x/api/v1/internal/harness/orders/21315208468963299/sourcing "HTTP/1.1 200 OK"\n'
+        '20:36:53.000 INFO:samba_agent.agents.base:recorder 근거 [기입 확인] {"source_order_no": "202610012036530002", "real_price": 108690.0, "shipping_fee": 0.0}\n',
+        encoding='utf-8',
+    )
+    ledger = Ledger(tmp_path / 'ledger.sqlite')
+    assert backfill(ledger, logs) == 1
+    row = ledger.recent(days=3650)[0]
+    assert (row.order_no, row.source_order_no, row.cost, row.account, row.site) == (
+        '21315208468963299', '202610012036530002', 108690.0, 'edelvise06', 'MUSINSA',
+    )  # fmt: skip

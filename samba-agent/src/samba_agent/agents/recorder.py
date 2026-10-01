@@ -21,6 +21,7 @@ from samba_agent.agents.source_detail import (
     site_of,
 )
 from samba_agent.failures import FailReason
+from samba_agent.ops.crosscheck import note_recorded
 from samba_agent.ops.masking import mask_text
 from samba_agent.wave.client import WaveClient, WaveError, wave_fields
 
@@ -434,6 +435,15 @@ class RecorderAgent(AgentBase):
             json.dumps(checked, ensure_ascii=False)
             if checked
             else '삼바웨이브 응답에 대조할 필드가 없다 — 기입 자체는 200 으로 확인',
+        )
+        # 교차 검증 장부 — 이 뒤로 삼바웨이브 값이 바뀌면(외부 덮어쓰기) 주기 점검이 잡는다
+        note_recorded(
+            a.order.order_no,
+            sourcing_no,
+            float(values.get('real_price') or 0),
+            float(values.get('shipping_fee') or 0),
+            str(a.handoff.get('account') or a.order.account or ''),
+            _source_site(str(a.handoff.get('buy_source') or a.order.source)),
         )
         if self.mark_status:
             self._mark_waiting_ship(a, sourcing_no)

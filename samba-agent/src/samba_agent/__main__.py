@@ -35,6 +35,8 @@ from samba_agent.export.stage import (
 from samba_agent.export.store import ExportQueue
 from samba_agent.gateway.slack_bot import SambaBot
 from samba_agent.llm.decide import make_decide
+from samba_agent.ops.crosscheck import CrossChecker
+from samba_agent.ops.crosscheck import configure as configure_crosscheck
 from samba_agent.ops.dewu_order import make_shihuo_handler
 from samba_agent.ops.dewu_tracking import start_dewu_tracking_loop
 from samba_agent.ops.diagnose import diagnose
@@ -199,6 +201,7 @@ def main() -> None:
     queue = JobQueue(settings.db_path)
     releases = ReleaseStore(settings.root / 'releases.sqlite')
     events = EventLog(settings.root / 'events.sqlite')
+    crosscheck_ledger = configure_crosscheck(settings.root / 'ledger.sqlite')
 
     bridge = BridgeClient(
         settings.bridge_url,
@@ -465,6 +468,13 @@ def main() -> None:
         )
         threading.Thread(
             target=notifier.run_forever, args=(stop.is_set,), daemon=True, name='export-notify'
+        ).start()
+
+    if wave is not None:
+        # 교차 검증 — 하네스가 기입한 값과 삼바웨이브 값을 10분마다 대조한다(2026-10-01 실구매가 덮어쓰기 사고)
+        checker = CrossChecker(crosscheck_ledger, wave, lambda text: bot.post_new(text))
+        threading.Thread(
+            target=checker.run_forever, args=(stop.is_set,), daemon=True, name='crosscheck'
         ).start()
 
     if intake is not None:
