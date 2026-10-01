@@ -305,15 +305,18 @@ def test_집은_주문이_화면에_없으면_나중에_다시_한다(queue):
     assert queue.get(a.id).attempts == 1
 
 
-def test_집은_주문을_끝내_못_찾으면_실패로_끝낸다(queue):
+def test_집은_주문을_끝내_못_찾으면_실패로_끝낸다(queue, monkeypatch):
     adapter = FakeBatch(present=())
     queue.enqueue('A1', 'shopmine', 1000, 0)
     w = batch_worker(queue, adapter, retry_delay_s=0, max_attempts=2)
     assert w.run_once().status == 'pending'
+    # 하루가 지나기 전에는 횟수를 넘겨도 다시 본다(수집이 늦는 주문, 2026-10-01)
+    assert w.run_once().status == 'pending'
+    monkeypatch.setattr('samba_agent.export.worker._age_s', lambda _req: 25 * 3600)
     out = w.run_once()
     assert out.status == 'failed'
     assert out.fail_reason == 'not_found'
-    assert out.attempts == 2
+    assert out.attempts == 3
 
 
 def test_배치_어댑터의_재시도_사유는_대기_요청을_건드리지_않는다(queue):

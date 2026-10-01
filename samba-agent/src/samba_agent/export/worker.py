@@ -9,6 +9,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
 from samba_agent.export.adapters import (
@@ -44,6 +45,20 @@ class _Outcome:
     kind: Literal['done', 'fail', 'retry']
     detail: str
     reason: ExportFail | None = None
+
+
+# 화면에서 못 찾은 주문을 포기하기까지의 시간 — 그 전에는 횟수를 넘겨도 다시 본다
+NOT_FOUND_GIVE_UP_S = 24 * 3600
+
+
+def _age_s(req: ExportRequest) -> float:
+    try:
+        created = datetime.fromisoformat(req.created_at)
+    except ValueError:
+        return float('inf')
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - created).total_seconds()
 
 
 def _same(current: CellValues, req: ExportRequest) -> bool:
@@ -234,8 +249,9 @@ class ExportWorker:
             detail = str(found(req.order_no) or detail)
         if req.order_no in completed:
             return _Outcome('done', detail), completed
-        # 화면(필터)에 아직 없는 주문 — 수집이 늦을 수 있으니 시간을 두고 다시 본다
-        if req.attempts >= self._max_attempts:
+        # 화면(필터)에 아직 없는 주문 — 수집이 늦을 수 있으니 시간을 두고 다시 본다.
+        # 쇼핑몰 수집이 몇 시간 늦기도 해서(2026-10-01: 5분 만에 실패로 끝나 미지정 18건 방치) 하루는 계속 본다
+        if req.attempts >= self._max_attempts and _age_s(req) >= NOT_FOUND_GIVE_UP_S:
             return (
                 _Outcome(
                     'fail',
