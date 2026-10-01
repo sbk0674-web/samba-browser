@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from langgraph.checkpoint.sqlite import SqliteSaver
 from slack_bolt import App
 
-from samba_agent.agents.buyer import BuyerAgent
+from samba_agent.agents.buyer import _CLOSE_LANE_TABS_JS, BuyerAgent
 from samba_agent.agents.factory import build_agents
 from samba_agent.agents.payer import PayerAgent
 from samba_agent.agents.recorder import RecorderAgent
@@ -35,7 +35,7 @@ from samba_agent.export.stage import (
 from samba_agent.export.store import ExportQueue
 from samba_agent.gateway.slack_bot import SambaBot
 from samba_agent.llm.decide import make_decide
-from samba_agent.ops.crosscheck import CrossChecker
+from samba_agent.ops.crosscheck import CrossChecker, LedgerRow
 from samba_agent.ops.crosscheck import configure as configure_crosscheck
 from samba_agent.ops.dewu_order import make_shihuo_handler
 from samba_agent.ops.dewu_tracking import start_dewu_tracking_loop
@@ -472,7 +472,37 @@ def main() -> None:
 
     if wave is not None:
         # 교차 검증 — 하네스가 기입한 값과 삼바웨이브 값을 10분마다 대조한다(2026-10-01 실구매가 덮어쓰기 사고)
-        checker = CrossChecker(crosscheck_ledger, wave, lambda text: bot.post_new(text))
+        xbridge = bridge.scoped(['run_script', 'run_js']).with_lane('xcheck')
+
+        def _source_status(row: LedgerRow) -> str | None:
+            """소싱처 주문 상세의 상태 글자(읽기 전용). 못 읽으면 None."""
+            try:
+                raw = xbridge.call(
+                    'run_script',
+                    name='musinsa_order_detail',
+                    args=json.dumps({'source_order_no': row.source_order_no, 'profile': row.account}),
+                ).result
+                start = raw.rfind('{"source_order_no"')
+                out = json.loads(raw[start:]) if start >= 0 else {}
+            except (BridgeError, ValueError):
+                return None
+            finally:
+                try:
+                    xbridge.call('run_js', code=_CLOSE_LANE_TABS_JS, safety='no_pay')
+                except BridgeError:
+                    pass
+            if not isinstance(out, dict) or out.get('note'):
+                return None
+            return str(out.get('status') or '') or None
+
+        checker = CrossChecker(
+            crosscheck_ledger,
+            wave,
+            lambda text: bot.post_new(text),
+            source_status=_source_status,
+            # 주문 작업이 도는 동안에는 브라우저를 건드리지 않는다
+            idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()),
+        )
         threading.Thread(
             target=checker.run_forever, args=(stop.is_set,), daemon=True, name='crosscheck'
         ).start()

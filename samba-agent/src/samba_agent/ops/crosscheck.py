@@ -37,6 +37,12 @@ _VOID_STATES = {
     'exchange_requested', 'exchanging', 'exchanged',
 }  # fmt: skip
 DEFAULT_DAYS = 14
+# 발송 전 상태 — 이때만 소싱처 주문이 취소됐는지 본다
+_BEFORE_SHIP_STATES = {'wait_ship', 'preparing'}
+# 소싱처 주문 상세로 상태를 읽을 수 있는 곳(상태 글자가 확인된 스크립트만)
+SOURCE_CHECK_SITES = {'MUSINSA'}
+SOURCE_CHECKS_PER_CYCLE = 3
+SOURCE_RECHECK_HOURS = 6
 # 로그에서 되살린 줄의 restored_at 표시 — 자동으로 되돌리지 않는다
 BACKFILLED = 'backfill'
 DEFAULT_INTERVAL_S = 600.0
@@ -55,6 +61,7 @@ class LedgerRow:
     recorded_at: str
     state: str = 'ok'
     restored_at: str | None = None
+    source_checked_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +100,9 @@ class Ledger:
                 'state TEXT NOT NULL DEFAULT "ok", restored_at TEXT, '
                 'PRIMARY KEY(order_no, source_order_no))'
             )
+            cols = {r[1] for r in db.execute('PRAGMA table_info(ledger)')}
+            if 'source_checked_at' not in cols:
+                db.execute('ALTER TABLE ledger ADD COLUMN source_checked_at TEXT')
 
     def _open(self) -> sqlite3.Connection:
         db = sqlite3.connect(self._path, timeout=20)
@@ -150,6 +160,13 @@ class Ledger:
             db.execute(
                 'UPDATE ledger SET state=? WHERE order_no=? AND source_order_no=?',
                 (state, row.order_no, row.source_order_no),
+            )
+
+    def mark_source_checked(self, row: LedgerRow) -> None:
+        with self._open() as db:
+            db.execute(
+                'UPDATE ledger SET source_checked_at=? WHERE order_no=? AND source_order_no=?',
+                (_now(), row.order_no, row.source_order_no),
             )
 
     def mark_restored(self, row: LedgerRow) -> None:
@@ -219,12 +236,17 @@ class CrossChecker:
         *,
         restore: bool = True,
         days: int = DEFAULT_DAYS,
+        source_status: Callable[[LedgerRow], str | None] | None = None,
+        idle: Callable[[], bool] | None = None,
     ) -> None:
         self._ledger = ledger
         self._wave = wave
         self._alert = alert
         self._restore = restore
         self._days = days
+        # 소싱처 주문 상세의 상태 글자를 읽는 함수(브라우저를 쓴다) — 주문 작업이 없을 때만 부른다
+        self._source_status = source_status
+        self._idle = idle
         self._told: set[tuple[str, str, str]] = set()
 
     def run_once(self) -> list[Finding]:
@@ -232,6 +254,7 @@ class CrossChecker:
 
         all_found: list[Finding] = []
         fixed: list[str] = []
+        before_ship: list[LedgerRow] = []
         for row in self._ledger.recent(self._days):
             try:
                 order = self._wave.get_order(row.order_no, sourcing_order_number=row.source_order_no)
@@ -241,6 +264,8 @@ class CrossChecker:
             if is_void(order):
                 self._ledger.mark(row, 'voided')
                 continue
+            if (order.status or '').strip().lower() in _BEFORE_SHIP_STATES:
+                before_ship.append(row)
             found = compare(row, order)
             if not found:
                 continue
@@ -258,7 +283,40 @@ class CrossChecker:
                     self._alert(text)
                 except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
                     _log.exception('교차 검증 알림 실패')
+        self._check_sources(before_ship)
         return all_found
+
+    def _check_sources(self, rows: list[LedgerRow]) -> None:
+        """아직 발송 전인 이행 주문의 소싱처 주문이 취소됐는지 본다(한 주기에 몇 건씩, 주문 작업이 없을 때만).
+
+        소싱처에서 취소됐는데 삼바웨이브에는 이행으로 남으면 고객 주문이 방치된다(실기 2026-10-01 비니·나이키).
+        """
+        if self._source_status is None:
+            return
+        since = (datetime.now(UTC) - timedelta(hours=SOURCE_RECHECK_HOURS)).isoformat(timespec='seconds')
+        due = [r for r in rows if r.site in SOURCE_CHECK_SITES and (r.source_checked_at or '') < since]
+        for row in due[:SOURCE_CHECKS_PER_CYCLE]:
+            if self._idle is not None and not self._idle():
+                return
+            try:
+                status = self._source_status(row)
+            except Exception:  # noqa: BLE001 — 한 건 실패로 점검을 멈추지 않는다
+                _log.exception('교차 검증: %s 소싱처 상태 확인 실패', row.order_no)
+                continue
+            if status is None:
+                continue  # 못 읽었다 — 다음 주기에 다시 본다
+            self._ledger.mark_source_checked(row)
+            if '취소' in status and '요청' not in status:
+                text = (
+                    f'⚠ [교차 검증] 소싱처 주문이 취소됐는데 삼바웨이브는 이행 상태다 — {row.order_no} '
+                    f'({row.site} {row.source_order_no}, 상태 "{status}"). 기록을 주문접수로 되돌리고 다시 사야 한다'
+                )
+                _log.warning(text)
+                if self._alert is not None:
+                    try:
+                        self._alert(text)
+                    except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
+                        _log.exception('교차 검증 알림 실패')
 
     def _restore_row(self, row: LedgerRow, order: WaveOrder, found: list[Finding]) -> bool:
         """실구매가·주문계정을 장부 값으로 한 번 되돌린다. 소싱주문번호가 다르면 손대지 않는다(재구매·사람 수정)."""

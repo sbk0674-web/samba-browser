@@ -94,3 +94,31 @@ def test_로그에서_장부를_채운다(tmp_path):
     assert (row.order_no, row.source_order_no, row.cost, row.account, row.site) == (
         '21315208468963299', '202610012036530002', 108690.0, 'edelvise06', 'MUSINSA',
     )  # fmt: skip
+
+
+def test_소싱처에서_취소된_이행_주문을_알린다(tmp_path):
+    ledger = _ledger(tmp_path)
+    alerts: list[str] = []
+    seen: list[str] = []
+
+    def status(row):
+        seen.append(row.source_order_no)
+        return '취소 완료'
+
+    checker = CrossChecker(ledger, _Wave(_order()), alerts.append, source_status=status, idle=lambda: True)  # type: ignore[arg-type]
+    checker.run_once()
+    assert seen == ['S1'] and len(alerts) == 1 and '취소' in alerts[0]
+    # 방금 본 주문은 몇 시간 뒤에 다시 본다
+    checker.run_once()
+    assert seen == ['S1']
+
+
+def test_주문_작업이_돌면_소싱처를_열지_않고_취소_요청은_알리지_않는다(tmp_path):
+    ledger = _ledger(tmp_path)
+    alerts: list[str] = []
+    busy = CrossChecker(ledger, _Wave(_order()), alerts.append, source_status=lambda r: '취소 완료', idle=lambda: False)  # type: ignore[arg-type]
+    busy.run_once()
+    assert alerts == []
+    asked = CrossChecker(ledger, _Wave(_order()), alerts.append, source_status=lambda r: '취소 요청', idle=lambda: True)  # type: ignore[arg-type]
+    asked.run_once()
+    assert alerts == []
