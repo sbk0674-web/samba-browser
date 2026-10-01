@@ -442,6 +442,18 @@ class WaveClient:
         body = self._request('PUT', f'/orders/{order_no}/status', json=payload)
         return bool(body.get('changed')) if isinstance(body, dict) else False
 
+    def dewu_tracking_targets(self, limit: int = 30) -> list[dict[str, str]]:
+        """중국 크림 得物 주문 중 해외송장이 빈 건 — [{order_number, sourcing_order_number}]."""
+        body = self._request('GET', '/cn-dewu-tracking-targets', params={'limit': limit})
+        return [x for x in body if isinstance(x, dict)] if isinstance(body, list) else []
+
+    def write_overseas_tracking(self, order_no: str, company: str, number: str) -> bool:
+        """중국 크림 주문의 해외 택배사·송장을 넣는다(배송중으로 바뀐다). 허브넷 전송은 삼바웨이브 CN 루프가 한다."""
+        body = self._request(
+            'PUT', f'/orders/{order_no}/overseas-tracking', json={'company': company, 'number': number}
+        )
+        return bool(body.get('rows')) if isinstance(body, dict) else False
+
     def add_memo(self, order_no: str, line: str) -> bool:
         """주문 메모에 한 줄을 덧붙인다(상태·소싱 값은 그대로). 새로 붙였으면 True, 이미 같은 줄이 있으면 False.
 

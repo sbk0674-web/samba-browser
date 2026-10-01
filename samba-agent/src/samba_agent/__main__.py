@@ -36,6 +36,7 @@ from samba_agent.export.store import ExportQueue
 from samba_agent.gateway.slack_bot import SambaBot
 from samba_agent.llm.decide import make_decide
 from samba_agent.ops.dewu_order import make_shihuo_handler
+from samba_agent.ops.dewu_tracking import start_dewu_tracking_loop
 from samba_agent.ops.diagnose import diagnose
 from samba_agent.ops.events import EventLog
 from samba_agent.ops.masking import mask_text
@@ -378,6 +379,10 @@ def main() -> None:
     if settings.slack_bot_token and settings.slack_app_token:
         slack_app = App(token=settings.slack_bot_token.get_secret_value())
 
+    if wave is not None:
+        # 중국 크림 得物 주문 송장 — 30분마다 큐가 비었을 때 폰 得物 앱에서 읽어 해외송장에 넣는다(사용자 2026-10-01)
+        # 사람 대기(needs_human)는 폰을 쓰지 않으니 빼고, 대기·실행 중인 작업이 없을 때만 돈다
+        start_dewu_tracking_loop(wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()))
     bot = SambaBot(slack_app, worker, queue, settings, _diagnose_text)
 
     # 자동 수집 — 삼바웨이브 클라이언트가 있고 켜져 있을 때만 돈다. 슬랙이 없으면 스레드 없이 큐에만 쌓인다
