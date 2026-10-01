@@ -2368,13 +2368,13 @@ class BuyerAgent(AgentBase):
             allowed = set(only) if allowed is None else (set(allowed) & set(only))
         return allowed
 
-    def _pay_card_quote(self, account: str) -> list[dict[str, object]]:
+    def _pay_card_quote(self, account: str, tab: str | None = None) -> list[dict[str, object]]:
         """무신사페이 등록 기본 카드 견적 한 줄(`<key>_pay_card_quote`). 못 읽으면 빈 목록."""
         try:
             # 없거나 틀리면 AI 가 만든다(29CM 도 무신사페이 등록 카드로 결제한다)
             out = self.script_json(
                 source_of(self.spec.name).pay_card_quote_script,
-                {'profile': account},
+                {'profile': account, **({'tab': tab} if tab else {})},
                 goal=(
                     '열린 주문서(계정 profile)에서 무신사페이를 골라 등록된 카드 목록(카드사 이름 (번호) 신용카드/체크카드) 중 '
                     '맨 앞 기본 카드와, 그때의 총 결제 금액·후기 제외 적립·사용 적립금을 '
@@ -2467,8 +2467,10 @@ class BuyerAgent(AgentBase):
         if src.direct_card:
             # 카드 직접 결제 소싱처(H몰): 그 카드사 줄만 견적한다(다른 카드사는 허용 수단이 아니다)
             quote_args['cards'] = [src.direct_card]
-            if snap.get('order_tab'):
-                quote_args['tab'] = str(snap.get('order_tab'))
+        if snap.get('order_tab'):
+            # 방금 만든 주문서 탭을 짚어 준다 — 같은 계정의 주문서 탭이 하나 더 남아 있으면 스크립트가
+            # '주문서 탭 여러 개'로 멈춘다(실기 2026-10-02 29CM 교차 비교 승: 견적 없이 진행해 결제창을 못 열었다)
+            quote_args['tab'] = str(snap.get('order_tab'))
         try:
             out = self.script_json(
                 src.payment_quotes_script,
@@ -2490,7 +2492,7 @@ class BuyerAgent(AgentBase):
         if source_of(self.spec.name).pay_card_quote:
             # 간편결제(무신사페이)의 등록 기본 카드 견적 — 결제는 카드 목록 맨 앞 카드로 된다. 롯데 ×0.98·현대 ×0.973
             # 청구할인을 무신사머니와 같이 비교하려면 이 줄이 있어야 한다(실기: 무신사페이는 즉시할인 배너 카드로만 견적됐다)
-            extra = self._pay_card_quote(account)
+            extra = self._pay_card_quote(account, str(snap.get('order_tab') or '') or None)
             raw_quotes = [*(raw_quotes if isinstance(raw_quotes, list) else []), *extra]
         if not isinstance(raw_quotes, list) or not raw_quotes:
             self.note('결제수단 견적', '견적 없음 — 스냅샷 원가로 진행')
@@ -2910,6 +2912,12 @@ class BuyerAgent(AgentBase):
             why = '더 싸다'
         self.note('교차 비교', f'{sib_src.id} {why} — {sib_src.id} {s_acc} 로 산다')
         self._log_cross(a, f'{sib_src.id} 선택({why}) — {here} {own_txt} vs {sib_src.id} {other:,.0f}원')
+        # 비교용 레인의 주문서를 먼저 닫는다 — 열어 둔 채 짝 사이트가 사면 같은 계정 주문서가 둘이 되어
+        # 결제수단 견적·결제창이 '주문서 탭 여러 개'로 멈춘다(실기 2026-10-02 29CM 승 2회, 9/29·9/30 각 1회)
+        try:
+            cmp.tool('run_js', code=_CLOSE_LANE_TABS_JS, safety='no_pay')
+        except AgentFailure:
+            pass
         return self._buy_sibling(sib, a3)
 
     def _buy_sibling(self, sib: 'BuyerAgent', a3: Assignment) -> AgentResult:
