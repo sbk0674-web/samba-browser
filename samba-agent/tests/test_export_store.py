@@ -364,3 +364,21 @@ def test_memo_칸이_없던_옛_파일도_연다(tmp_path):
     db.close()
     q = ExportQueue(path)
     assert q.enqueue('A1', 'shopmine', 1, 0, '메모').memo == '메모'
+
+
+def test_새_요청이_다시_보는_요청보다_먼저_집힌다(tmp_path):
+    """실기 2026-10-01: 화면에 없는 옛 취소 요청들이 번갈아 집혀 새 원가 기입·상품코드 조회가 몇 시간 밀렸다."""
+    from samba_agent.export.failures import ExportFail
+    from samba_agent.export.store import ExportQueue
+
+    q = ExportQueue(tmp_path / 'exports.sqlite')
+    old = q.enqueue('OLD1', 'emp_cancel', 0, 0)
+    q.enqueue('OLD2', 'emp_cancel', 0, 0)
+    first = q.claim_next(['emp_cancel', 'emp'])
+    assert first.id == old.id
+    # 화면에 없어 미룬다 — 같이 본 OLD2 도 함께 미뤄진다
+    q.retry_later(first.id, ExportFail.NOT_FOUND, '아직 없다', 0, count_attempt=False)
+    assert q.defer_orders('emp_cancel', ['OLD2'], ExportFail.NOT_FOUND, '아직 없다', 0) == 1
+    q.enqueue('NEW1', 'emp', 1000, 0)
+    assert q.claim_next(['emp_cancel', 'emp']).order_no == 'NEW1'  # 새 요청 먼저
+    assert q.claim_next(['emp_cancel', 'emp']).order_no in ('OLD1', 'OLD2')

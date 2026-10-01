@@ -202,7 +202,12 @@ class ExportQueue:
         return _to_request(row) if row is not None else None
 
     def claim_next(self, targets: Sequence[str]) -> ExportRequest | None:
-        """맡은 대상의 대기 요청 중 가장 오래된 것을 running 으로 바꿔 돌려준다."""
+        """맡은 대상의 대기 요청 하나를 running 으로 바꿔 돌려준다.
+
+        아직 한 번도 시도하지 않은 요청이 먼저다(오래된 순). 다시 보는 요청은 그 뒤에, 가장 오래전에 본 것부터.
+        예전에는 만든 순서만 봐서, 화면에 없는 옛 요청 열몇 건이 번갈아 집히며 새 요청이 몇 시간씩 밀렸다
+        (실기 2026-10-01: EMP 취소 대기 14건 때문에 원가 기입·상품코드 조회가 한 번도 못 돌았다).
+        """
         if not targets:
             return None
         now = self._iso()
@@ -210,7 +215,8 @@ class ExportQueue:
         with self._immediate():
             row = self._db.execute(
                 f"SELECT * FROM export_requests WHERE status='pending' AND next_at<=? "
-                f'AND target IN ({marks}) ORDER BY created_at, id LIMIT 1',
+                f'AND target IN ({marks}) ORDER BY (fail_reason IS NOT NULL), '
+                'CASE WHEN fail_reason IS NULL THEN created_at ELSE updated_at END, id LIMIT 1',
                 (now, *targets),
             ).fetchone()
             if row is None:
@@ -291,6 +297,24 @@ class ExportQueue:
                 'attempts=MAX(attempts-?, 0), next_at=?, updated_at=? WHERE id=?',
                 (reason.value, detail, back, self._iso(delay_s), self._iso(), request_id),
             )
+
+    def defer_orders(
+        self, target: str, order_nos: Sequence[str], reason: ExportFail, detail: str, delay_s: float
+    ) -> int:
+        """묶음으로 같이 봤지만 화면에 없던 다른 대기 요청도 함께 미룬다(횟수는 세지 않는다).
+
+        안 미루면 방금 본 주문들이 하나씩 다시 집혀, 같은 묶음을 주문 수만큼 되풀이한다.
+        """
+        if not order_nos:
+            return 0
+        marks = ','.join('?' for _ in order_nos)
+        with self._immediate():
+            cur = self._db.execute(
+                f"UPDATE export_requests SET fail_reason=?, detail=?, next_at=?, updated_at=? "
+                f"WHERE target=? AND status='pending' AND order_no IN ({marks})",
+                (reason.value, detail, self._iso(delay_s), self._iso(), target, *order_nos),
+            )
+        return int(cur.rowcount)
 
     def recover_running(self, targets: Sequence[str]) -> int:
         """작업자가 도중에 죽어 남은 running 을 되돌린다.
