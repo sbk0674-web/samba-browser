@@ -1790,18 +1790,11 @@ def test_주소에_건물번호가_없고_상세가_번호로_시작하는_주�
     assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 라마바로 29'})
 
 
-def test_빠른_비교가_비슷한_계정은_한_묶음으로_주문서_견적한다():
-    """실기 2026-10-01: 빠른 비교 30원 차로 hwangnol06 을 골랐는데 주문서 원가는 edelvise06 이 쌌다."""
+def test_빠른_비교는_순서만_정하고_계정_전부를_주문서로_견적한다():
+    """실기 2026-10-02 비니: edelvise06 화면가 34,460(쿠폰 미반영)이라 비교에서 빠졌는데 주문서는 가장 쌌다."""
     from samba_agent.agents.buyer import quick_batches
 
-    scores = {'edelvise06': 114790.0, 'cannonfort': 114790.0, 'hwangnol06': 114760.0, 'roasterydg': 119620.0}
-    ranked = ['hwangnol06', 'edelvise06', 'cannonfort', 'roasterydg']
-    assert quick_batches(ranked, scores) == [['hwangnol06', 'edelvise06', 'cannonfort'], ['roasterydg']]
-
-
-def test_빠른_비교_차이가_크면_싼_계정부터_하나씩_견적한다():
-    from samba_agent.agents.buyer import quick_batches
-
-    scores = {'a': 50000.0, 'b': 56000.0}
-    # 값을 못 읽은 계정(c)은 뒤에 하나씩
-    assert quick_batches(['a', 'b', 'c'], scores) == [['a'], ['b'], ['c']]
+    scores = {'edelvise06': 34460.0, 'cannonfort': 34460.0, 'hwangnol06': 27590.0, 'roasterydg': 28320.0}
+    ranked = ['hwangnol06', 'roasterydg', 'edelvise06', 'cannonfort', 'unread']
+    assert quick_batches(ranked, scores) == [ranked]
+    assert quick_batches([], {}) == []
