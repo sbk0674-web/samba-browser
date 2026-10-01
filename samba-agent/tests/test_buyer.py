@@ -1798,3 +1798,13 @@ def test_빠른_비교는_순서만_정하고_계정_전부를_주문서로_견�
     ranked = ['hwangnol06', 'roasterydg', 'edelvise06', 'cannonfort', 'unread']
     assert quick_batches(ranked, scores) == [ranked]
     assert quick_batches([], {}) == []
+
+
+def test_단일_상품_색_표기가_달라도_같은_색이면_진행한다():
+    """실기 2026-10-02 롯데온 선캡: 주문 옵션 'BLACK ONE', 상품명 'NE3CS11A_BLK' — 선택란 없는 단일 상품."""
+    from samba_agent.agents.buyer import single_item_ok
+
+    snap = {'order_tab': 't1', 'cost': 36580, 'product_name': '우먼 유브이 라이트 선캡 NE3CS11A_BLK'}
+    assert single_item_ok('BLACK ONE', snap)
+    # 이름에 다른 색이 적혀 있으면 막는다
+    assert not single_item_ok('BLACK ONE', {**snap, 'product_name': '우먼 유브이 라이트 선캡 NE3CS11A_WHT'})

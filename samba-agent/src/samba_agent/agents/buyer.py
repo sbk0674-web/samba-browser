@@ -1065,6 +1065,42 @@ _COLOR_WORDS_KO = frozenset(
 _COLOR_WORDS = _COLOR_WORDS_EN | _COLOR_WORDS_KO
 
 
+# 같은 색의 다른 표기 — 주문 옵션 'BLACK' 과 상품명 'NE3CS11A_BLK' 는 같은 색이다(실기 2026-10-02 롯데온 선캡)
+_COLOR_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({'black', 'blk', 'bk', '블랙', '검정'}),
+    frozenset({'white', 'wht', 'wh', '화이트', '흰색'}),
+    frozenset({'navy', 'nvy', '네이비'}),
+    frozenset({'grey', 'gray', 'gry', '그레이', '회색'}),
+    frozenset({'beige', '베이지'}),
+    frozenset({'brown', '브라운'}),
+    frozenset({'red', '레드'}),
+    frozenset({'blue', '블루'}),
+    frozenset({'green', '그린'}),
+    frozenset({'pink', '핑크'}),
+    frozenset({'yellow', '옐로우'}),
+    frozenset({'khaki', '카키'}),
+    frozenset({'ivory', '아이보리'}),
+    frozenset({'cream', '크림'}),
+    frozenset({'purple', '퍼플'}),
+    frozenset({'orange', '오렌지'}),
+    frozenset({'silver', '실버'}),
+    frozenset({'gold', '골드'}),
+    frozenset({'charcoal', '차콜'}),
+    frozenset({'mint', '민트'}),
+)
+
+
+def _same_colors(option_colors: list[str], name_colors: set[str]) -> bool:
+    """주문 옵션의 색 낱말이 모두 상품명에 적힌 색과 같은 색(표기만 다름)인가."""
+    if not option_colors or not name_colors:
+        return False
+    for color in option_colors:
+        group = next((g for g in _COLOR_GROUPS if color in g), None)
+        if group is None or not (group & name_colors):
+            return False
+    return True
+
+
 def _name_colors(name: str) -> set[str]:
     """상품명에 적힌 색 이름들(소문자 상품명 기준)."""
     words = set(re.split(r'[^a-z]+', name))
@@ -1084,7 +1120,11 @@ def single_item_ok(option: str | None, snap: dict[str, object]) -> bool:
         return True
     # 상품명에 색 글자가 아예 없는 단일 상품(실기 2026-10-01 롯데온 라코스테 쇼퍼백 '블랙 FREE' — 이름은 품번뿐):
     # 선택란이 없으면 변형이 하나뿐이라 색을 잘못 고를 수 없다. 이름에 **다른 색**이 적혀 있을 때만 막는다
-    return all(t in _COLOR_WORDS for t in rest) and not _name_colors(name)
+    if not all(t in _COLOR_WORDS for t in rest):
+        return False
+    named = _name_colors(name)
+    # 이름에 색이 적혀 있어도 주문 색과 같은 색의 다른 표기(BLACK ↔ BLK)면 같은 상품이다
+    return not named or _same_colors(rest, named)
 
 
 # SSG 장바구니 — 바로구매 전에 한 번 열어 기본 배송지를 불러오게 한다(_warm_ssg_cart)
