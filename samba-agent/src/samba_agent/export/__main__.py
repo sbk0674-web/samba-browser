@@ -11,6 +11,7 @@ import logging
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import get_args
 
@@ -93,6 +94,32 @@ def _auth_toast(program: str, detail: str) -> None:
         toast.show(f'{name} 창이 막혀 있다', f'{detail}\n창을 닫으면 외부 기입이 이어서 돈다.')
 
 
+# 삼바웨이브에서 '취소로 가는 중'으로 보는 상태 — 이 밖이면(주문접수·배송대기 등) 외부 취소를 하지 않는다
+_CANCEL_STATES = frozenset({'cancelling', 'cancel_requested', 'cancelled'})
+
+
+def _still_cancelling() -> 'Callable[[str], bool | None] | None':
+    """취소 연동 직전 확인 함수. 삼바웨이브 설정이 없으면 None(확인 없이 예전처럼 돈다)."""
+    from samba_agent.wave.client import WaveClient, WaveError
+
+    settings = load_settings(DEFAULT_ROOT / '.env')
+    if not (settings.wave_internal_token and settings.wave_tenant_id):
+        return None
+
+    def check(order_no: str) -> bool | None:
+        client = WaveClient(
+            settings.wave_url, settings.wave_internal_token.get_secret_value(), settings.wave_tenant_id
+        )
+        try:
+            return (client.get_order(order_no).status or '').strip().lower() in _CANCEL_STATES
+        except WaveError:
+            return None
+        finally:
+            client.close()
+
+    return check
+
+
 def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
     adapters = build_adapters(targets)
     if not adapters:
@@ -114,6 +141,7 @@ def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
         min_idle_by_target={t: EMP_MIN_IDLE_S for t in adapters if t.startswith('emp')},
         # 인증 창은 사람이 처리한다 — 슬랙을 안 보니 윈도우 알림으로 바로 알린다(사용자 2026-09-29)
         on_auth_required=_auth_toast,
+        still_cancelling=_still_cancelling(),
     ).run_forever(stop.is_set)
     return 0
 

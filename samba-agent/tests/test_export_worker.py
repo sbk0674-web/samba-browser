@@ -435,3 +435,39 @@ def test_메모가_이미_들어_있으면_쓰지_않는다(queue):
     out = worker(queue, adapter).run_once()
     assert out.status == 'done'
     assert not any(c.startswith('write') for c in adapter.calls)
+
+
+class FakeCancelAdapter:
+    """취소 연동(일괄형) 대역 — 넘겨받은 주문을 전부 처리했다고 답한다."""
+
+    one_at_a_time = False
+
+    def __init__(self) -> None:
+        self.seen: list[list[str]] = []
+
+    def complete_pending(self, order_nos):
+        self.seen.append(list(order_nos))
+        return list(order_nos)
+
+
+def test_취소_연동은_주문이_지금도_취소_상태일_때만_실행한다(queue):
+    """실기 2026-10-01: 취소중으로 돌렸다가 나중에 이행된 주문에 EMP 취소가 대기로 남아 있었다."""
+    from samba_agent.export.adapters import BatchAdapter
+
+    adapter = FakeCancelAdapter()
+    assert isinstance(adapter, BatchAdapter)
+    state = {'A1': False, 'A2': True, 'A3': None}
+    w = ExportWorker(
+        queue, {'emp_cancel': adapter}, user_idle_s=lambda: 999.0, still_cancelling=lambda no: state[no]
+    )
+    for no in ('A1', 'A2', 'A3'):
+        queue.enqueue(no, 'emp_cancel', 0, 0)
+    first = w.run_once()  # A1 — 이미 이행된 주문: 프로그램을 건드리지 않고 끝낸다
+    assert first.order_no == 'A1' and first.status == 'failed'
+    assert adapter.seen == []
+    second = w.run_once()  # A2 — 취소 상태. 확인 못 한 A3 은 묶음에 태우지 않는다
+    assert second.order_no == 'A2' and second.status == 'done'
+    assert adapter.seen == [['A2']]
+    third = w.run_once()  # A3 — 상태를 확인 못 했다: 실행하지 않고 미룬다
+    assert third.order_no == 'A3' and third.status == 'pending'
+    assert adapter.seen == [['A2']]

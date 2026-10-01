@@ -92,6 +92,7 @@ class ExportWorker:
         min_idle_s: float = 20.0,
         min_idle_by_target: Mapping[str, float] | None = None,
         on_auth_required: Callable[[str, str], object] | None = None,
+        still_cancelling: Callable[[str], bool | None] | None = None,
         max_attempts: int = 5,
         retry_delay_s: float = 60.0,
     ) -> None:
@@ -104,6 +105,9 @@ class ExportWorker:
         # 인증 창이 떠 있을 때 사람에게 알리는 함수(프로그램 이름, 설명). 같은 프로그램은 30분에 한 번만
         self._on_auth_required = on_auth_required
         self._auth_alerted: dict[str, float] = {}
+        # 취소 연동 직전 확인 — 그 주문이 지금도 취소 상태인가(True/False, 확인 못 하면 None).
+        # 취소중으로 돌렸다가 나중에 이행된 주문을 외부 프로그램에서 취소해 버리지 않게 한다(실기 2026-10-01)
+        self._still_cancelling = still_cancelling
         self._max_attempts = max_attempts
         self._retry_delay_s = retry_delay_s
 
@@ -132,7 +136,28 @@ class ExportWorker:
         self._process(req, self._adapters[req.target])
         return self._queue.get(req.id)
 
+    def _cancel_ok(self, order_no: str) -> bool | None:
+        if self._still_cancelling is None:
+            return True
+        try:
+            return self._still_cancelling(order_no)
+        except Exception:  # noqa: BLE001 — 확인 실패는 "모름"이다(취소를 밀어붙이지 않는다)
+            return None
+
     def _process(self, req: ExportRequest, adapter: Adapter | BatchAdapter) -> None:
+        if req.target.endswith('_cancel'):
+            ok = self._cancel_ok(req.order_no)
+            if ok is False:
+                self._queue.fail(
+                    req.id, ExportFail.BLOCKED, '취소 연동 중단 — 삼바웨이브에서 이 주문이 취소 상태가 아니다'
+                )
+                return
+            if ok is None:
+                self._queue.retry_later(
+                    req.id, ExportFail.BLOCKED, '삼바웨이브 상태를 확인하지 못해 취소 연동을 미룬다',
+                    self._retry_delay_s, count_attempt=False,
+                )
+                return
         batch = isinstance(adapter, BatchAdapter)
         completed: set[str] = set()
         if batch:
@@ -229,6 +254,9 @@ class ExportWorker:
             order_nos = [req.order_no]
         else:
             order_nos = [req.order_no, *self._queue.pending_order_nos(req.target)]
+            if req.target.endswith('_cancel'):
+                # 묶음에 같이 태우는 다른 대기 주문도 지금 취소 상태인 것만 넘긴다(확인 못 한 것은 이번엔 뺀다)
+                order_nos = [req.order_no, *[o for o in order_nos[1:] if self._cancel_ok(o) is True]]
         try:
             completed = set(adapter.complete_pending(order_nos))
         except AdapterRetry as e:
