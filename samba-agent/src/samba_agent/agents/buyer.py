@@ -940,6 +940,25 @@ COUPON_GAP_MIN_WON = 3000
 COUPON_GAP_RATE = 0.05
 
 
+# 빠른 비교(상품 화면 할인가 − 최대 적립)는 결제수단 적립·청구할인·적립금 사용을 모른다. 값이 이 폭 안이면
+# 순위를 믿지 않고 주문서 견적으로 가린다(실기 2026-10-01 플리즈노팔로우: 빠른 비교 30원 차로 hwangnol06 을 골랐는데
+# 주문서 원가는 edelvise06 무신사머니가 862원 쌌다)
+QUICK_TIE_MIN_WON = 1500
+QUICK_TIE_RATE = 0.03
+
+
+def quick_batches(ranked: list[str], scores: dict[str, float]) -> list[list[str]]:
+    """빠른 비교 순위를 견적 묶음으로 나눈다. 최저와 비슷한 계정은 한 묶음(모두 주문서 견적), 나머지는 하나씩."""
+    if not ranked:
+        return []
+    best = scores.get(ranked[0])
+    if best is None:
+        return [[acc] for acc in ranked]
+    limit = best + max(QUICK_TIE_MIN_WON, best * QUICK_TIE_RATE)
+    first = [acc for acc in ranked if acc in scores and scores[acc] <= limit]
+    return [first] + [[acc] for acc in ranked if acc not in first]
+
+
 def coupon_gap(my_price: float | None, sheet_total: float) -> float:
     """주문서 총액이 나의 할인가보다 허용 폭을 넘게 비싸면 그 차액, 아니면 0."""
     if not my_price or my_price <= 0 or sheet_total <= 0:
@@ -3096,7 +3115,12 @@ class BuyerAgent(AgentBase):
         self._quote_errors = []
         self._quote_skips: list[str] = []
         ranked = self._quick_rank(a, accounts)
-        batches = [[acc] for acc in ranked] if ranked else [accounts]
+        batches = quick_batches(ranked, getattr(self, '_quick_scores', {}) or {}) if ranked else [accounts]
+        if ranked and len(batches[0]) > 1:
+            self.note(
+                '빠른 비교',
+                f'{", ".join(batches[0])} 의 값이 비슷하다 — 결제수단 적립·청구할인까지 주문서로 비교한다',
+            )
         tried: list[str] = []
         quotes: list[tuple[str, dict[str, object]]] = []
         unpayable = False

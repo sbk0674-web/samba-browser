@@ -1788,3 +1788,20 @@ def test_주소에_건물번호가_없고_상세가_번호로_시작하는_주�
     assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 가나다로 31'})
     # 도로명이 다르면 다른 곳이다
     assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 라마바로 29'})
+
+
+def test_빠른_비교가_비슷한_계정은_한_묶음으로_주문서_견적한다():
+    """실기 2026-10-01: 빠른 비교 30원 차로 hwangnol06 을 골랐는데 주문서 원가는 edelvise06 이 쌌다."""
+    from samba_agent.agents.buyer import quick_batches
+
+    scores = {'edelvise06': 114790.0, 'cannonfort': 114790.0, 'hwangnol06': 114760.0, 'roasterydg': 119620.0}
+    ranked = ['hwangnol06', 'edelvise06', 'cannonfort', 'roasterydg']
+    assert quick_batches(ranked, scores) == [['hwangnol06', 'edelvise06', 'cannonfort'], ['roasterydg']]
+
+
+def test_빠른_비교_차이가_크면_싼_계정부터_하나씩_견적한다():
+    from samba_agent.agents.buyer import quick_batches
+
+    scores = {'a': 50000.0, 'b': 56000.0}
+    # 값을 못 읽은 계정(c)은 뒤에 하나씩
+    assert quick_batches(['a', 'b', 'c'], scores) == [['a'], ['b'], ['c']]

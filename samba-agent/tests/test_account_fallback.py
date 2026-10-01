@@ -101,16 +101,18 @@ def test_구매_한도에_걸린_계정은_빼고_다음으로_싼_계정으로_
             {
                 'buyer01': AgentFailure('fail', LIMIT, FailReason.OUT_OF_STOCK),
                 'buyer02': {'cost': 44390.0},
+                'buyer03': {'cost': 44390.0},
+                'buyer05': {'cost': 45550.0},
             },
             calls,
         ),
     )
     account, snap = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert account == 'buyer02'
-    assert calls == ['buyer01', 'buyer02']  # 한도 계정 다음으로 싼 계정(동률이면 앞 계정)
-    assert any(e.label == '계정 전환' and 'buyer02' in e.detail for e in buyer.evidence)
-    # 이긴 계정이 마지막으로 연 계정이라 다시 만들지 않는다
-    assert 'resnap' not in snap
+    assert account == 'buyer02'  # 한도 계정 다음으로 싼 계정(동률이면 앞 계정)
+    # 빠른 비교가 비슷한(3% 안) 계정은 모두 주문서로 견적한다 — 빠른 값은 결제수단 적립·청구할인을 모른다
+    assert calls == ACCOUNTS
+    # 이긴 계정이 마지막으로 연 계정이 아니라 주문서를 다시 만든다
+    assert snap.get('resnap') is True
 
 
 @respx.mock
@@ -140,7 +142,7 @@ def test_로그인_안_된_계정도_계정_사유라_다음_계정으로_잇는
 @respx.mock
 def test_상품_사유면_다른_계정을_돌지_않는다(buyer, monkeypatch) -> None:
     """품절은 계정과 무관하다 — 다음 계정으로 잇지 않는다."""
-    mock_quick({'buyer01': 40000, 'buyer02': 41000, 'buyer03': 42000, 'buyer05': 43000})
+    mock_quick({'buyer01': 40000, 'buyer02': 42000, 'buyer03': 44000, 'buyer05': 46000})
     calls: list[str] = []
     monkeypatch.setattr(
         BuyerAgent,
