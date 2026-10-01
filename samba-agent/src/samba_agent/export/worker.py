@@ -25,7 +25,13 @@ log = logging.getLogger(__name__)
 
 # 사람·창 상태를 기다리는 사유 — 시도 횟수에 넣지 않는다(5번 만에 실패로 끝나 몇 시간 방치되지 않게).
 # 대화상자(BLOCKED)·인증 창은 윈도우 알림으로 사람에게 알린다
-_WAIT_REASONS = (ExportFail.BUSY, ExportFail.AUTH_REQUIRED, ExportFail.BLOCKED)
+_WAIT_REASONS = (
+    ExportFail.BUSY,
+    ExportFail.AUTH_REQUIRED,
+    ExportFail.BLOCKED,
+    # 프로그램이 꺼져 있다(밤사이 EMP 종료, 2026-10-01) — 켜질 때까지 기다리고 알린다
+    ExportFail.WINDOW_MISSING,
+)
 
 
 @dataclass(frozen=True)
@@ -138,7 +144,11 @@ class ExportWorker:
                 self._retry_delay_s,
                 count_attempt=outcome.reason not in _WAIT_REASONS,
             )
-            if outcome.reason in (ExportFail.AUTH_REQUIRED, ExportFail.BLOCKED):
+            if outcome.reason in (
+                ExportFail.AUTH_REQUIRED,
+                ExportFail.BLOCKED,
+                ExportFail.WINDOW_MISSING,
+            ):
                 self._alert_auth(req.target, outcome.detail)
         else:
             assert outcome.reason is not None
