@@ -15,9 +15,13 @@ if (ls.some(l => / link "일시품절"/.test(l))) return { ...R, error: 'sold_ou
 // 옵션: '100 (남은수량:4)' 또는 'L' — 주문서 옵션 글자(snap.selected)와 앞부분이 정확히 같은 것 하나
 const opt = nz(args.option).replace(/\s*\(남은수량[^)]*\)\s*$/, '')
 // 큰 페이지(신세계백화점)는 전체 목록이 잘린다 — 검색으로 찾고, '사이즈 선택하세요.'처럼 이름 붙은 칸을 먼저(맨 앞은 숨은 칸, 09-30)
-const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l))
-const sel = selAll.find(l => !/ link "선택하세요\."/.test(l)) || selAll[0]
-if (sel) {
+// 선택 칸이 둘(색·사이즈)이면 주문서 옵션 '색/사이즈'를 칸 순서대로 하나씩 고른다(2026-10-02 다이나핏 '라이트 블루(B1)/L')
+const selN = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l)).length
+const parts = selN > 1 && opt.includes('/') ? opt.split('/').map(nz).filter(Boolean) : [opt]
+for (const opt of parts) {
+  const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l))
+  const sel = selAll.find(l => !/ link "선택하세요\."/.test(l)) || selAll[0]
+  if (!sel) break
   await page.click(idL(sel))
   await sleep(1500)
   ls = [...await lines({ interactive: true }), ...await lines({ query: opt || '선택' })]
