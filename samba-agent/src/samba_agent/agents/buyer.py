@@ -131,14 +131,24 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
     b = _norm_address(str(applied.get('address', '')))
     if not a or not b:
         return False
-    if a in b or b in a:
+    # 주문 주소에 건물번호가 없고 상세주소가 번호로 시작하면('…로' + '29, 5층') 포함 관계만으로는 건물번호를
+    # 확인하지 못한다('…로 31' 도 품는다) — 아래의 주소+상세 숫자 비교로 넘긴다
+    number_in_detail = not re.search(r'\d', a) and bool(
+        re.match(r'\s*\d', str(expected.get('address_detail') or ''))
+    )
+    if (a in b or b in a) and not number_in_detail:
         return True
     if re.findall(r'\d+', a) == re.findall(r'\d+', b) and a[-6:] in b:
         return True
     # 사이트가 상세주소까지 붙여 되읽는 경우(실기 2026-09-30 패션플러스: '도로명 12 101동 1203호') — 넣은 주소+상세의
     # 숫자 토큰이 되읽은 주소와 같고 도로명 끝부분이 들어 있으면 같은 곳이다
     full = _norm_address(f'{expected.get("address", "")} {expected.get("address_detail") or ""}')
-    return bool(full) and re.findall(r'\d+', full) == re.findall(r'\d+', b) and a[-6:] in b
+    if full and re.findall(r'\d+', full) == re.findall(r'\d+', b) and a[-6:] in b:
+        return True
+    # 주문 주소에 건물번호가 없고 상세주소가 번호로 시작하는 주문(실기 2026-10-01 패션플러스: 주소 '…로', 상세 '29, …')은
+    # 사이트가 '…로 29' + 상세로 나눠 되읽는다 — 양쪽 모두 주소+상세를 붙여 숫자 토큰을 비교한다
+    b_full = _norm_address(f'{applied.get("address", "")} {applied.get("address_detail") or ""}')
+    return bool(full) and re.findall(r'\d+', full) == re.findall(r'\d+', b_full) and a[-6:] in b_full
 
 
 # 결제수단 이름 → 키마스터 결제 제공자(src/shared/vault.ts PaymentProvider). 앞에서부터 먼저 맞는 것

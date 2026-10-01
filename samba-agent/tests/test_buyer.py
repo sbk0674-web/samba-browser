@@ -1775,3 +1775,16 @@ def test_롯데홈쇼핑_나이키_아디다스는_직배():
     assert decide_order_type(order('ADIDAS 삼바 OG'), 40000)[0] == 'direct'
     assert decide_order_type(order('뉴발란스 530'), 40000)[0] == 'kkadaegi'  # 다른 브랜드는 정가 비교 그대로
     assert decide_order_type(order('나이키 에어포스', seller='쿠팡(unclehg)'), 40000)[0] == 'kkadaegi'
+
+
+def test_주소에_건물번호가_없고_상세가_번호로_시작하는_주문도_같은_곳으로_본다():
+    """실기 2026-10-01 패션플러스: 주문 주소 '…로', 상세 '29, 5층' → 사이트는 '…로 29' + '5층' 으로 되읽는다."""
+    from samba_agent.agents.buyer import shipping_matches
+
+    want = {'name': '홍길동', 'address': '경기 용인시 처인구 가나다로', 'address_detail': '29, 5층'}
+    got = {'name': '홍길동', 'address': '경기 용인시 처인구 가나다로 29', 'address_detail': '5층', 'zip': '16827'}
+    assert shipping_matches(want, got)
+    # 건물번호가 다르면 다른 곳이다
+    assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 가나다로 31'})
+    # 도로명이 다르면 다른 곳이다
+    assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 라마바로 29'})
