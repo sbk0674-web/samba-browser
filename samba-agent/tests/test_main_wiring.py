@@ -128,3 +128,20 @@ def test_배송_연락처_설정은_없다():
 def test_자동_수집은_기본으로_켜져_있고_끌_수_있다():
     assert _settings().intake_enabled is True
     assert _settings(SAMBA_INTAKE_ENABLED='false').intake_enabled is False
+
+
+class _BrokenBot:
+    """네트워크가 끊겨 슬랙 호출이 예외를 던지는 봇."""
+
+    def post(self, thread_ts, text, blocks=None):  # type: ignore[no-untyped-def]
+        raise OSError('getaddrinfo failed')
+
+    def post_approval(self, thread_ts, order_no, stage, summary):  # type: ignore[no-untyped-def]
+        raise OSError('getaddrinfo failed')
+
+
+def test_슬랙_전송_예외는_작업을_죽이지_않는다():
+    # 2026-10-01 DNS 끊김 — 보고 예외로 running 작업이 고아가 돼 큐가 멈췄다
+    report, approval_report = make_reporters(lambda: _BrokenBot())
+    report(_Job(), '접수: A1')
+    approval_report(_Job(), 'A1', 'pay', '요약')

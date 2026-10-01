@@ -78,12 +78,24 @@ def make_reporters(get_bot: 'Callable[[], SambaBot]') -> tuple[ReportFn, Approva
     콜러블로 받아 호출 시점에 푼다.
     """
 
+    # 슬랙 전송 오류(네트워크 끊김 등)가 작업을 죽이면 안 된다 — 2026-10-01 DNS 끊김 때
+    # 작업을 running 으로 잡은 직후 보고가 터져 그 작업이 고아로 남고 큐가 멈췄다
     def report(job: Job, line: str) -> None:
-        if not get_bot().post(job.thread_ts, line):
+        try:
+            posted = get_bot().post(job.thread_ts, line)
+        except Exception as e:  # noqa: BLE001 — 보고 실패는 기록만 하고 넘긴다
+            log.warning('슬랙 보고 실패(%s) — 로그로만 남긴다', type(e).__name__)
+            posted = False
+        if not posted:
             log.info('%s', mask_text(line))
 
     def approval_report(job: Job, order_no: str, stage: str, summary: str) -> None:
-        if not get_bot().post_approval(job.thread_ts, order_no, stage, summary):
+        try:
+            posted = get_bot().post_approval(job.thread_ts, order_no, stage, summary)
+        except Exception as e:  # noqa: BLE001
+            log.warning('슬랙 승인 요청 실패(%s) — 로그로만 남긴다', type(e).__name__)
+            posted = False
+        if not posted:
             log.info('승인 요청(슬랙 없음) %s %s\n%s', order_no, stage, mask_text(summary))
 
     return report, approval_report
