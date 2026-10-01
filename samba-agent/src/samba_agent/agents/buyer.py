@@ -518,6 +518,11 @@ POINTS_USE_MIN = 50000
 ALLOWED_CARD_ISSUERS = ('현대', 'KB', '국민', '롯데', '신한', '농협', 'NH', '우리', 'BC', '비씨', '삼성')
 
 
+# 롯데홈쇼핑 판매건 중 이 브랜드는 늘 직배(사용자 2026-10-01 "롯데홈쇼핑 나이키,아디다스 직배로 주문해")
+LOTTEHOME_SELLER_RE = re.compile(r'롯데홈쇼핑|롯데아이몰|lottehome', re.IGNORECASE)
+DIRECT_BRANDS_RE = re.compile(r'나이키|아디다스|nike|adidas', re.IGNORECASE)
+
+
 def decide_order_type(
     order: OrderRef, normal_price: float | None, forced: str | None = None, forwarder: bool = False
 ) -> tuple[str, str]:
@@ -534,6 +539,9 @@ def decide_order_type(
         return forced, f'소싱처 규칙({forced})'
     if order.order_type == 'gift':
         return 'gift', '선물 태그'
+    if LOTTEHOME_SELLER_RE.search(order.seller or '') and DIRECT_BRANDS_RE.search(order.sku or ''):
+        # 사용자 2026-10-01: 롯데홈쇼핑 나이키·아디다스 주문은 정가 비교 없이 직배
+        return 'direct', '롯데홈쇼핑 나이키·아디다스는 직배(사용자 규칙)'
     if is_poison_seller(order.seller):
         return 'kkadaegi', '포이즌 판매건은 전부 까대기'
     if forwarder:

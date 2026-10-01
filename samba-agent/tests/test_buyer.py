@@ -1755,3 +1755,16 @@ def test_나의_할인가보다_주문서가_크게_비싸면_결제하지_않�
     assert e.value.fail_reason is not FailReason.MARGIN  # 자동 취소로 가면 안 된다
     coupon_gap_failure(36350, 37850, 'edelvise06')  # 1,500원 — 적립금·등급 차이 범위, 통과
     coupon_gap_failure(None, 37440, 'edelvise06')  # 빠른 비교 없음 — 검사 안 함
+
+
+def test_롯데홈쇼핑_나이키_아디다스는_직배():
+    """사용자 2026-10-01: 롯데홈쇼핑 나이키·아디다스 주문은 정가와 상관없이 직배."""
+    from samba_agent.agents.buyer import decide_order_type
+
+    def order(sku: str, seller: str = '롯데홈쇼핑(037800LT)') -> OrderRef:
+        return OrderRef(order_no='1', source='MUSINSA', seller=seller, sku=sku, qty=1, sale_price=50000, order_type='direct')
+
+    assert decide_order_type(order('매장정품 나이키 에어포스'), 40000)[0] == 'direct'  # 정가 ≤ 결제액이어도
+    assert decide_order_type(order('ADIDAS 삼바 OG'), 40000)[0] == 'direct'
+    assert decide_order_type(order('뉴발란스 530'), 40000)[0] == 'kkadaegi'  # 다른 브랜드는 정가 비교 그대로
+    assert decide_order_type(order('나이키 에어포스', seller='쿠팡(unclehg)'), 40000)[0] == 'kkadaegi'
