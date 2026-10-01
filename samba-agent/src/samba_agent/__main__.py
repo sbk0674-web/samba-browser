@@ -40,6 +40,7 @@ from samba_agent.ops.events import EventLog
 from samba_agent.ops.masking import mask_text
 from samba_agent.ops.releases import ReleaseStore
 from samba_agent.ops.site_scripts import install_missing
+from samba_agent.ops.ssg_gift_accept import make_after_done
 from samba_agent.ops.tracing import configure_tracing
 from samba_agent.queue.db import Job, JobQueue
 from samba_agent.queue.intake import Intake
@@ -215,6 +216,10 @@ def main() -> None:
     # 조회 통로: 삼바웨이브 API 우선, 실패하면 앱 저장 스크립트
     _parse_order = parse_order_fn(wave, lookup_bridge)
 
+    def _source_sku_of(job: Job) -> tuple[str, str]:
+        order = _parse_order(job.order_no, job.options)
+        return order.source, order.sku
+
     agents = build_agents(reg, bridge, decide, wave, settings.compare_accounts_max)
     repair_on = settings.repair_enabled
     if repair_on and not app_supports_pay_guard(bridge.scoped(['run_js'])):
@@ -334,6 +339,8 @@ def main() -> None:
             ready=lambda: _bridge_ready(bridge),
             flag_order=flagger.mark if flagger is not None else None,
             add_memo=wave.add_memo if wave is not None else None,
+            # SSG 선물 주문은 결제 뒤 폰 카카오톡에서 선물을 받아야 발송된다(사용자 2026-10-01 하네스 이식)
+            after_done=make_after_done(_source_sku_of),
             sources=frozenset(
                 x.strip().upper() for x in settings.intake_sources.split(',') if x.strip()
             ),

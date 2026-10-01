@@ -726,3 +726,15 @@ def test_카카오페이_비밀번호_미입력이면_다른_수단으로_사지
     assert job.state == 'needs_human'
     assert not job.options.get('card')  # 네이버페이로 다시 사지 않는다
     assert memos and memos[0][0] == 'A1' and '54,000원' in memos[0][1]
+
+
+def test_끝난_작업은_뒤처리를_부르고_결과를_보고한다(setup):
+    q, log, sent, make = setup
+    w = make(gate=False)
+    w.d.dry_run = False
+    calls: list[str] = []
+    w.d.after_done = lambda job, out: calls.append(job.order_no) or 'SSG 선물 받기 완료'
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    assert w.tick().state == 'done'
+    assert calls == ['A1']
+    assert any('SSG 선물 받기 완료' in s for s in sent)

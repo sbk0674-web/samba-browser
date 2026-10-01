@@ -62,6 +62,8 @@ class WorkerDeps:
     flag_order: Callable[..., str | None] | None = None
     # 주문 메모 한 줄 덧붙이기(주문번호, 글) — 카카오페이 최저가인데 비밀번호를 못 받은 주문에 쓴다. 없으면 보고만 한다
     add_memo: Callable[[str, str], bool] | None = None
+    # 끝난(done) 작업 뒤처리 — (작업, 그래프 결과) → 보고할 한 줄(할 일 없으면 None). SSG 선물 수락(폰)에 쓴다
+    after_done: Callable[[Job, dict], str | None] | None = None
     # 처리할 소싱처 범위(대문자 id). 비어 있으면 거르지 않는다. 접수 뒤 삼바웨이브에서 소싱처가 바뀐 주문을
     # 시작 직전에 한 번 더 거른다(실기 2026-09-25: 무신사로 접수된 주문이 롯데온으로 바뀌어 돌았다)
     sources: frozenset[str] = frozenset()
@@ -357,6 +359,13 @@ class Worker:
             job,
             f'{job.order_no} {outcome}' + (f' — 사유 {fail}' if fail else ' — 완료'),
         )
+        if outcome == 'done' and not self.d.dry_run and self.d.after_done is not None:
+            try:
+                line = self.d.after_done(job, out)
+            except Exception as exc:  # noqa: BLE001 — 뒤처리 실패가 끝난 주문을 되돌리지 않는다
+                line = f'뒤처리 실패: {mask_text(str(exc))[:120]}'
+            if line:
+                self.d.report(job, f'{job.order_no} {line}')
         if outcome == 'needs_human' and not self.d.dry_run and not job.options.get(SHIP_RETRY_KEY):
             reason = _failed_reason(out)
             if SHIP_RETRY_MARK in reason:
