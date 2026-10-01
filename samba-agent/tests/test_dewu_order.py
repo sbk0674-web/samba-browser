@@ -131,7 +131,7 @@ def test_성공하면_원가와_배송비_8500을_기록한다(monkeypatch):
     monkeypatch.setattr(dewu_order, 'buy_on_dewu', lambda *a, **k: dewu_order.DewuResult('110', 580.92, 564, 202.16))
     monkeypatch.setattr('samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'S1')
     handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 202.16)
-    outcome, _fail, line = handle(None, SimpleNamespace(order_no='A1'))
+    outcome, _fail, _line = handle(None, SimpleNamespace(order_no='A1'))
     assert outcome == 'done'
     assert recorded['sourcing_order_number'] == '110' and recorded['shipping_fee'] == 8500
     assert recorded['sourcing_account_id'] == 'sa_DEWU'  # 주문계정이 있어야 배송대기중으로 넘어간다
