@@ -48,5 +48,7 @@ for (const m of pay.matchAll(/([가-힣A-Za-z.\s]+?)\s*결제완료\s*([\d,]+)\s
   else { R.paid += amt; methods.push(name) }
 }
 R.card = methods.join(' + ')
+// 네이버페이 기본 적립(결제액 1%)은 롯데온 상세에 안 나온다 — 견적과 같은 규칙으로 더한다(사용자 2026-09-25 원가 공식)
+if (/네이버페이/.test(R.card)) R.reward += Math.round(R.paid * 0.01)
 if (!R.paid && !R.points_used) R.note = 'payment info not read'
 return done(R)
