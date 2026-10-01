@@ -275,11 +275,15 @@ def make_shihuo_handler(
             f'得物 앱(임성희폰) 결제 ¥{res.paid_cny:g}(상품 ¥{res.item_cny:g}+알리페이 카드수수료) × {res.rate:g}'
             f' · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
         )
+        # 주문계정(得物 계정)을 같이 넣어야 삼바 상태가 배송대기중으로 넘어간다(사용자 2026-10-01: 계정을 안 골라
+        # 주문접수로 남았다)
+        account_id = wave.only_sourcing_account_id('DEWU')  # type: ignore[attr-defined]
         wave.record_sourcing(  # type: ignore[attr-defined]
             order_no,
             sourcing_order_number=res.order_no,
             cost=res.cost_krw,
             shipping_fee=CN_SHIPPING_FEE,
+            sourcing_account_id=account_id,
             notes=note,
         )
         margin = (revenue - res.cost_krw - CN_SHIPPING_FEE) / revenue * 100

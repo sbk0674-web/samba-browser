@@ -345,6 +345,16 @@ class WaveClient:
                 return str(item.get('id') or '') or None
         return None
 
+    def only_sourcing_account_id(self, source_site: str) -> str | None:
+        """그 소싱처의 활성 계정이 하나뿐이면 그 id(得物 '마놀' 처럼 계정이 하나인 곳). 없거나 여럿이면 None."""
+        try:
+            body = self._request('GET', '/sourcing-accounts', params={'source_site': source_site})
+        except WaveError:
+            return None
+        items = body.get('items') if isinstance(body, dict) else body
+        ids = [str(i.get('id')) for i in items or [] if isinstance(i, dict) and i.get('id')]
+        return ids[0] if len(ids) == 1 else None
+
     def get_order(
         self,
         order_no: str,
