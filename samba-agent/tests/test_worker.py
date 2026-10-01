@@ -738,3 +738,16 @@ def test_끝난_작업은_뒤처리를_부르고_결과를_보고한다(setup):
     assert w.tick().state == 'done'
     assert calls == ['A1']
     assert any('SSG 선물 받기 완료' in s for s in sent)
+
+
+def test_폰_구매_소싱처는_그래프_없이_처리기로_끝낸다(setup):
+    """중국 크림(SHIHUO) 주문 — 得物 앱 처리기(사용자 2026-10-01)."""
+    q, log, sent, make = setup
+    w = make(gate=False)
+    w.d.dry_run = False
+    w.d.parse_order = lambda job: OrderRef(order_no=job.order_no, source='SHIHUO', seller='크림', sku='S1', qty=1)
+    w.d.phone_sources = {'SHIHUO': lambda job, order: ('done', None, '得物 110 원가 117,439원')}
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    assert w.tick().state == 'done'
+    assert log == []  # 브라우저 그래프(구매·결제·기록)는 돌지 않았다
+    assert any('得物 110' in s for s in sent)

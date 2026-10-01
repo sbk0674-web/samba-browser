@@ -150,6 +150,10 @@ class WaveOrder(BaseModel):
     # SAMBA 정산금. 목록 응답에 실리면 마진을 정산금 기준으로 계산한다(없으면 판매가 근사)
     revenue: float | None = None
     seller: str | None = None
+    # 중국 크림 주문 — 판매처(得物 …)·판매처 가격(위안)·수집상품 상품코드(식화 품번). 삼바웨이브가 실어 줄 때만
+    source_seller: str | None = None
+    source_price_cny: float | None = None
+    source_product_code: str | None = None
     sourcing_account_id: str | None = None
     sourcing_account_username: str | None = None
     sourcing_account_label: str | None = None

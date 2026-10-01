@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.failures import FailReason
@@ -64,6 +64,9 @@ class WorkerDeps:
     add_memo: Callable[[str, str], bool] | None = None
     # 끝난(done) 작업 뒤처리 — (작업, 그래프 결과) → 보고할 한 줄(할 일 없으면 None). SSG 선물 수락(폰)에 쓴다
     after_done: Callable[[Job, dict], str | None] | None = None
+    # 브라우저 그래프 대신 폰으로 사는 소싱처(대문자 id → 처리기). 처리기는 (작업, 주문) → (결과, 오류 코드, 보고)
+    # 중국 크림(SHIHUO) 주문 — 得物 앱 구매(사용자 2026-10-01)
+    phone_sources: dict[str, Callable[[Job, OrderRef], tuple[str, str | None, str]]] = field(default_factory=dict)
     # 처리할 소싱처 범위(대문자 id). 비어 있으면 거르지 않는다. 접수 뒤 삼바웨이브에서 소싱처가 바뀐 주문을
     # 시작 직전에 한 번 더 거른다(실기 2026-09-25: 무신사로 접수된 주문이 롯데온으로 바뀌어 돌았다)
     sources: frozenset[str] = frozenset()
@@ -127,6 +130,9 @@ class Worker:
             self.d.queue.finish(job.id, 'needs_human', error=why)
             self.d.report(job, f'{job.order_no} 건너뜀 — {why}')
             return self.d.queue.get(job.order_no)
+        handler = self.d.phone_sources.get(order.source.upper())
+        if handler is not None:
+            return self._run_phone_order(job, order, handler)
         self._reset_finished_thread(job.id)
         if self.d.tabs is not None:
             self._close_deferred(job)
@@ -140,6 +146,24 @@ class Worker:
             'dry_run_digits': self.d.dry_run_digits,
         }
         return self._cleanup_tabs(self._invoke(job, state))
+
+    def _run_phone_order(
+        self, job: Job, order: OrderRef, handler: Callable[[Job, OrderRef], tuple[str, str | None, str]]
+    ) -> Job | None:
+        """폰으로 사는 소싱처 — 그래프 없이 처리기 하나로 끝낸다. dry-run 이면 사지 않고 사람에게 넘긴다."""
+        if self.d.dry_run:
+            self.d.queue.finish(job.id, 'needs_human', error='dry_run')
+            self.d.report(job, f'{job.order_no} 폰 구매 소싱처({order.source}) — dry-run 이라 사지 않음')
+            return self.d.queue.get(job.order_no)
+        self.d.queue.progress(job.id, agent=f'phone.{order.source.lower()}', step='폰 구매')
+        try:
+            outcome, fail, line = handler(job, order)
+        except Exception as exc:  # noqa: BLE001 — 처리기 예외는 사람에게 넘긴다(결제 여부는 보고 줄로 확인)
+            outcome, fail, line = 'needs_human', 'unknown', f'폰 구매 오류: {mask_text(str(exc))[:200]}'
+        self.d.queue.progress(job.id, agent=None, step=None)
+        self.d.queue.finish(job.id, outcome, error=fail)
+        self.d.report(job, mask_text(f'{job.order_no} {outcome} — {line}')[:300])
+        return self.d.queue.get(job.order_no)
 
     def _close_leftovers(self, label: str) -> None:
         """작업 시작 직전 — 지난 작업(죽은 하네스·시간 초과)이 남긴 탭을 닫는다. 화면을 남기는 설정이면 건너뛴다."""

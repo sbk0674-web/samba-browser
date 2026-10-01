@@ -1,0 +1,288 @@
+"""중국 크림(식화) 주문 — 임성희폰 得物 앱으로 사고 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다.
+
+사용자 2026-10-01: "식화>더우 결제도 하네스한테 넘겨". 사람이 하던 순서(실기 A-SN241417042, 得物 110213474374883854):
+得物 검색(품번) → 상품 → 立即购买 → EU 사이즈 칸 → '再领¥N' 쿠폰 → 하단 결제 → 알리페이 결제창('CVV를 입력하세요' =
+6자리 결제 비밀번호) → phone_approve_payment(provider='alipay') → '支付成功' → 완료 → 我·订单의 주문 상세 '订单编号'.
+
+원가 = 알리페이 청구 위안(상품 + 국제카드 수수료 3%) × CNY/KRW 환율(크림 엔진과 같은 frankfurter), 배송비 8,500원 고정.
+판매처가 得物이 아니면(唯品会·淘宝 …) 사람에게 넘긴다 — 그 앱 흐름은 아직 없다.
+"""
+
+import json
+import logging
+import re
+import time
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from samba_agent.ops.ssg_gift_accept import Node, Phone, find_text, has_text
+
+log = logging.getLogger(__name__)
+
+DEWU = 'com.shizhuang.duapp'
+ALIPAY = 'com.eg.android.AlipayGphone'
+CN_SHIPPING_FEE = 8500
+FX_URL = 'https://api.frankfurter.dev/v1/latest?base=CNY&symbols=KRW'
+_PRICE = re.compile(r'^¥\s*(\d+(?:\.\d+)?)$')
+_ORDER_NO = re.compile(r'^\d{15,22}$')
+
+
+class DewuOrderError(Exception):
+    """사람에게 넘길 사유(개인정보 없음). paid=True 면 결제는 끝났다(재결제 금지)."""
+
+    def __init__(self, reason: str, paid: bool = False) -> None:
+        super().__init__(reason)
+        self.paid = paid
+
+
+@dataclass
+class DewuResult:
+    order_no: str
+    paid_cny: float
+    item_cny: float
+    rate: float
+
+    @property
+    def cost_krw(self) -> int:
+        return round(self.paid_cny * self.rate)
+
+
+def cny_krw_rate() -> float:
+    """CNY → KRW 환율(frankfurter). 못 받으면 0."""
+    try:
+        with urllib.request.urlopen(FX_URL, timeout=15) as r:
+            return float(json.loads(r.read().decode('utf-8'))['rates']['KRW'])
+    except Exception:  # noqa: BLE001 — 환율을 못 받으면 사지 않는다(호출부)
+        return 0.0
+
+
+def header_price(nodes: list[Node]) -> float | None:
+    """구매창 위쪽(y<330)의 '¥564' 가격."""
+    for n in sorted(nodes, key=lambda n: n.y):
+        m = _PRICE.match(n.text.replace(' ', ''))
+        if m and n.y < 330:
+            return float(m.group(1))
+    return None
+
+
+def order_no_after_label(nodes: list[Node]) -> str | None:
+    """주문 상세의 '订单编号' 뒤에 오는 숫자."""
+    seen = False
+    for n in nodes:
+        if n.text == '订单编号':
+            seen = True
+            continue
+        if seen and _ORDER_NO.match(n.text):
+            return n.text
+    return None
+
+
+def buy_on_dewu(
+    phone: Phone,
+    model: str,
+    eu_size: str,
+    *,
+    max_cny: float,
+    approve: Callable[[int], str],
+    rate: float,
+    sleep: Callable[[float], None] = time.sleep,
+) -> DewuResult:
+    """得物에서 model 의 eu_size 를 산다. max_cny 를 넘으면(쿠폰 반영 뒤) 결제하지 않는다.
+
+    approve(원화 금액) 는 앱의 phone_approve_payment(provider='alipay') 를 부르고 결과 글자('ok'·'refused: …')를 준다.
+    """
+
+    def wait_for(check: Callable[[list[Node]], bool], seconds: float, step: float = 1.5) -> list[Node]:
+        end = time.monotonic() + seconds
+        nodes = phone.nodes()
+        while not check(nodes) and time.monotonic() < end:
+            sleep(step)
+            nodes = phone.nodes()
+        return nodes
+
+    # 1) 검색 — 홈·상품 화면 어디서 시작해도 뒤로 가며 검색창을 찾는다
+    phone.launch(DEWU)
+    sleep(4)
+    nodes = phone.nodes()
+    for _ in range(5):
+        if find_text(nodes, '搜索') or find_text(nodes, '立即购买'):
+            break
+        phone.key('4')
+        sleep(1.5)
+        nodes = phone.nodes()
+    box = next((n for n in nodes if n.y < 140 and n.x < 520 and n.text and n.text != '搜索'), None)
+    if box is None:
+        raise DewuOrderError('得物 검색창을 못 찾았다')
+    phone.tap(box.x, box.y)
+    sleep(2)
+    # 지난 검색어가 칸에 남아 있으면 뒤에 붙는다 — 먼저 지운다
+    phone._run('shell', 'input', 'keyevent', *(['67'] * 30))
+    phone._run('shell', 'input', 'text', re.sub(r'[^A-Za-z0-9-]', '', model))
+    sleep(1)
+    go = find_text(phone.nodes(), '搜索')
+    if go is None:
+        raise DewuOrderError('得物 검색 버튼(搜索)을 못 찾았다')
+    phone.tap(go.x, go.y)
+    # 2) 결과의 '商品' 카드 → 상품 화면
+    nodes = wait_for(lambda ns: find_text(ns, '商品') is not None, 15)
+    title = find_text(nodes, '商品')
+    card = next(
+        (n for n in sorted(nodes, key=lambda n: n.y) if title and n.y > title.y and _PRICE.match(n.text.replace(' ', ''))),
+        None,
+    )
+    if card is None:
+        raise DewuOrderError(f'得物 검색 결과에 {model} 상품이 없다')
+    phone.tap(card.x, card.y)
+    nodes = wait_for(lambda ns: find_text(ns, '立即购买') is not None, 15)
+    buy = find_text(nodes, '立即购买')
+    if buy is None:
+        raise DewuOrderError('상품 화면에서 立即购买 를 못 찾았다')
+    phone.tap(buy.x, buy.y)
+    # 3) 사이즈 칸 — 글자가 EU 값과 똑같은 칸, 가격이 '¥--' 면 판매 없음
+    nodes = wait_for(lambda ns: find_text(ns, eu_size) is not None, 10)
+    cell = find_text(nodes, eu_size)
+    if cell is None:
+        raise DewuOrderError(f'得物 사이즈 목록에 EU {eu_size} 가 없다')
+    below = next((n for n in nodes if abs(n.x - cell.x) < 60 and 0 < n.y - cell.y < 70), None)
+    if below is not None and '--' in below.text:
+        raise DewuOrderError(f'得物 EU {eu_size} 판매 없음(¥--)')
+    phone.tap(cell.x, cell.y)
+    sleep(2)
+    nodes = phone.nodes()
+    if not has_text(nodes, 'HUBNET'):
+        raise DewuOrderError('得物 배송지가 HUBNET 배대지가 아니다 — 결제하지 않음')
+    # 4) 쿠폰('再领¥N') 받고 가격
+    coupon = next((n for n in nodes if '再领' in n.text), None)
+    if coupon is not None:
+        phone.tap(coupon.x, coupon.y)
+        sleep(3)
+        nodes = phone.nodes()
+    price = header_price(nodes)
+    if price is None:
+        raise DewuOrderError('得物 구매창 가격을 못 읽었다')
+    if price > max_cny:
+        raise DewuOrderError(f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)')
+    # 5) 하단 결제 버튼 → 알리페이 결제창
+    pay = next(
+        (n for n in sorted(nodes, key=lambda n: -n.y) if n.y > 1380 and _PRICE.match(n.text.replace(' ', ''))),
+        None,
+    )
+    if pay is None:
+        raise DewuOrderError('得物 결제 버튼을 못 찾았다')
+    phone.tap(pay.x, pay.y)
+    end = time.monotonic() + 20
+    while phone.top_package() != ALIPAY and time.monotonic() < end:
+        sleep(1.5)
+    if phone.top_package() != ALIPAY:
+        raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
+    paid_hint = round(price * 1.03 * rate)
+    out = approve(paid_hint).strip()
+    if not out.startswith('ok'):
+        raise DewuOrderError(f'알리페이 결제 승인 실패: {out[:80]}')
+    # 6) 支付成功 + 청구 위안 → 완료
+    nodes = wait_for(lambda ns: has_text(ns, '支付成功'), 20)
+    if not has_text(nodes, '支付成功'):
+        raise DewuOrderError('알리페이 완료 화면(支付成功)이 안 보인다 — 得物 주문내역 확인(재결제 금지)', paid=True)
+    amounts = [float(n.text) for n in nodes if re.fullmatch(r'\d+\.\d{2}', n.text)]
+    paid_cny = amounts[0] if amounts else round(price * 1.03, 2)
+    done = find_text(nodes, '완료') or find_text(nodes, '完成')
+    if done is not None:
+        phone.tap(done.x, done.y)
+        sleep(3)
+    order_no = _latest_order_no(phone, sleep)
+    if order_no is None:
+        raise DewuOrderError(f'결제는 됐는데(¥{paid_cny}) 得物 주문번호를 못 읽었다 — 주문내역 확인', paid=True)
+    return DewuResult(order_no=order_no, paid_cny=paid_cny, item_cny=price, rate=rate)
+
+
+def _latest_order_no(phone: Phone, sleep: Callable[[float], None]) -> str | None:
+    """我 → 待发货 첫 주문 → 상세의 '订单编号'. 화면 이동은 실기 순서를 따른다."""
+    for _ in range(6):
+        nodes = phone.nodes()
+        tab = find_text(nodes, '我')
+        if tab is not None and tab.y > 1400:
+            phone.tap(tab.x, tab.y)
+            sleep(3)
+            break
+        phone.key('4')
+        sleep(1.5)
+    nodes = phone.nodes()
+    pending = find_text(nodes, '待发货')
+    if pending is None:
+        return None
+    phone.tap(pending.x, pending.y)
+    sleep(3)
+    nodes = phone.nodes()
+    first = next((n for n in sorted(nodes, key=lambda n: n.y) if '实付款' in n.text), None)
+    if first is None:
+        return None
+    phone.tap(360, max(first.y - 40, 300))
+    sleep(3)
+    for _ in range(8):
+        found = order_no_after_label(phone.nodes())
+        if found:
+            phone.key('4')
+            return found
+        phone._run('shell', 'input', 'swipe', '360', '1200', '360', '800', '300')
+        sleep(1)
+    return None
+
+
+def make_shihuo_handler(
+    wave: object,
+    approve: Callable[[int], str],
+    *,
+    adb: str | None = None,
+    phone_serial: str | None = None,
+    rate_of: Callable[[], float] = cny_krw_rate,
+) -> Callable[[object, object], tuple[str, str | None, str]]:
+    """워커가 SHIHUO 주문에 부르는 처리기 — (작업, 주문) → (결과 'done'|'needs_human', 오류 코드, 보고 한 줄)."""
+    import os
+
+    from samba_agent.ops.ssg_gift_accept import DEFAULT_ADB, DEFAULT_PHONE, find_phone_serial
+
+    adb_path = adb or os.environ.get('SAMBA_ADB') or DEFAULT_ADB
+    want = phone_serial or os.environ.get('SAMBA_PAY_PHONE') or DEFAULT_PHONE
+
+    def handle(job: object, order: object) -> tuple[str, str | None, str]:
+        order_no = str(getattr(order, 'order_no', ''))
+        detail = wave.get_order(order_no)  # type: ignore[attr-defined]
+        seller = (detail.source_seller or '').strip()
+        if seller != '得物':
+            return 'needs_human', 'unknown', f'판매처 {seller or "모름"} — 得物 외 판매처는 사람이 산다'
+        eu = (detail.registered_option or '').strip()
+        model = (detail.source_product_code or '').strip()
+        if not eu or not model:
+            return 'needs_human', 'unknown', f'EU 사이즈({eu or "-"})·품번({model or "-"})이 없어 살 수 없다'
+        rate = rate_of()
+        if rate <= 0:
+            return 'needs_human', 'unknown', '위안 환율을 못 받아 원가를 낼 수 없다 — 결제하지 않음'
+        revenue = float(detail.revenue or 0)
+        # 마진 > 0: 청구 위안(상품 × 1.03) × 환율 + 배송비 8,500 < 정산금
+        max_cny = (revenue - CN_SHIPPING_FEE) / rate / 1.03 if revenue > 0 else 0
+        if max_cny <= 0:
+            return 'needs_human', 'margin', '정산금을 몰라 마진을 볼 수 없다 — 결제하지 않음'
+        serial = find_phone_serial(adb_path, want)
+        if serial is None:
+            return 'needs_human', 'unknown', '결제 폰(임성희폰)이 연결돼 있지 않다'
+        try:
+            res = buy_on_dewu(Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate)
+        except DewuOrderError as e:
+            fail = 'margin' if '마진' in str(e) else ('pay_interrupted' if e.paid else 'unknown')
+            return 'needs_human', fail, str(e)
+        note = (
+            f'得物 앱(임성희폰) 결제 ¥{res.paid_cny:g}(상품 ¥{res.item_cny:g}+알리페이 카드수수료) × {res.rate:g}'
+            f' · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
+        )
+        wave.record_sourcing(  # type: ignore[attr-defined]
+            order_no,
+            sourcing_order_number=res.order_no,
+            cost=res.cost_krw,
+            shipping_fee=CN_SHIPPING_FEE,
+            notes=note,
+        )
+        margin = (revenue - res.cost_krw - CN_SHIPPING_FEE) / revenue * 100
+        return 'done', None, f'得物 {res.order_no} 원가 {res.cost_krw:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%'
+
+    return handle

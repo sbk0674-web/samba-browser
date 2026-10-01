@@ -35,6 +35,7 @@ from samba_agent.export.stage import (
 from samba_agent.export.store import ExportQueue
 from samba_agent.gateway.slack_bot import SambaBot
 from samba_agent.llm.decide import make_decide
+from samba_agent.ops.dewu_order import make_shihuo_handler
 from samba_agent.ops.diagnose import diagnose
 from samba_agent.ops.events import EventLog
 from samba_agent.ops.masking import mask_text
@@ -107,6 +108,24 @@ def make_export(settings: 'Settings') -> tuple[ExportQueue, ExportFn] | None:
     return queue, make_exporter(
         queue, routing, wait_s=settings.export_wait_s, deferred=EXPORT_DEFERRED
     )
+
+
+def _alipay_approve(bridge: BridgeClient) -> Callable[[int], str]:
+    """알리페이 결제창 비밀번호 — 앱의 phone_approve_payment(provider='alipay')가 키마스터에서 넣는다."""
+
+    def approve(amount_krw: int) -> str:
+        try:
+            return bridge.call(
+                'phone_approve_payment',
+                provider='alipay',
+                amountKrw=max(int(amount_krw), 1),
+                merchant='得物',
+                methodLabel='알리페이',
+            ).result
+        except BridgeError as e:
+            return f'refused: {e}'
+
+    return approve
 
 
 def make_cancel_export(
@@ -341,6 +360,10 @@ def main() -> None:
             add_memo=wave.add_memo if wave is not None else None,
             # SSG 선물 주문은 결제 뒤 폰 카카오톡에서 선물을 받아야 발송된다(사용자 2026-10-01 하네스 이식)
             after_done=make_after_done(_source_sku_of),
+            # 중국 크림(식화) 주문은 폰 得物 앱으로 산다 — 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다
+            phone_sources=(
+                {'SHIHUO': make_shihuo_handler(wave, _alipay_approve(bridge))} if wave is not None else {}
+            ),
             sources=frozenset(
                 x.strip().upper() for x in settings.intake_sources.split(',') if x.strip()
             ),
