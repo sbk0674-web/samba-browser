@@ -40,7 +40,8 @@ const g = ls.find(l => /^\[\d+\] link "선물"/.test(l)) || (await lines({ query
 if (!g) return { ...R, error: 'no_gift_button', note: '선물 버튼 없음' }
 page.click(idL(g)).catch(() => {})
 let loginSeen = null
-for (let i = 0; i < 30; i++) {
+// 로그인 팝업은 이미 로그인돼 있으면 저절로 닫히고 선물 화면으로 넘어간다 — 팝업을 봤으면 더 기다린다(2026-10-02)
+for (let i = 0; i < (loginSeen ? 75 : 30); i++) {
   await sleep(600)
   const ts = await tabs.list()
   const gi = ts.find(t => /pay\.ssg\.com\/cart\/giftInfo/.test(t.url || ''))
