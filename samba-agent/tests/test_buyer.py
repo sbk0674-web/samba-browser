@@ -1678,6 +1678,13 @@ def test_선택란_없는_단일_상품은_프리사이즈_색상이_맞으면_�
     assert not single_item_ok('WHT(WHITE) FREE', snap)  # 색이 다르면 아니다
     assert not single_item_ok('BLK 270', snap)  # 프리사이즈가 아니면 아니다
     assert not single_item_ok('BLK FREE', {'cost': 1000})  # 주문서가 없으면 아니다
+    # 상품명에 색 글자가 없으면(품번뿐) 선택란 없는 단일 상품으로 본다 — 실기 2026-10-01 롯데온 라코스테 쇼퍼백
+    plain = {'order_tab': 't', 'cost': 100080, 'product_name': '[라코스테]2025 NEW L.12.12 스몰 사이즈 쇼퍼백 KP NF2037P55G000'}
+    assert single_item_ok('블랙 FREE', plain)
+    assert not single_item_ok('블랙 250', plain)  # 프리사이즈가 아니면 여전히 아니다
+    assert not single_item_ok('NF9999 FREE', plain)  # 색이 아닌 낯선 글자는 이름에 있어야 한다
+    # 이름에 다른 색이 적혀 있으면 막는다
+    assert not single_item_ok('블랙 FREE', {**plain, 'product_name': '[라코스테] 쇼퍼백 화이트 NF2037'})
 
 
 def test_선물하기가_막힌_지역_주소():

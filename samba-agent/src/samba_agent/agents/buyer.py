@@ -1020,6 +1020,29 @@ def order_qty_problem(want: int, snap: dict[str, object]) -> str | None:
     return f'주문서 수량 {got or "확인 안 됨"}개 ≠ 주문 수량 {want}개 — 결제하지 않는다'
 
 
+# 색 이름(주문 옵션·상품명에 쓰이는 표기). 영문은 낱말 단위로, 한글은 포함으로 찾는다
+_COLOR_WORDS_EN = frozenset(
+    {
+        'black', 'blk', 'bk', 'white', 'wht', 'wh', 'navy', 'nvy', 'grey', 'gray', 'gry', 'beige', 'brown',
+        'red', 'blue', 'green', 'pink', 'yellow', 'khaki', 'ivory', 'cream', 'purple', 'orange', 'silver',
+        'gold', 'charcoal', 'mint',
+    }
+)  # fmt: skip
+_COLOR_WORDS_KO = frozenset(
+    {
+        '블랙', '검정', '화이트', '흰색', '네이비', '그레이', '회색', '베이지', '브라운', '레드', '블루', '그린',
+        '핑크', '옐로우', '카키', '아이보리', '크림', '퍼플', '오렌지', '실버', '골드', '차콜', '민트',
+    }
+)  # fmt: skip
+_COLOR_WORDS = _COLOR_WORDS_EN | _COLOR_WORDS_KO
+
+
+def _name_colors(name: str) -> set[str]:
+    """상품명에 적힌 색 이름들(소문자 상품명 기준)."""
+    words = set(re.split(r'[^a-z]+', name))
+    return (words & _COLOR_WORDS_EN) | {k for k in _COLOR_WORDS_KO if k in name}
+
+
 def single_item_ok(option: str | None, snap: dict[str, object]) -> bool:
     """선택란 없는 단일 상품으로 봐도 되는가 — 주문서가 열렸고(원가 있음) 주문 옵션이 프리사이즈이며,
     색상 등 나머지 글자가 있으면 그중 하나가 상품명에 있다."""
@@ -1029,7 +1052,11 @@ def single_item_ok(option: str | None, snap: dict[str, object]) -> bool:
         return False
     name = str(snap.get('product_name') or '').lower()
     rest = [t for t in re.split(r'[\s()/·,\[\]]+', option.lower()) if t and t not in _FREE_SIZE_TOKENS]
-    return not rest or any(t in name for t in rest)
+    if not rest or any(t in name for t in rest):
+        return True
+    # 상품명에 색 글자가 아예 없는 단일 상품(실기 2026-10-01 롯데온 라코스테 쇼퍼백 '블랙 FREE' — 이름은 품번뿐):
+    # 선택란이 없으면 변형이 하나뿐이라 색을 잘못 고를 수 없다. 이름에 **다른 색**이 적혀 있을 때만 막는다
+    return all(t in _COLOR_WORDS for t in rest) and not _name_colors(name)
 
 
 # SSG 장바구니 — 바로구매 전에 한 번 열어 기본 배송지를 불러오게 한다(_warm_ssg_cart)
