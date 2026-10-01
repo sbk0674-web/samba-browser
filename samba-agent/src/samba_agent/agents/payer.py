@@ -149,6 +149,21 @@ PAY_HOST_PROVIDERS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r'(^|\.)pay\.naver\.com$'), 'naverpay'),
 )
 
+# 네이버페이 창 계정 불일치로 멈춘 사유의 표식 — 작업 실행기가 이 표식을 보고 다른 계정으로 한 번 다시 산다
+NAVERPAY_MISMATCH_MARK = '네이버페이 창 계정 불일치'
+_NAVERPAY_MISMATCH_RE = re.compile(
+    r'NAVERPAY_ACCOUNT_MISMATCH.*?signed in as (\S+?), but the KeyMaster account to pay with is ([^\s.]+)'
+)
+
+
+def naverpay_mismatch(out: str) -> tuple[str, str] | None:
+    """앱의 네이버페이 계정 불일치 거절이면 (창에 보인 계정, 키마스터 연결 계정). 아니면 None."""
+    if 'NAVERPAY_ACCOUNT_MISMATCH' not in out:
+        return None
+    m = _NAVERPAY_MISMATCH_RE.search(out)
+    return (m.group(1), m.group(2)) if m else ('?', '?')
+
+
 # 키패드 입력 뒤 주문 완료 화면이 뜰 때까지 기다리는 시간(ms)
 PAY_RESULT_WAIT_MS = 4000
 # 완료 문구가 아직 없으면 다시 보는 횟수·간격(최대 약 15초 더)
@@ -1026,7 +1041,18 @@ class PayerAgent(AgentBase):
         out = self._press_keypad(a, provider, account)
         self.note('키패드 입력', mask_text(out[:200]))
         low = out.lower()
-        if low.startswith('refused') or 'not found' in low or 'ambiguous' in low:
+        mismatch = naverpay_mismatch(out)
+        if mismatch is not None:
+            # 네이버페이 창이 키마스터 연결 계정이 아닌 네이버 계정으로 로그인돼 있다 — 앱이 비밀번호를 넣지 않았으니
+            # 결제는 안 됐다. '결제 확인'으로 넘기면 "결제 여부 불명(재결제 금지)"으로 오판한다(실기 2026-10-01)
+            shown, expected = mismatch
+            raise AgentFailure(
+                'needs_human',
+                f'{NAVERPAY_MISMATCH_MARK}: 프로필 {account} 의 네이버페이 창은 {shown} 로 로그인돼 있고 키마스터 연결 계정은 '
+                f'{expected} 다 — 그 프로필에서 네이버를 {expected} 로 로그인해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)',
+                FailReason.PERMISSION_DENIED,
+            )
+        if low.startswith('refused') or '거절: refused' in low or 'not found' in low or 'ambiguous' in low:
             raise AgentFailure(
                 'needs_human',
                 f'결제 비밀번호를 앱이 넣지 못했다 — 사람이 직접 누른다: {mask_text(out[:100])}',

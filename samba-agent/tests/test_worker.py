@@ -751,3 +751,48 @@ def test_폰_구매_소싱처는_그래프_없이_처리기로_끝낸다(setup):
     assert w.tick().state == 'done'
     assert log == []  # 브라우저 그래프(구매·결제·기록)는 돌지 않았다
     assert any('得物 110' in s for s in sent)
+
+
+def test_네이버페이_창_계정_불일치면_그_계정만_빼고_한_번_다시_산다(tmp_path):
+    """실기 2026-10-01: ABC cannonfort 프로필의 네이버가 키마스터 연결 계정(edelvise06)이 아닌 계정으로 로그인돼
+    결제 비밀번호를 넣지 않고 멈췄다 — 결제는 안 됐으니 그 계정을 빼고 다시 산다(두 번은 하지 않는다)."""
+    from samba_agent.agents.payer import NAVERPAY_MISMATCH_MARK, naverpay_mismatch
+    from samba_agent.queue.worker import ACCOUNT_RETRY_KEY
+
+    raw = (
+        'fill_secret 거절: refused: NAVERPAY_ACCOUNT_MISMATCH — the Naver Pay window is signed in as cannonfort, '
+        'but the KeyMaster account to pay with is edelvise06. Sign out inside the Naver Pay window'
+    )
+    assert naverpay_mismatch(raw) == ('cannonfort', 'edelvise06')
+    assert naverpay_mismatch('ok: the app entered the payment password') is None
+
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    acts = agents([])
+    acts['payer'] = lambda _a: AgentResult(
+        status='needs_human',
+        reason=f'{NAVERPAY_MISMATCH_MARK}: 프로필 cannonfort 의 네이버페이 창은 cannonfort 로 로그인돼 있고 키마스터 연결 '
+        '계정은 edelvise06 다 — 결제 비밀번호는 넣지 않았다(결제 안 됨)',
+        fail_reason=FailReason.PERMISSION_DENIED,
+    )
+    sent: list[str] = []
+    graph = build_supervisor(reg, acts, checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(
+            queue=q,
+            graph=graph,
+            version='vtest',
+            report=lambda j, l: sent.append(l),
+            parse_order=order_of,
+            dry_run=False,
+        )
+    )
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    w.tick()
+    job = q.get('A1')
+    assert job.state == 'queued'  # 다시 큐에 들어갔다
+    assert job.options.get('skip_accounts') == 'cannonfort' and job.options.get(ACCOUNT_RETRY_KEY)
+    assert any('cannonfort 계정을 빼고' in s for s in sent)
+    # 두 번째도 같은 사유면 더 돌리지 않고 사람에게 남긴다
+    w.tick()
+    assert q.get('A1').state == 'needs_human'

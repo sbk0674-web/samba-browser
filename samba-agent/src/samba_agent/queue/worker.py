@@ -401,6 +401,21 @@ class Worker:
                 )
                 self.d.report(job, f'{job.order_no} 배송지 저장 뒤 목록 미반영 — 한 번 다시 산다')
                 return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+        if outcome == 'needs_human' and not self.d.dry_run and not job.options.get(ACCOUNT_RETRY_KEY):
+            reason = _failed_reason(out)
+            skipped = _mismatch_profile(reason)
+            if skipped:
+                # 그 계정 프로필의 네이버가 키마스터 연결 계정이 아닌 계정으로 로그인돼 있어 결제 비밀번호를 넣지 않았다
+                # (결제 안 됨). 그 계정만 빼고 한 번 다시 산다 — 사람이 로그인을 고칠 때까지 주문을 세워 두지 않는다
+                self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
+                self.d.queue.enqueue(
+                    job.order_no,
+                    job.requester,
+                    {**job.options, 'skip_accounts': skipped, ACCOUNT_RETRY_KEY: 1},
+                    job.thread_ts,
+                )
+                self.d.report(job, mask_text(f'{job.order_no} {reason}')[:200] + f' — {skipped} 계정을 빼고 한 번 다시 산다')
+                return self.d.queue.get(job.order_no)  # type: ignore[return-value]
         if outcome == 'needs_human' and not self.d.dry_run and not job.options.get('card'):
             reason = _failed_reason(out)
             if KAKAO_FALLBACK_MARK in reason:
@@ -474,6 +489,17 @@ def _buy_payload(out: dict) -> dict[str, object] | None:
         if isinstance(payload, dict) and payload.get('cost') is not None:
             return payload
     return None
+
+
+# 네이버페이 창 계정 불일치(payer.NAVERPAY_MISMATCH_MARK) 사유에서 문제 계정(프로필) 이름을 뽑는다
+ACCOUNT_RETRY_KEY = '_account_retry'
+_MISMATCH_PROFILE_RE = re.compile(r'네이버페이 창 계정 불일치: 프로필 (\S+) 의')
+
+
+def _mismatch_profile(reason: str) -> str:
+    """네이버페이 창 계정 불일치로 멈춘 사유면 그 계정 이름, 아니면 빈 문자열."""
+    m = _MISMATCH_PROFILE_RE.search(reason)
+    return m.group(1) if m else ''
 
 
 def _failed_reason(out: dict) -> str:

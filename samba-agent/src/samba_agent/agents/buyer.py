@@ -1461,10 +1461,21 @@ class BuyerAgent(AgentBase):
         최대 compare_accounts_max 개만 쓴다.
         """
         source = source_of(self.spec.name)
+        forced = str(a.options.get('account') or '').strip()
+        if forced and source.buy_accounts and forced in source.buy_accounts:
+            # 작업 옵션으로 사람이 계정을 정했으면 비교 계정을 정해 둔 소싱처에서도 그 계정 하나로 산다
+            # (실기 2026-10-01: ABC 는 account 옵션을 무시하고 6계정을 다시 비교해 같은 계정에서 또 멈췄다)
+            self.note('계정 후보', f'{source.id}: 작업 옵션 지정 계정 {forced}')
+            return [forced]
         if source.buy_accounts:
             # 비교 계정을 정해 둔 소싱처 — SAMBA 주문계정은 기록용일 뿐 구매 계정이 아니다(§5).
             # 순서(= 동률일 때 이기는 쪽)는 키마스터의 결제 우선순위가 먼저, 없으면 sources.yaml 순서
             ordered = self._by_pay_priority(source, list(source.buy_accounts))
+            # 직전 시도에서 결제창 계정 문제로 못 쓴 계정은 뺀다(작업 실행기가 skip_accounts 로 넘긴다)
+            skip = {s for s in str(a.options.get('skip_accounts') or '').split(',') if s}
+            if skip and len(ordered) > len(skip & set(ordered)):
+                ordered = [x for x in ordered if x not in skip]
+                self.note('계정 후보', f'{source.id}: 결제창 계정 문제로 제외 {sorted(skip)}')
             self.note('계정 후보', f'{source.id}: 비교 계정 {ordered}')
             return ordered
         requested = str(a.options.get('account') or '').strip()
