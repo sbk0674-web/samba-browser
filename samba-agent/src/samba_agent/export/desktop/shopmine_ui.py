@@ -45,6 +45,8 @@ ORDER_MENU = '주문관리'
 NORMAL_ALL = '(정상전체)'
 FILTER_STATUS = '미지정'
 FILTER_EXCEL = '엑셀생성안됨'
+# 필터 콤보를 찾는 횟수(한 번에 못 찾으면 화면을 다시 읽고 찾는다)
+FILTER_COMBO_TRIES = 4
 STATUS_MENU = '작업상태지정'
 ORDER_NO_COLUMN = '주문번호'
 # 쿠팡은 삼바웨이브 주문번호가 샵마인의 배송번호 칸에 있다(실기 2026-09-29: 736… ↔ 배송번호)
@@ -499,13 +501,19 @@ class PywinautoShopMineUi:
     # ---- 필터 ----
     def _filter_combo(self, item: str):
         """주문필터 툴바에서 그 항목을 가진 콤보 상자(id 가 숫자라 항목 목록으로 찾는다)."""
-        toolbar = self._el('ToolStripOrderFilter')
-        for combo in toolbar.children(control_type='ComboBox'):
-            try:
-                if item in combo.texts():
-                    return combo
-            except Exception:  # noqa: BLE001, S112 — 목록을 못 주는 콤보는 건너뛴다
-                continue
+        # 콤보가 화면에 멀쩡히 있어도 항목 목록을 한순간 못 줄 때가 있다(실기 2026-10-01: 1,239회 중 1회,
+        # 사람이 창을 만지는 중이었다). 바로 '막혔다'고 알리지 말고 화면을 다시 읽어 몇 번 더 찾는다
+        for attempt in range(FILTER_COMBO_TRIES):
+            if attempt:
+                time.sleep(self._poll_s * 2)
+                self._refresh()
+            toolbar = self._el('ToolStripOrderFilter')
+            for combo in toolbar.children(control_type='ComboBox'):
+                try:
+                    if item in combo.texts():
+                        return combo
+                except Exception:  # noqa: BLE001, S112 — 목록을 못 주는 콤보는 건너뛴다
+                    continue
         raise AdapterRetry(ExportFail.BLOCKED, f'주문필터에 {item!r} 항목을 가진 콤보 상자가 없다')
 
     @_guard_pywinauto_errors
