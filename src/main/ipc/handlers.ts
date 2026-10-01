@@ -7,6 +7,7 @@ import {
   setExtensionActionListener,
   warmExtensionWorkers
 } from '../extensions/cookies-bridge'
+import { loadFallbackTokens } from '../agent/fallback-tokens'
 import { applyProfileProxy, loadProfileProxies, profileOfPartition } from '../browser/profile-proxy'
 import { ChatSessionStore } from '../agent/chat-session'
 import {
@@ -97,7 +98,12 @@ import {
 } from '../ai/connections'
 import { resolveAgentAuth } from '../ai/auth-route'
 import { remapOnProviderChange, resolveModel, taskModelChoices } from '../ai/models'
-import { agentBackend, setApiKeyResolver, setAuthResolver } from '../agent/provider'
+import {
+  agentBackend,
+  setApiKeyResolver,
+  setAuthResolver,
+  setSubscriptionFallbackTokens
+} from '../agent/provider'
 // === AI 연결 끝 =======================================================================
 import { AuthService } from '../sync/auth'
 import {
@@ -867,9 +873,12 @@ export function registerIpc(
       hasApiKey: Boolean(apiKeys.masked().anthropic)
     })
   })
+  // 구독 예비 계정 토큰(하네스와 공유). 등록·삭제가 재시작 없이 반영되게 부를 때마다 읽는다
+  setSubscriptionFallbackTokens(() => loadFallbackTokens([process.cwd(), app.getAppPath()]))
   win.once('closed', () => {
     setApiKeyResolver(null)
     setAuthResolver(null)
+    setSubscriptionFallbackTokens(null)
   })
 
   // 첫 실행 1회 승계: 이미 Claude 구독으로 쓰고 있던 기존 사용자는 연결됨으로 올려 준다
@@ -1251,7 +1260,11 @@ export function registerIpc(
   // 막는 사이트는 전용 프로필에만 프록시를 건다(사용자 2026-09-28)
   const profileProxies = loadProfileProxies(app.getPath('userData'))
   tabs.setSessionHook((ses, partition) => {
-    applyProfileProxy(ses, profileOfPartition(partition, workspace.partitionPrefix()), profileProxies)
+    applyProfileProxy(
+      ses,
+      profileOfPartition(partition, workspace.partitionPrefix()),
+      profileProxies
+    )
     enableExtensionServiceWorkerSupport(ses, join(__dirname, '../preload/extension-sw.js'))
     // 파티션 이름을 함께 넘긴다 — 같은 세션이 두 번 들어와도 한 번만 붙는다
     void extensions
@@ -1275,7 +1288,8 @@ export function registerIpc(
     setTimeout(() => {
       const t = tabs.active()
       const wc = t?.view.webContents
-      if (wc && !wc.isDestroyed()) sendExtensionTabEvent(wc.session, 'activated', { tabId: wc.id, windowId: 0 })
+      if (wc && !wc.isDestroyed())
+        sendExtensionTabEvent(wc.session, 'activated', { tabId: wc.id, windowId: 0 })
     }, 0)
   })
 
