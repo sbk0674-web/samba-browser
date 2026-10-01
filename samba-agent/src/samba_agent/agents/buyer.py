@@ -2201,7 +2201,8 @@ class BuyerAgent(AgentBase):
             '쿠폰',
             f'상품 쿠폰 {_as_float(out.get("coupon")):,.0f}원 · 장바구니 쿠폰 {_as_float(out.get("cart_coupon")):,.0f}원 → 총 {total:,.0f}원',
         )
-        coupon_gap_failure(getattr(self, '_quick_my_prices', {}).get(account), total + used, account)
+        # 나의 할인가는 적립금 사용까지 반영한 값이다 — 결제액(total)과 비교한다(적립금을 더하면 정상 주문을 막았다)
+        coupon_gap_failure(getattr(self, '_quick_my_prices', {}).get(account), total, account)
         self.note(
             '주문서 정돈',
             f'보유 적립금 {_as_float(out.get("points_balance")):,.0f}원 → 사용 {used:,.0f}원, 선할인 {out.get("prepay")}',
