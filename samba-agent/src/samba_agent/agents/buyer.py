@@ -916,6 +916,27 @@ def own_snapshot_problem(snap: dict[str, object]) -> str | None:
     return None
 
 
+# 주문서 총액(쿠폰·적립금 사용 반영)이 상품 화면 '나의 할인가'보다 이만큼 넘게 비싸면 쿠폰이 빠진 것으로 본다.
+# 실기 2026-10-01 노스페이스 비니: 나의 할인가 27,590 인데 주문서 쿠폰 0원 37,440 으로 결제됐다(9/28~ 83건 의심)
+COUPON_GAP_MIN_WON = 3000
+COUPON_GAP_RATE = 0.05
+
+
+def coupon_gap_failure(my_price: float | None, sheet_total: float, account: str) -> None:
+    """나의 할인가보다 주문서가 크게 비싸면 결제하지 않고 사람에게 넘긴다(쿠폰 미적용 의심)."""
+    if not my_price or my_price <= 0 or sheet_total <= 0:
+        return
+    gap = sheet_total - my_price
+    if gap > max(COUPON_GAP_MIN_WON, my_price * COUPON_GAP_RATE):
+        raise AgentFailure(
+            'needs_human',
+            f'{account}: 쿠폰 미적용 의심 — 상품 화면 나의 할인가 {my_price:,.0f}원인데 주문서 {sheet_total:,.0f}원'
+            f'(차이 {gap:,.0f}원). 결제하지 않음',
+            # MARGIN 으로 두면 자동 취소중이 된다 — 쿠폰 문제지 마진 문제가 아니다
+            FailReason.UNKNOWN,
+        )
+
+
 def snapshot_login_required(out: dict[str, object]) -> bool:
     """스냅샷이 '이 계정 프로필은 로그인이 안 돼 있다'고 알렸는가."""
     return out.get('error') == 'login_required' or (
@@ -2180,6 +2201,7 @@ class BuyerAgent(AgentBase):
             '쿠폰',
             f'상품 쿠폰 {_as_float(out.get("coupon")):,.0f}원 · 장바구니 쿠폰 {_as_float(out.get("cart_coupon")):,.0f}원 → 총 {total:,.0f}원',
         )
+        coupon_gap_failure(getattr(self, '_quick_my_prices', {}).get(account), total + used, account)
         self.note(
             '주문서 정돈',
             f'보유 적립금 {_as_float(out.get("points_balance")):,.0f}원 → 사용 {used:,.0f}원, 선할인 {out.get("prepay")}',
@@ -2839,8 +2861,12 @@ class BuyerAgent(AgentBase):
             price = _as_float(out.get('my_price'))
             if price <= 0:
                 return account, None
+            # 상품 화면 '나의 할인가'(쿠폰 반영) — 주문서 총액이 이보다 크게 비싸면 쿠폰이 빠진 것이다(_order_prep 검사)
+            my_prices[account] = price
             return account, price - _as_float(out.get('max_reward'))
 
+        my_prices: dict[str, float] = {}
+        self._quick_my_prices = my_prices
         self.step(f'{self.spec.name}: 계정 {len(accounts)}개 빠른 비교(할인가·최대 적립)')
         workers = (
             max(1, min(len(accounts), int(os.environ.get('SAMBA_ACCOUNT_WORKERS') or 2)))

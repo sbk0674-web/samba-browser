@@ -1743,3 +1743,15 @@ def test_상품_도메인이_홈과_다르면_그_도메인에서_로그인한�
     calls.clear()
     assert agent._login_product_host('edelvise06', 'https://pay.ssg.com/myssg/x') is False
     assert calls == []
+
+
+def test_나의_할인가보다_주문서가_크게_비싸면_결제하지_않는다():
+    """실기 2026-10-01 노스페이스 비니: 나의 할인가 27,590 · 주문서 쿠폰 0원 37,440 으로 결제됐다."""
+    from samba_agent.agents.buyer import coupon_gap_failure
+
+    with pytest.raises(AgentFailure) as e:
+        coupon_gap_failure(27590, 37440, 'edelvise06')
+    assert e.value.status == 'needs_human' and '쿠폰 미적용' in e.value.reason
+    assert e.value.fail_reason is not FailReason.MARGIN  # 자동 취소로 가면 안 된다
+    coupon_gap_failure(36350, 37850, 'edelvise06')  # 1,500원 — 적립금·등급 차이 범위, 통과
+    coupon_gap_failure(None, 37440, 'edelvise06')  # 빠른 비교 없음 — 검사 안 함
