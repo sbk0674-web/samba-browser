@@ -930,12 +930,20 @@ COUPON_GAP_MIN_WON = 3000
 COUPON_GAP_RATE = 0.05
 
 
+def coupon_gap(my_price: float | None, sheet_total: float) -> float:
+    """주문서 총액이 나의 할인가보다 허용 폭을 넘게 비싸면 그 차액, 아니면 0."""
+    if not my_price or my_price <= 0 or sheet_total <= 0:
+        return 0.0
+    gap = sheet_total - my_price
+    return gap if gap > max(COUPON_GAP_MIN_WON, my_price * COUPON_GAP_RATE) else 0.0
+
+
 def coupon_gap_failure(my_price: float | None, sheet_total: float, account: str) -> None:
     """나의 할인가보다 주문서가 크게 비싸면 결제하지 않고 사람에게 넘긴다(쿠폰 미적용 의심)."""
     if not my_price or my_price <= 0 or sheet_total <= 0:
         return
     gap = sheet_total - my_price
-    if gap > max(COUPON_GAP_MIN_WON, my_price * COUPON_GAP_RATE):
+    if coupon_gap(my_price, sheet_total) > 0:
         raise AgentFailure(
             'needs_human',
             f'{account}: 쿠폰 미적용 의심 — 상품 화면 나의 할인가 {my_price:,.0f}원인데 주문서 {sheet_total:,.0f}원'
@@ -2228,6 +2236,21 @@ class BuyerAgent(AgentBase):
             # 쿠폰을 받았는데 주문서 쿠폰 0원 — 쿠폰 목록이 가끔 안 열린다(실기 2026-10-01 그랜드스테이지: 같은 주문서에서
             # 한 번은 13,900원, 한 번은 0원). 한 번 더 돌려 더 싼 쪽을 쓴다
             self.note('쿠폰', f'{account}: 받은 쿠폰 {len(issued)}장인데 주문서 쿠폰 0원 — 한 번 더 적용')
+            again = self.script_json(
+                source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
+            )
+            if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
+                out = again
+        my_price = getattr(self, '_quick_my_prices', {}).get(account)
+        if (
+            out.get('ok')
+            and my_price
+            and not (_as_float(out.get('coupon')) + _as_float(out.get('cart_coupon')))
+            and coupon_gap(my_price, _as_float(out.get('total'))) > 0
+        ):
+            # 주문서 쿠폰이 0원인데 나의 할인가보다 크게 비싸다 — 이미 받아 둔 쿠폰이라 '받은 쿠폰'은 비어 있고
+            # 쿠폰 목록이 안 열린 경우다(실기 2026-10-01 노스페이스 폴로: 한 번은 17,850원, 다음엔 0원). 한 번 더 돌린다
+            self.note('쿠폰', f'{account}: 주문서 쿠폰 0원인데 나의 할인가보다 비싸다 — 한 번 더 적용')
             again = self.script_json(
                 source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
             )
