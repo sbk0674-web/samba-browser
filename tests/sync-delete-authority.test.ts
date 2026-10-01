@@ -311,6 +311,23 @@ describe('삭제는 서버에서 권위를 갖는다', () => {
     expect(pc4.vault.listAccounts(HOST)).toEqual([])
   })
 
+  it('삭제 뒤에 다른 기기가 같은 원격 id 의 내용(주소)을 바꿔 다시 저장하면 지운 기기에도 되살아난다', async () => {
+    // 실기 2026-10-01: 9/24 에 지운 포이즌 계정을 다른 PC 가 9/30 에 주소를 고쳐 저장했는데 이 PC 만 끝내 안 받았다
+    const account = pc1.vault.upsertAccount({ host: HOST, username: USER })
+    await cycle(pc1)
+    const remoteId = pc1.local.accountForSync(account.id)!.remoteId!
+    pc1.vault.deleteAccounts([account.id])
+    await cycle(pc1)
+
+    const row = backend.rows('accounts_sync').find((r) => r.id === remoteId)!
+    backend.seed('accounts_sync', [
+      { ...row, host: 'new.example.com', deleted_at: null, updated_at: new Date(Date.now() + 5_000).toISOString() }
+    ])
+
+    await cycle(pc1)
+    expect(pc1.vault.listAccounts('new.example.com').map((a) => a.username)).toEqual([USER])
+  })
+
   it('옛 사본의 최초 업로드는 삭제를 이기지 못한다 — 올리지 않고 로컬도 지우며, 수정 시각을 올리지 않는다', async () => {
     // PC3 는 첫 PC 와 같은 금고를 열고, 로그아웃 상태에서 계정·항목을 옛날에 저장해 두었다
     const pc3 = await freshPc(false)
