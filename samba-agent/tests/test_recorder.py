@@ -418,7 +418,8 @@ def test_주문_상세에_적립이_없으면_견적의_적립으로_원가를_�
     a.mark_status = False
     out = a(assignment(reg, dry_run=False, handoff={'reward': 1640, 'points_used': 14200}))
     assert out.status == 'ok'
-    assert json.loads(put.calls[0].request.content)['cost'] == 57560
+    # 네이버페이 = 현대카드 청구할인 2.7%(사용자 2026-10-02): 45,000 × 0.973 − 1,640 + 14,200
+    assert json.loads(put.calls[0].request.content)['cost'] == 56345
 
 
 @respx.mock

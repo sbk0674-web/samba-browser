@@ -380,6 +380,8 @@ OFFICE_SHIPPING: dict[str, object] = {
 POINTS_ONLY_METHOD = '포인트전액'
 # 네이버페이 기본 적립률(결제액 기준) — 사이트 적립과 별개로 원가에서 뺀다(실측 2026-09-25 64,600원 → 646원)
 NAVERPAY_POINT_RATE = 0.01
+# 네이버페이 결제 카드(사용자 2026-10-02: 네이버페이 = 현대카드, 청구할인 2.7%)
+NAVERPAY_CARD = '현대카드'
 # 페이코 결제 카드(사용자 2026-09-25: 페이코 = 현대카드, 청구할인 2.7%)
 PAYCO_CARD = '현대카드'
 # 카드 청구할인(플레이북 §7): 결제창에 안 보이는 카드 대금 할인 — 원가 = 카드 결제액 × 계수 − 적립
@@ -517,7 +519,13 @@ def effective_cost(row: dict[str, object]) -> float:
     paid = _as_float(row.get('cost'))
     reward = _as_float(row.get('reward'))
     used = _as_float(row.get('points_used'))
-    return round(paid * billing_factor(str(row.get('card') or '') or None) - reward + used)
+    card = str(row.get('card') or '')
+    factor = billing_factor(card or None)
+    if factor == 1.0 and '네이버' in f'{card} {row.get("method") or ""}':
+        # 네이버페이는 그 안에 등록한 현대카드로 결제된다 — 카드 이름이 안 보여도 청구할인 2.7%가 붙는다
+        # (사용자 2026-10-02). 다른 카드 이름이 적혀 있으면 그 카드 계수를 쓴다(위 billing_factor)
+        factor = billing_factor(NAVERPAY_CARD)
+    return round(paid * factor - reward + used)
 
 
 # 결제창(토스페이·네이버페이) 안에서 고를 수 있는 카드사. 2026-09-24: 현대·KB·롯데·신한·농협, 2026-09-28 사용자 추가:

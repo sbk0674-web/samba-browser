@@ -1468,13 +1468,15 @@ def test_무신사페이_등록_카드가_없으면_수리하지_않는다():
 
 
 def test_네이버페이_견적은_사이트_적립과_네이버페이_1퍼센트를_모두_뺀다():
-    """ABC 원가 = 결제액 − A-RT 적립 − 네이버페이 적립(1%) + 사용 포인트(사용자 2026-09-25)."""
+    """ABC 원가 = 결제액 × 현대카드 청구할인 − A-RT 적립 − 네이버페이 적립(1%) + 사용 포인트.
+
+    네이버페이는 등록한 현대카드로 결제된다 — 청구할인 2.7%(사용자 2026-10-02)."""
     from samba_agent.agents.buyer import cheapest_quotes
 
     rows = cheapest_quotes(
         [{'method': '네이버페이', 'cost': 64600, 'reward': 1300, 'points_used': 0}], None, {'naver'}
     )
-    assert rows[0]['cost'] == 64600 - 1300 - 646
+    assert rows[0]['cost'] == round(64600 * 0.973 - 1300 - 646)
 
 
 def test_같은_원가면_페이코보다_무신사페이가_먼저다():
@@ -1808,3 +1810,13 @@ def test_단일_상품_색_표기가_달라도_같은_색이면_진행한다():
     assert single_item_ok('BLACK ONE', snap)
     # 이름에 다른 색이 적혀 있으면 막는다
     assert not single_item_ok('BLACK ONE', {**snap, 'product_name': '우먼 유브이 라이트 선캡 NE3CS11A_WHT'})
+
+
+def test_네이버페이는_현대카드_청구할인을_원가에_반영한다():
+    """사용자 2026-10-02: 네이버페이는 현대카드로 결제된다 — 2.7% 청구할인. 다른 카드가 적혀 있으면 그 카드 계수."""
+    from samba_agent.agents.buyer import effective_cost
+
+    assert effective_cost({'method': '네이버페이', 'card': None, 'cost': 97670, 'reward': 977}) == round(97670 * 0.973 - 977)
+    assert effective_cost({'card': '네이버페이', 'cost': 100000}) == 97300  # 주문 상세의 결제수단 글자
+    assert effective_cost({'card': '네이버페이 - 롯데카드', 'cost': 100000}) == 98000
+    assert effective_cost({'method': '토스페이', 'card': None, 'cost': 100000}) == 100000
