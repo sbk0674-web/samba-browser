@@ -185,18 +185,11 @@ export async function pullAll(deps: PullDeps): Promise<PullResult> {
  * 로컬·원격 중 누가 이겼는지 판정한다.
  * 로컬이 이기면 충돌로 센다 — 로컬 값이 그대로 남고, 다음 푸시가 원격을 덮는다
  */
-function wins(
-  localRow: Syncable | null,
-  remoteRow: Syncable,
-  result: PullResult,
-  revive = false
-): boolean {
+function wins(localRow: Syncable | null, remoteRow: Syncable, result: PullResult): boolean {
   // 로컬에서 지운 행(tombstone)은 원격의 "살아 있는" 갱신이 더 늦어도 되살리지 않는다 — 옛 복제본(병렬
   // 인스턴스)이 지운 뒤에 그 행을 만지고 upsert 하면 LWW 로는 삭제가 뒤집혔다(실기: 키마스터에서 지운
-  // 계정·사이트가 자꾸 원복). 삭제는 사용자 의도라 이긴다. 다음 푸시가 tombstone 을 다시 올린다.
-  // 단 revive(다른 기기가 삭제 뒤에 내용을 바꿔 다시 저장했다)면 그 수정이 이긴다 — 실기 2026-10-01:
-  // 9/24 에 지운 포이즌 계정을 다른 PC 가 9/30 에 주소·비밀번호를 고쳐 저장했는데 이 PC 만 끝내 안 받았다
-  if (localRow !== null && localRow.deletedAt !== null && remoteRow.deletedAt === null && !revive) {
+  // 계정·사이트가 자꾸 원복). 삭제는 사용자 의도라 이긴다. 다음 푸시가 tombstone 을 다시 올린다
+  if (localRow !== null && localRow.deletedAt !== null && remoteRow.deletedAt === null) {
     result.conflicts += 1
     return false
   }
@@ -205,20 +198,6 @@ function wins(
   if (decision === 'local') result.conflicts += 1
   // 같은 시각이면 굳이 덮어쓰지 않는다
   return false
-}
-
-/**
- * 지운 계정을 다른 기기가 삭제 **뒤에** 내용을 바꿔 다시 저장했는가(주소·아이디 중 하나라도 다르다).
- * 내용이 같은 채 시각만 늦은 행은 옛 복제본이 만진 것으로 보고 되살리지 않는다(원복 사고 방지)
- */
-export function accountRevived(
-  current: { host: string; username: string; deletedAt: number | null } | null,
-  remote: { host: string; username: string; updatedAt: number; deletedAt: number | null }
-): boolean {
-  if (current === null || current.deletedAt === null || remote.deletedAt !== null) return false
-  if (remote.updatedAt <= current.deletedAt) return false
-  // 이름(label)은 로그인 기록이 저절로 바꾸기도 해 판단에서 뺀다 — 주소·아이디가 바뀐 것만 사람의 재저장으로 본다
-  return current.host !== remote.host || current.username !== remote.username
 }
 
 function toSyncable(row: {
@@ -252,7 +231,7 @@ async function pullAccounts(
     const byRemote = remote.remoteId ? local.accountIdByRemote(remote.remoteId) : null
     if (byRemote !== null) {
       const current = local.accountForSync(byRemote)
-      if (wins(current ? toSyncable(current) : null, toSyncable(remote), result, accountRevived(current, remote))) {
+      if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
         local.applyAccount(remote, byRemote)
         result.applied += 1
       } else if (current && current.deletedAt !== null && remote.deletedAt === null) {
@@ -407,15 +386,7 @@ async function pullVaultItems(
       const byRemote = local.vaultItemIdByRemote(remote.remoteId)
       if (byRemote !== null) {
         const current = local.vaultItemForSync(byRemote)
-        // 딸린 계정이 살아 있고(다시 저장돼 되살아난 계정 포함) 원격 항목이 삭제보다 뒤에 고쳐졌으면 되살린다
-        const revive =
-          current !== null &&
-          current.deletedAt !== null &&
-          remote.deletedAt === null &&
-          remote.updatedAt > current.deletedAt &&
-          accountLocalId !== null &&
-          local.accountDeletedAt(accountLocalId) === null
-        if (wins(current ? toSyncable(current) : null, toSyncable(remote), result, revive)) {
+        if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
           local.applyVaultItem(remote, byRemote)
           result.applied += 1
         } else if (current && current.deletedAt !== null && remote.deletedAt === null) {
