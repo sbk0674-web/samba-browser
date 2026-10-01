@@ -84,6 +84,13 @@ try{
     const bl=(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];
     const amt=bl?parseInt((bl.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;
     if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
+    // 장바구니 쿠폰(결제수단과 무관한 주문할인, 2026-10-02): 고르면 버튼 금액이 그 쿠폰 금액으로 바뀐다 — 읽기만 하고 닫는다
+    const cs=(await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>parseInt(l.slice(1)));
+    if(cs.length){await page.click(Math.max(...cs));await sleep(1200);
+      const cb=(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];
+      const ca=cb?parseInt((cb.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;
+      if(ca>0)for(const q of quotes)if(q.cost!=null&&q.method!=='카카오페이'){q.cost-=ca;q.discount='장바구니 쿠폰';}
+    }
     const cl=(await Q('닫기',/button "닫기"/)).map(l=>parseInt(l.slice(1))).sort((a,b)=>b-a);
     for(const c of cl.slice(0,2)){await page.click(c);await sleep(400);}
   }
