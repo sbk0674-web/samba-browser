@@ -333,6 +333,7 @@ def main() -> None:
             # 앱 채팅이 도는 동안(409 busy)·앱이 꺼진 동안은 큐를 집지 않는다
             ready=lambda: _bridge_ready(bridge),
             flag_order=flagger.mark if flagger is not None else None,
+            add_memo=wave.add_memo if wave is not None else None,
             sources=frozenset(
                 x.strip().upper() for x in settings.intake_sources.split(',') if x.strip()
             ),

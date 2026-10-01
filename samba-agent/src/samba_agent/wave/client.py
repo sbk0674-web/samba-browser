@@ -438,6 +438,14 @@ class WaveClient:
         body = self._request('PUT', f'/orders/{order_no}/status', json=payload)
         return bool(body.get('changed')) if isinstance(body, dict) else False
 
+    def add_memo(self, order_no: str, line: str) -> bool:
+        """주문 메모에 한 줄을 덧붙인다(상태·소싱 값은 그대로). 새로 붙였으면 True, 이미 같은 줄이 있으면 False.
+
+        사용자 2026-10-01: 카카오페이가 최저가인데 폰 비밀번호를 못 받으면 다른 수단으로 사지 않고 메모만 남긴다.
+        """
+        body = self._request('POST', f'/orders/{order_no}/memo', json={'line': line})
+        return bool(body.get('rows')) if isinstance(body, dict) else False
+
     def close(self) -> None:
         self._client.close()
 
