@@ -26,10 +26,17 @@ let t = await get({ interactive: 1 })
 const cb = idOf(t, /^\[\d+\] button "쿠폰 (?:사용|변경|적용 중)"\n\[(\d+)\] clickable/m)
 if (cb) {
   await page.click(cb)
-  const opened = await safe(() => page.waitFor('적용하기', 3000))
-  t = await get({ interactive: 1 })
-  const rs = [...t.matchAll(/^\[(\d+)\] radio "([\d,]+)원 할인/gm)].map(m => ({ id: +m[1], v: num(m[2]) })).sort((a, b) => b.v - a.v)
-  const ap = idOf(t, /^\[(\d+)\] button "적용하기"/m)
+  // '적용하기' 글자는 시트가 그려지기 전에도 DOM 에 있다 — 쿠폰 radio 가 보일 때까지 기다린다(2026-10-01 쿠폰 누락 사고)
+  let rs = []
+  for (let i = 0; i < 12 && !rs.length; i++) {
+    await sleep(500)
+    t = await get({ interactive: 1 })
+    rs = [...t.matchAll(/^\[(\d+)\] radio "([\d,]+)원 할인/gm)].map(m => ({ id: +m[1], v: num(m[2]) })).sort((a, b) => b.v - a.v)
+  }
+  const opened = rs.length > 0 || /적용하기/.test(t)
+  // '적용하기' 버튼은 interactive 목록에 안 나올 때가 있다 — page.idOf 로도 찾는다
+  let ap = idOf(t, /^\[(\d+)\] button "적용하기"/m)
+  if (!ap) { const k = await safe(() => page.idOf('적용하기', 0)); if (typeof k === 'number' && k >= 0) ap = k }
   if (rs[0] && ap) {
     await page.click(rs[0].id)
     await sleep(300)
