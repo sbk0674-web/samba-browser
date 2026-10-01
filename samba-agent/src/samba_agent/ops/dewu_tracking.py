@@ -3,7 +3,7 @@
 사용자 2026-10-01: "크림 중국계정 삼바 송장수집 및 허브넷 전송에 더우도 추가". 得物은 앱 전용이라 삼바웨이브(도커)가
 읽을 수 없다 — 하네스(호스트)가 폰으로 읽는다. 허브넷 전송은 삼바웨이브의 CN 루프가 해외송장 있는 주문을 그대로 보낸다.
 
-주문 찾기: 得物 → 我 → 订单 목록의 검색칸('品牌名/商品名/订单号')에 得物 주문번호 → 결과 → 상세.
+주문 찾기: 得物 → 我 → 订单 목록의 검색칸('品牌名/商品名/订单号')에 得物 주문번호 → 搜索 → '查看物流'.
 송장 읽기: 상세 글자에서 '택배사 이름 + 운송장'(웨이핀후이 수집기와 같은 택배사 목록). 발송 전이면 아무것도 안 한다.
 """
 
@@ -75,23 +75,24 @@ def read_dewu_tracking(phone: Phone, order_no: str, *, sleep: Callable[[float], 
     sleep(2)
     phone._run('shell', 'input', 'keyevent', *(['67'] * 30))
     phone._run('shell', 'input', 'text', order_no)
-    phone.key('66')  # ENTER — 검색
-    sleep(4)
-    nodes = phone.nodes()
-    first = next((n for n in sorted(nodes, key=lambda n: n.y) if '实付款' in n.text), None)
-    if first is None:
+    sleep(1)
+    # Enter 로는 검색이 안 된다 — 오른쪽 '搜索' 버튼을 누른다(실측 2026-10-01)
+    go = find_text(phone.nodes(), '搜索')
+    if go is None:
         return None
-    phone.tap(360, max(first.y - 40, 300))
-    sleep(3)
-    for _ in range(4):
-        got = tracking_of(phone.nodes())
-        if got:
-            phone.key('4')
-            return got
-        phone._run('shell', 'input', 'swipe', '360', '1200', '700', '300')
-        sleep(1)
+    phone.tap(go.x, go.y)
+    sleep(4)
+    # 발송된 주문만 '查看物流'(배송 조회)가 있다 — 그 화면에 '顺丰速运：SF…' 처럼 택배사·운송장이 나온다
+    logistics = find_text(phone.nodes(), '查看物流')
+    if logistics is None:
+        phone.key('4')
+        return None
+    phone.tap(logistics.x, logistics.y)
+    sleep(4)
+    got = tracking_of(phone.nodes())
     phone.key('4')
-    return None
+    phone.key('4')
+    return got
 
 
 def collect_dewu_tracking(wave: object, phone: Phone, *, sleep: Callable[[float], None] = time.sleep) -> dict[str, int]:
