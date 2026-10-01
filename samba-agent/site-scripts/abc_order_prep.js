@@ -73,7 +73,7 @@ const ls = await cbs()
 const i = ls.findIndex(l => l.includes(`label "${LABEL[n]}"`))
 const c = i < 0 ? null : ls.slice(i + 1).find(l => /\] clickable "/.test(l))
 if (!c || !(await clickId(parseInt(c.slice(1))))) return false
-for (let k = 0; k < 8; k++) { if ((await opts()).length) return true; await sleep(200) }
+for (let k = 0; k < 25; k++) { if ((await opts()).length) return true; await sleep(200) }
 return false
 }
 // 같은 쿠폰 사본 여럿 — 앞에서부터 누른다

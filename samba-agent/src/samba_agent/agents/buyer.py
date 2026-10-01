@@ -2278,6 +2278,22 @@ class BuyerAgent(AgentBase):
                 out = again
         if (
             out.get('ok')
+            and not issued
+            and not my_price
+            and not source.direct_card
+            and not (_as_float(out.get('coupon')) + _as_float(out.get('cart_coupon')))
+        ):
+            # 받아 둔 쿠폰이 있어도 '받은 쿠폰'은 비고, 상품 화면가(빠른 비교)가 없는 소싱처는 견줄 값도 없다 —
+            # 쿠폰 목록이 늦게 열려 0원으로 끝난 것을 가릴 수 없다(실기 2026-10-01 그랜드스테이지 P-6000: 10% 쿠폰이
+            # 있는데 0원으로 결제, 같은 주문서를 다시 돌리면 13,900원). 쿠폰 0원이면 한 번 더 돌려 더 싼 쪽을 쓴다
+            self.note('쿠폰', f'{account}: 주문서 쿠폰 0원 — 목록이 늦게 열렸을 수 있어 한 번 더 적용')
+            again = self.script_json(
+                source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
+            )
+            if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
+                out = again
+        if (
+            out.get('ok')
             and re.search(r'일반쿠폰 |플러스쿠폰 ', str(out.get('note') or ''))
             and not (_as_float(out.get('coupon')) + _as_float(out.get('cart_coupon')))
         ):
@@ -2710,7 +2726,9 @@ class BuyerAgent(AgentBase):
             others = [_as_float(o.get('cost')) for acc, o in quotes if acc != account]
             low = min(others) if others else 0.0
             cost = _as_float(q.get('cost'))
-            if issued and low and cost > low:
+            # 결제수단 적립·청구할인만큼의 차이(몇백~몇천 원)는 정상이다 — 쿠폰이 빠졌다고 볼 만큼 벌어질 때만
+            # 다시 견적한다(계정 전부를 견적하게 된 뒤로 싼 계정 말고는 매번 걸려 주문이 두 배로 느렸다, 2026-10-02)
+            if issued and low and coupon_gap(low, cost) > 0:
                 flags[account] = (
                     f'쿠폰 {issued} 을 받았는데 비교액 {cost:,.0f} > 다른 계정 {low:,.0f}'
                 )
