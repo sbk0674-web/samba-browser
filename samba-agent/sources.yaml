@@ -218,6 +218,15 @@ sources:
     login_host: kasina.co.kr
     status: hold
   # 보류 — 등록하지 않는다. 주문이 들어오면 감독자가 unsupported 로 사람에게 넘긴다
+  # 중국 크림 계정 주문(삼바웨이브가 연결 수집상품의 소싱처 SHIHUO 로 내보낸다) — 브라우저 그래프가 아니라 워커의
+  # 폰 처리기(ops/dewu_order.py, 得物 앱)가 산다. 표에는 접수 대상이 되도록만 둔다(사용자 2026-10-01)
+  - id: SHIHUO
+    key: shihuo
+    label: 식화
+    home: https://www.shihuo.cn/
+    login_host: shihuo.cn
+    status: scripts_pending
+
   - id: KREAM
     key: kream
     label: 크림
