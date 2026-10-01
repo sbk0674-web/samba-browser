@@ -5,6 +5,7 @@ needs_human 으로 두고 사람이 슬랙에서 승인할 때까지 기다린�
 """
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ THREAD_PREFIX = 'job:'
 # 카카오페이 비밀번호를 사람이 끝내 안 넣어 멈춘 결제(payer 문구) — 이때 다시 살 수단
 KAKAO_FALLBACK_MARK = '카카오페이 폰 비밀번호를 기다렸지만'
 KAKAO_FALLBACK_CARD = '네이버페이'
+# 대체 결제 작업 옵션에 실어 기록 단계가 삼바 메모 끝에 붙이는 글(사용자 2026-10-01)
+KAKAO_MEMO_KEY = 'kakao_memo'
 # 배송지를 저장했는데 목록에 바로 안 보여 멈춘 결제 전 실패(구매 문구) — 한 번 다시 돌린다
 SHIP_RETRY_MARK = '저장 뒤 목록에 없음'
 SHIP_RETRY_KEY = '_ship_retry'
@@ -372,10 +375,16 @@ class Worker:
                 # 카카오페이는 비밀번호를 사람이 폰에서 넣어야 한다(보안 키패드) — 기다려도 안 넣었으면 다음으로 싼,
                 # 자동으로 끝낼 수 있는 수단(네이버페이)으로 한 번 다시 산다(사용자 2026-09-30: 최저가로 살 수 있는 수단)
                 self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
+                # 기록 단계가 삼바 메모에 남긴다 — 카카오페이가 최저였는데 비밀번호를 못 받아 다른 수단으로 샀다
+                paid = re.search(r'\[카카오페이 ([^\]]+)\]', reason)
+                memo = (
+                    f'카카오페이 최저가({paid.group(1) if paid else "금액 미확인"}) 결제 시도·알림 — '
+                    f'폰 비밀번호 미입력으로 {KAKAO_FALLBACK_CARD} 결제'
+                )
                 self.d.queue.enqueue(
                     job.order_no,
                     job.requester,
-                    {**job.options, 'card': KAKAO_FALLBACK_CARD},
+                    {**job.options, 'card': KAKAO_FALLBACK_CARD, KAKAO_MEMO_KEY: memo},
                     job.thread_ts,
                 )
                 self.d.report(job, f'{job.order_no} 카카오페이 비밀번호 미입력 — {KAKAO_FALLBACK_CARD}로 다시 산다')

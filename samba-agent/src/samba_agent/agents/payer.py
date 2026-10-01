@@ -14,6 +14,7 @@ from samba_agent import local_aliases
 from samba_agent.agents.base import AgentBase, AgentFailure, run_agent, split_page_dialogs
 from samba_agent.agents.buyer import DIRECT_CARD_METHODS, POINTS_ONLY_METHOD, product_no_of
 from samba_agent.agents.contracts import AgentResult, Assignment
+from samba_agent.export.desktop import toast
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
 from samba_agent.sources import default_sources
@@ -556,6 +557,17 @@ KAKAO_REQUEST_WAIT_MS = 2500
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
 KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck')
 KAKAO_HUMAN_WAIT_TRIES = 36
+
+
+def _as_won(value: object) -> str:
+    """알림·메모용 금액 글자. 모르면 '금액 미확인'."""
+    try:
+        amount = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return '금액 미확인'
+    return f'{amount:,.0f}원' if amount > 0 else '금액 미확인'
+
+
 KAKAO_HUMAN_WAIT_MS = 5000
 
 
@@ -783,6 +795,12 @@ class PayerAgent(AgentBase):
         """사람이 폰에서 카카오페이 비밀번호를 넣을 때까지 결제창을 열어 두고 완료 화면을 기다린다."""
         self.step('payer: 카카오페이 — 폰에서 결제 비밀번호를 직접 넣어 주세요(결제창 열어 둠)')
         self.note('카카오페이', mask_text(f'폰 키패드 자동 입력 실패({why[:60]}) — 사람 입력 대기'))
+        # 사람이 바로 알 수 있게 PC 알림을 띄운다(사용자 2026-10-01 "결제 시도하고 알람 준 뒤 안 되면 삼바 메모")
+        amount = _as_won(a.handoff.get('paid'))
+        toast.show(
+            '카카오페이 결제 비밀번호 입력',
+            f'{a.order.order_no} {amount} — 폰에서 3분 안에 결제 비밀번호를 넣어 주세요',
+        )
         for _ in range(KAKAO_HUMAN_WAIT_TRIES):
             page = self._success_page(a)
             if any(m in page for m in PAY_SUCCESS_MARKERS):
@@ -790,7 +808,8 @@ class PayerAgent(AgentBase):
             self.tool('wait', ms=KAKAO_HUMAN_WAIT_MS)
         raise AgentFailure(
             'needs_human',
-            '카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인)',
+            '카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인)'
+            f' [카카오페이 {_as_won(a.handoff.get("paid"))}]',
             FailReason.PAY_INTERRUPTED,
         )
 

@@ -694,3 +694,40 @@ def test_검증_전_결제수단은_자동_승인하지_않는다(tmp_path):
     assert job.state == 'needs_human'
     assert 'pay' not in log
     assert any('수동 승인 필요' in s for s in sent)
+
+
+def test_카카오페이_비밀번호_미입력이면_네이버페이로_다시_사고_메모를_싣는다(tmp_path):
+    """사용자 2026-10-01: 카카오페이 결제를 시도해 알린 뒤 안 되면 삼바 메모를 남긴다."""
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    acts = agents([])
+    acts['payer'] = lambda _a: AgentResult(
+        status='needs_human',
+        reason='카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인) [카카오페이 54,000원]',
+        fail_reason=FailReason.PAY_INTERRUPTED,
+    )
+    graph = build_supervisor(reg, acts, checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(queue=q, graph=graph, version='vtest', report=lambda j, l: None, parse_order=order_of, dry_run=False)
+    )
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    w.tick()
+    again = q.get('A1')
+    assert again.state == 'queued'
+    assert again.options['card'] == '네이버페이'
+    assert '54,000원' in again.options['kakao_memo'] and '네이버페이' in again.options['kakao_memo']
+
+
+def test_삼바_메모에_카카오페이_사정을_붙인다():
+    from samba_agent.agents.contracts import Assignment
+    from samba_agent.agents.recorder import wave_notes
+
+    order = OrderRef(order_no='A1', source='LOTTEON', seller='s', sku='S1', qty=1)
+    a = Assignment(
+        order=order,
+        allowed_tools=[],
+        rules='',
+        options={'card': '네이버페이', 'kakao_memo': '카카오페이 최저가(54,000원) 결제 시도·알림'},
+    )
+    notes = wave_notes(a, {'account': 'acc', 'paid': 55000, 'real_price': 54450})
+    assert notes.splitlines()[1] == '카카오페이 최저가(54,000원) 결제 시도·알림'

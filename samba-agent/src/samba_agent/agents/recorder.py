@@ -67,10 +67,13 @@ def wave_notes(a: Assignment, values: dict[str, object]) -> str:
     # 실제 주문 상세에서 읽은 값이 있으면 그것을 쓴다(결제 뒤 재계산)
     card = values.get('card') or a.handoff.get('card') or a.options.get('card') or '미확인'
     paid = values.get('paid') or a.handoff.get('paid')
-    return (
+    line = (
         f'계정 {values.get("account") or "미확인"} · 수단 {card} · '
         f'실결제 {_won(paid)} · 원가 {_won(values.get("real_price"))}'
     )
+    # 카카오페이가 최저였는데 비밀번호를 못 받아 다른 수단으로 산 작업 — 그 사정을 메모에 남긴다(사용자 2026-10-01)
+    kakao = str(a.options.get('kakao_memo') or '').strip()
+    return f'{line}\n{kakao}' if kakao else line
 
 
 def _arrival_memo(a: Assignment, values: dict[str, object]) -> str | None:
