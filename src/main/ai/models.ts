@@ -12,17 +12,17 @@ import {
 // 목록·라벨을 API 키 경로와 같게 보여 주기 위함
 const SUBSCRIPTION_MODELS: TaskModels = {
   fast: 'claude-haiku-4-5-20251001',
-  standard: 'claude-sonnet-5',
-  deep: 'claude-opus-5',
-  visual: 'claude-sonnet-5'
+  standard: 'claude-sonnet-5-5',
+  deep: 'claude-opus-5-5',
+  visual: 'claude-sonnet-5-5'
 }
 
 // 내 API 키 경로는 별칭이 통하지 않으므로 정식 모델 ID 를 쓴다
 const API_KEY_MODELS: TaskModels = {
   fast: 'claude-haiku-4-5-20251001',
-  standard: 'claude-sonnet-5',
-  deep: 'claude-opus-5',
-  visual: 'claude-sonnet-5'
+  standard: 'claude-sonnet-5-5',
+  deep: 'claude-opus-5-5',
+  visual: 'claude-sonnet-5-5'
 }
 
 // Codex 구독(= Codex CLI) 경로는 OpenAI 모델 이름을 그대로 넘긴다(codex exec -m)
@@ -46,16 +46,16 @@ const MODEL_CHOICES: Record<AiProviderId, string[]> = {
   // Claude Code 구독은 별칭(haiku/sonnet/opus)과 정식 ID 둘 다 받는다 — 목록은 정식 ID 로 통일
   claude_subscription: [
     'claude-fable-5-1',
-    'claude-opus-5',
-    'claude-sonnet-5',
+    'claude-opus-5-5',
+    'claude-sonnet-5-5',
     'claude-haiku-4-5-20251001'
   ],
-  api_key: ['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
+  api_key: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'],
   codex_subscription: ['gpt-5.6', 'gpt-5.6-pro', 'gpt-5.1-codex-max', 'gpt-5.3-codex'],
   service_credit: [
     'claude-haiku-4-5-20251001',
-    'claude-sonnet-5',
-    'claude-opus-5',
+    'claude-sonnet-5-5',
+    'claude-opus-5-5',
     'claude-fable-5-1'
   ]
 }

@@ -31,7 +31,7 @@ BridgeCall = Callable[[str, dict[str, object]], str]
 Validate = Callable[[dict[str, object]], str | None]
 
 # SDK 내장 CLI 가 아는 모델이어야 한다(실기: claude-opus-5-5 는 'does not support this model')
-DEFAULT_REPAIR_MODEL = 'claude-opus-5'
+DEFAULT_REPAIR_MODEL = 'claude-opus-5-5'
 DEFAULT_MAX_TURNS = 70  # 40 이면 화면을 살피다 시험 전에 끝나는 일이 잦았다(실기 로그)
 DEFAULT_TIMEOUT_S = 900.0
 # 앱 run_js·저장 스크립트 코드 상한(RUN_JS_MAX_CODE)

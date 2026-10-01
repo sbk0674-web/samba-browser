@@ -27,7 +27,7 @@ from pydantic import BaseModel, ValidationError
 
 from samba_agent.agents.base import DecideFn
 
-DEFAULT_MODEL = 'claude-sonnet-5'
+DEFAULT_MODEL = 'claude-sonnet-5-5'
 # 구조화 출력 재요청은 base.decide_once 가 1 회 한다 — 여기서는 재시도하지 않는다
 DEFAULT_MAX_TURNS = 1
 

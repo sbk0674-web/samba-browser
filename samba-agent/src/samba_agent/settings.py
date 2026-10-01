@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # 저장 스크립트가 실패하면 AI 가 화면을 보고 고쳐 이어 간다(검증 통과한 코드만 저장, 이전 판은 이력 폴더)
     # 기본 꺼짐 — 2026-09-24 수리 시험 중 '결제하기' 클릭으로 실결제 발생. 앱 쪽 결제 버튼 클릭 차단 전까지 켜지 않는다
     repair_enabled: bool = Field(default=False, alias='SAMBA_REPAIR_ENABLED')
-    repair_model: str = Field(default='claude-opus-5', alias='SAMBA_REPAIR_MODEL')
+    repair_model: str = Field(default='claude-opus-5-5', alias='SAMBA_REPAIR_MODEL')
     repair_timeout_s: float = Field(default=900.0, ge=60, alias='SAMBA_REPAIR_TIMEOUT_S')
     site_scripts_file: Path = Field(
         default=DEFAULT_SITE_SCRIPTS_FILE, alias='SAMBA_SITE_SCRIPTS_FILE'

@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { AI_PROVIDERS, type AiConnections, type AiProviderId, type TaskModels } from './ai'
+import {
+  AI_PROVIDERS,
+  upgradeModelId,
+  type AiConnections,
+  type AiProviderId,
+  type TaskModels
+} from './ai'
 import { DEFAULT_DANGER_WORDS, mergeDangerWords } from './danger'
 import { EXTENSION_SOURCES, type ExtensionSource } from './extensions'
 import { defaultMouseGestures, GESTURE_ACTIONS } from './gestures'
@@ -136,9 +142,9 @@ export const DEFAULT_SETTINGS = {
   aiConnectionsMigrated: false,
   taskModels: {
     fast: 'claude-haiku-4-5-20251001',
-    standard: 'claude-sonnet-5',
-    deep: 'claude-opus-5',
-    visual: 'claude-sonnet-5'
+    standard: 'claude-sonnet-5-5',
+    deep: 'claude-opus-5-5',
+    visual: 'claude-sonnet-5-5'
   } as TaskModels,
   // 에이전트 동작
   agentNotify: true,
@@ -348,6 +354,13 @@ export const settingsSchema = z.object({
       deep: z.string(),
       visual: z.string()
     })
+    // 저장된 옛 모델 ID(Opus 5·Sonnet 5)는 최신(5.5)으로 올려 읽는다
+    .transform((m) => ({
+      fast: upgradeModelId(m.fast),
+      standard: upgradeModelId(m.standard),
+      deep: upgradeModelId(m.deep),
+      visual: upgradeModelId(m.visual)
+    }))
     .catch(DEFAULT_SETTINGS.taskModels),
   agentNotify: z.boolean().catch(DEFAULT_SETTINGS.agentNotify),
   agentSound: z.boolean().catch(DEFAULT_SETTINGS.agentSound),
