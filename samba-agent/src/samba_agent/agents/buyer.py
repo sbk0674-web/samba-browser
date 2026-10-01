@@ -2181,6 +2181,31 @@ class BuyerAgent(AgentBase):
             ),
             check=lambda o: self._prep_problem(account, o),
         )
+        issued = list(getattr(self, '_issued', {}).get(account, []))
+        if (
+            out.get('ok')
+            and issued
+            and not (_as_float(out.get('coupon')) + _as_float(out.get('cart_coupon')))
+        ):
+            # 쿠폰을 받았는데 주문서 쿠폰 0원 — 쿠폰 목록이 가끔 안 열린다(실기 2026-10-01 그랜드스테이지: 같은 주문서에서
+            # 한 번은 13,900원, 한 번은 0원). 한 번 더 돌려 더 싼 쪽을 쓴다
+            self.note('쿠폰', f'{account}: 받은 쿠폰 {len(issued)}장인데 주문서 쿠폰 0원 — 한 번 더 적용')
+            again = self.script_json(
+                source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
+            )
+            if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
+                out = again
+        if (
+            out.get('ok')
+            and re.search(r'일반쿠폰 |플러스쿠폰 ', str(out.get('note') or ''))
+            and not (_as_float(out.get('coupon')) + _as_float(out.get('cart_coupon')))
+        ):
+            # 쿠폰을 골랐다고 했는데 할인 0원 — 선택이 반영되지 않은 것이다(실기 2026-10-01). 그대로 사면 쿠폰을 버린다
+            raise AgentFailure(
+                'needs_human',
+                f'{account}: 쿠폰을 골랐는데 할인이 0원이다 — 결제하지 않음({mask_text(str(out.get("note"))[:80])})',
+                FailReason.UNKNOWN,
+            )
         if not out.get('ok'):
             raise AgentFailure(
                 'needs_human',
