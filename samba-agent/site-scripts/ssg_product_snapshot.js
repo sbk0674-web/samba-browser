@@ -42,6 +42,7 @@ if ((await page.idOf('바로구매', 0)) < 0 && ((await page.idOf('입고알림'
   return { ...R, sold_out: true, options: [], note: 'item sold out', product_tab: tabId }
 }
 
+const KE = '블랙black,화이트white,레드red,블루blue,네이비navy,그레이gr,그린green,베이지beige,핑크pink'.split(',').map(x => x.match(/(\W+)(\w+)/))
 const picked = []
 for (let step = 0; step < 3; step++) {
   const before = new Set(els(await tree({ interactive: true })).map(e => e.id))
@@ -52,7 +53,7 @@ for (let step = 0; step < 3; step++) {
   await page.click(opener)
   await sleep(700)
   const after = els(await tree({ interactive: true }))
-  const live = after.filter(e => !before.has(e.id) && e.role === 'link' && /href=#/.test(e.rest) && e.text && e.text.length <= 40 && !/배너|이전|다음|닫기|선택하세요|매진|품절/.test(e.text))
+  const live = after.filter(e => !before.has(e.id) && e.role === 'link' && /href=#/.test(e.rest) && e.text && e.text.length <= 40 && !/배너|이전|다음|닫기|선택하세요|매진|품절|Q&A|추천 상품|교환\/반품/.test(e.text))
   t = await text()
   const oseg = t.slice(Math.max(t.indexOf('선택하세요.'), 0), t.indexOf('총 금액') > 0 ? t.indexOf('총 금액') : undefined)
   const sold = [...oseg.matchAll(/(\S+)\(매진\)/g)].map(m => m[1] + ' 품절')
@@ -61,7 +62,7 @@ for (let step = 0; step < 3; step++) {
   let best = null, top = 0
   for (const o of live) { const s = score(o.text); if (s > top) { top = s; best = o } }
   const COLOR = /black|white|red|blue|navy|gr[ae]y|green|beige|pink|ivory|블랙|화이트|레드|블루|네이비|그레이|그린|베이지|핑크|아이보리/i
-  if (!best && live.length === 1 && (/^(free|f|one ?size|os|프리)$/i.test(live[0].text) || !COLOR.test(want) || COLOR.test(live[0].text) && nm(want).includes(nm(live[0].text)))) best = live[0]
+  if (!best && live.length === 1 && (/^(free|f|one ?size|os|프리)$/i.test(live[0].text) || !COLOR.test(want) || COLOR.test(live[0].text) && nm(want).includes(nm(live[0].text)) || KE.some(m => want.includes(m[1]) && live[0].text.toLowerCase().includes(m[2])))) best = live[0]
   if (!best) { R.note = want ? 'size not available' : 'option needs choice'; R.coupons[acct] = 0; return { ...R, product_tab: tabId } }
   await page.click(best.id)
   picked.push(best.text)
