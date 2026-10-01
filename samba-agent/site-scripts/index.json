@@ -1137,5 +1137,15 @@
       "memo — 선택, 배송 요청사항",
       "phone — 선택. 없으면 비워두고 phone_field_ids 반환"
     ]
+  },
+  {
+    "name": "lotteon_order_detail",
+    "host": "lotteon.com",
+    "description": "롯데온 주문 상세(2026-10-01, 로그인 실측): 계정 profile 로 주문/배송 내역에서 그 주문의 '상세보기'를 눌러 결제정보(결제액·L.POINT 사용)·구매적립예정을 읽고 탭을 닫는다.",
+    "params": [
+      "orderNo",
+      "profile",
+      "source_order_no"
+    ]
   }
 ]
