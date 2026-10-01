@@ -16,18 +16,20 @@ if (cand.length !== 1) return fail(cand.length ? `order form ambiguous: ${cand.l
 const tab = cand[0].id
 await tabs.switch(tab)
 const big = async () => (await lines()).filter(l => /^\[\d{6,}\]/.test(l))
-const closeModal = async () => { const c = (await big()).find(l => /button "모달 닫기"/.test(l)); if (c) { await page.click(parseInt(c.slice(1))); await sleep(400) } }
+const closeModal = async () => { const c = (await big()).find(l => /button "모달 닫기"/.test(l)); if (c) { try { await page.click(parseInt(c.slice(1))) } catch (e) {} await sleep(400) } }
 let fr = await big()
 if (!fr.some(l => /link "배송지 선택"/.test(l))) {
-  const ch = await page.idOf('배송지 변경')
+  // 창이 넘어가는 중이면 조회·클릭이 '프레임 호출 시간 초과'로 던진다 — 삼키고 다시 본다(2026-10-01)
+  let ch = -1
+  for (let i = 0; i < 3 && ch < 0; i++) { try { ch = await page.idOf('배송지 변경') } catch (e) { await sleep(1200) } }
   if (ch < 0) return fail('배송지 변경 링크 없음', { order_tab: tab })
-  await page.click(ch)
+  try { await page.click(ch) } catch (e) {}
   for (let i = 0; i < 20 && !(fr = await big()).some(l => /link "배송지 선택"/.test(l)); i++) await sleep(250)
 }
 const st = fr.find(l => /link "배송지 선택"/.test(l))
 if (!st) return fail('배송지 선택 탭 없음', { order_tab: tab })
-await page.click(parseInt(st.slice(1)))
-await sleep(600)
+try { await page.click(parseInt(st.slice(1))) } catch (e) {}
+await sleep(900)
 // 도로명(…로·…길)과 숫자 토큰, 호수
 const road = (addr.match(/\S+(로|길)\b/g) || []).map(sq)
 const nums = addr.replace(/^\d{5}\s*/, '').match(/\d+(-\d+)?/g) || []
