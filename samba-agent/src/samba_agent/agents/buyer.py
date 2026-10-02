@@ -148,7 +148,9 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
     # 주문 주소에 건물번호가 없고 상세주소가 번호로 시작하는 주문(실기 2026-10-01 패션플러스: 주소 '…로', 상세 '29, …')은
     # 사이트가 '…로 29' + 상세로 나눠 되읽는다 — 양쪽 모두 주소+상세를 붙여 숫자 토큰을 비교한다
     b_full = _norm_address(f'{applied.get("address", "")} {applied.get("address_detail") or ""}')
-    return bool(full) and re.findall(r'\d+', full) == re.findall(r'\d+', b_full) and a[-6:] in b_full
+    return (
+        bool(full) and re.findall(r'\d+', full) == re.findall(r'\d+', b_full) and a[-6:] in b_full
+    )
 
 
 # 결제수단 이름 → 키마스터 결제 제공자(src/shared/vault.ts PaymentProvider). 앞에서부터 먼저 맞는 것
@@ -163,7 +165,22 @@ QUOTE_PROVIDER_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # 사이트 자체 결제(웹에서 끝나는 결제) — 무신사머니·SSG PAY·L.pay·스마일페이 등
     # 롯데온 '충전결제'는 L.pay(사이트 결제 비밀번호, 키마스터 site 항목)다(실기 2026-09-26)
     # 슈마커·롯데온 '간편결제'는 사이트에 등록한 카드로 사이트 결제 비밀번호(키마스터 site 항목)를 쓴다
-    ('site', ('머니', 'ssg pay', 'ssgpay', 'l.pay', 'lpay', '엘페이', '충전결제', '간편결제', '스마일', 'smile', '포인트')),
+    (
+        'site',
+        (
+            '머니',
+            'ssg pay',
+            'ssgpay',
+            'l.pay',
+            'lpay',
+            '엘페이',
+            '충전결제',
+            '간편결제',
+            '스마일',
+            'smile',
+            '포인트',
+        ),
+    ),
     # 주문서의 '카드'(직접 결제)는 쓰지 않는다 — 결제 가능 수단에 절대 들어가지 않게 표에서 뺀다.
     # 예외는 소싱처 단위 direct_card(H몰 롯데카드) — quote_provider 가 표보다 먼저 본다
 )
@@ -184,7 +201,9 @@ def _direct_card_provider(method: str, card: str | None, direct_card: str | None
     return DIRECT_CARD_PROVIDER if not card or (issuer and issuer in card) else None
 
 
-def quote_provider(method: str, card: str | None = None, direct_card: str | None = None) -> str | None:
+def quote_provider(
+    method: str, card: str | None = None, direct_card: str | None = None
+) -> str | None:
     """견적 한 줄의 결제수단(카드사 포함)이 어느 결제 제공자인지. 모르면 None(결제 불가로 본다).
 
     direct_card(소싱처 표)가 있으면 주문서 '카드' 탭의 그 카드사 줄만 카드 직접 결제('card')로 본다(H몰 롯데카드).
@@ -200,7 +219,9 @@ def quote_provider(method: str, card: str | None = None, direct_card: str | None
     return None
 
 
-_CARD_ISSUER_RE = re.compile(r'(현대|KB국민|KB|국민|롯데|신한|농협|NH|삼성|하나|우리|BC|비씨|씨티)\s*카드')
+_CARD_ISSUER_RE = re.compile(
+    r'(현대|KB국민|KB|국민|롯데|신한|농협|NH|삼성|하나|우리|BC|비씨|씨티)\s*카드'
+)
 
 
 def clean_card(card: str | None) -> str | None:
@@ -266,7 +287,10 @@ def method_providers(
 
 
 def payable_methods(
-    methods: list[str], payable: set[str], money_in_pay: bool = False, direct_card: str | None = None
+    methods: list[str],
+    payable: set[str],
+    money_in_pay: bool = False,
+    direct_card: str | None = None,
 ) -> list[str]:
     """주문서에 보이는 결제수단 이름 중 키마스터로 낼 수 있는 것만(사이트 표기 그대로). 순서는 화면 순서."""
     return [m for m in methods if method_providers(m, money_in_pay, direct_card) & payable]
@@ -447,7 +471,9 @@ def mall_candidates(raw: object) -> list[dict[str, object]]:
     items = [
         x
         for x in (raw if isinstance(raw, list) else [])
-        if isinstance(x, dict) and str(x.get('url') or '').startswith('https://') and x.get('item_id')
+        if isinstance(x, dict)
+        and str(x.get('url') or '').startswith('https://')
+        and x.get('item_id')
     ]
     return sorted(items, key=lambda x: _as_float(x.get('price')) or float('inf'))
 
@@ -482,7 +508,9 @@ def blocked_failure(out: dict[str, object], what: str) -> AgentFailure | None:
         return None
     return AgentFailure(
         'needs_human',
-        mask_text(f'{BLOCKED_REASON}({what}) — 재시도하지 않는다: {str(out.get("note") or "")[:80]}'),
+        mask_text(
+            f'{BLOCKED_REASON}({what}) — 재시도하지 않는다: {str(out.get("note") or "")[:80]}'
+        ),
         FailReason.CAPTCHA,
     )
 
@@ -533,7 +561,19 @@ def effective_cost(row: dict[str, object]) -> float:
 # '카드 직접 결제'는 쓰지 않는다 — 카드는 간편결제 창 안에서만 고른다. 결제 에이전트가 카드를 고를 때 이 표를 쓴다
 # 무신사 적립금은 보유 5만원 이상일 때만 쓴다(플레이북 §6) — 그 아래면 '적립금 못 쓰는 계정'으로 본다
 POINTS_USE_MIN = 50000
-ALLOWED_CARD_ISSUERS = ('현대', 'KB', '국민', '롯데', '신한', '농협', 'NH', '우리', 'BC', '비씨', '삼성')
+ALLOWED_CARD_ISSUERS = (
+    '현대',
+    'KB',
+    '국민',
+    '롯데',
+    '신한',
+    '농협',
+    'NH',
+    '우리',
+    'BC',
+    '비씨',
+    '삼성',
+)
 
 
 # 롯데홈쇼핑 판매건 중 이 브랜드는 늘 직배(사용자 2026-10-01 "롯데홈쇼핑 나이키,아디다스 직배로 주문해")
@@ -582,7 +622,22 @@ def shipping_fee_for(order: OrderRef, order_type: str) -> float:
     return 0.0
 
 
-_FREE_SIZE_TOKENS = frozenset({'free', 'f', 'one', 'onesize', 'os', 'osfm', 'fs', '프리', '프리사이즈', '단일', '단일사이즈', 'freesize'})
+_FREE_SIZE_TOKENS = frozenset(
+    {
+        'free',
+        'f',
+        'one',
+        'onesize',
+        'os',
+        'osfm',
+        'fs',
+        '프리',
+        '프리사이즈',
+        '단일',
+        '단일사이즈',
+        'freesize',
+    }
+)
 
 
 def _is_free_size(text: str) -> bool:
@@ -647,7 +702,11 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
         if normed:
             return normed
         # 후보가 주문 옵션 안에 들어 있는 경우는 두 글자 이상만 — 'L' 이 'BLACK' 안에 있다고 L 을 고르면 안 된다
-        contains = [o for o in live if _norm(o) and (nw in _norm(o) or (len(_norm(o)) >= 2 and _norm(o) in nw))]
+        contains = [
+            o
+            for o in live
+            if _norm(o) and (nw in _norm(o) or (len(_norm(o)) >= 2 and _norm(o) in nw))
+        ]
         # 사이즈 글자가 서로 다르면(주문 XL ↔ 선택지 2XL·XXL) 글자 포함으로 맞추지 않는다
         # (실기 2026-09-30 그랜드스테이지: XL 품절인데 2XL 을 후보로 봐 품절 확증을 놓쳤다)
         wl = size_letters(w)
@@ -754,10 +813,30 @@ def numeric_overlap_options(options: list[str], wanted: str | None) -> list[str]
     빈 목록 — AI 가 '가장 가까운 220' 을 230 주문에 고르는 사고를 코드로 막는다(실기).
     """
     live = [o for o in options if not _sold_out(o)]
+    cap = cap_size_code(wanted or '')
+    if cap:
+        # 모자 분수 사이즈(7 7/8)는 선택지의 세 자리 코드(778)와 꼭 같아야 한다 — 숫자 7·8 이 겹친다고 718 을
+        # 후보로 주면 AI 가 그걸 고른다(실기 2026-10-03: 7 7/8 주문에 718 을 결제, 778 은 품절이었다)
+        return [
+            o
+            for o in live
+            if _CAP_OPTION_RE.match(o.strip()) and _CAP_OPTION_RE.match(o.strip()).group(1) == cap
+        ]
     nums = size_numbers(wanted or '')
     if not nums:
         return live
     return [o for o in live if size_numbers(o) & nums]
+
+
+_CAP_FRACTION_RE = re.compile(r'(?<![\d/])([5-8])\s+([1357])\s*/\s*(2|4|8)(?![\d/])')
+_NO_MATCH_REASON_RE = re.compile(r'(일치|해당)하는 (후보|옵션|선택지)[이가은는도]? ?없')
+_CAP_OPTION_RE = re.compile(r'^(\d{3})(?=\(|\s|$)')
+
+
+def cap_size_code(text: str) -> str:
+    """모자 분수 사이즈 '7 7/8' → 선택지 코드 '778'. 분수 사이즈가 없으면 빈 글."""
+    m = _CAP_FRACTION_RE.search(text)
+    return ''.join(m.groups()) if m else ''
 
 
 def resolve_choice(choice: str, candidates: list[str]) -> str | None:
@@ -847,12 +926,17 @@ def _quote_rows_brief(rows: list[object]) -> str:
     for r in rows[:8]:
         if isinstance(r, dict):
             flags = ','.join(k for k in ('available', 'allowed', 'registered') if r.get(k) is False)
-            out.append(f"{r.get('method')}/{r.get('card')}/{r.get('cost')}{'/X:' + flags if flags else ''}")
+            out.append(
+                f'{r.get("method")}/{r.get("card")}/{r.get("cost")}{"/X:" + flags if flags else ""}'
+            )
     return '; '.join(out)[:300]
 
 
 def quotes_problem(
-    out: dict[str, object], offered: list[str], allowed: set[str] | None, direct_card: str | None = None
+    out: dict[str, object],
+    offered: list[str],
+    allowed: set[str] | None,
+    direct_card: str | None = None,
 ) -> str | None:
     """결제수단 견적 검사 — 허용 수단으로 실제 낼 수 있는 줄이 있어야 하고, 주문서에 무신사머니가 있으면 그 줄도 있어야 한다.
 
@@ -877,7 +961,10 @@ def pay_card_quote_problem(out: dict[str, object]) -> str | None:
     """무신사페이 기본 카드 견적 검사 — 카드 이름과 금액이 있어야 한다(실기: 카드 [] 인데 통과)."""
     rows = out.get('quotes')
     note = str(out.get('note') or '')
-    if not rows and (out.get('cards') == [] or re.search(r'no registered card|등록(된)? ?카드 ?없', note, re.IGNORECASE)):
+    if not rows and (
+        out.get('cards') == []
+        or re.search(r'no registered card|등록(된)? ?카드 ?없', note, re.IGNORECASE)
+    ):
         # 무신사페이에 등록 카드가 없는 계정 — 실제로 그렇다(수리해도 genuine). 견적 줄 없이 넘어간다
         # (실기 2026-09-25: buyer05 에서 작업마다 수리를 돌렸다)
         return None
@@ -1123,7 +1210,9 @@ def single_item_ok(option: str | None, snap: dict[str, object]) -> bool:
     if not _is_free_size(option):
         return False
     name = str(snap.get('product_name') or '').lower()
-    rest = [t for t in re.split(r'[\s()/·,\[\]]+', option.lower()) if t and t not in _FREE_SIZE_TOKENS]
+    rest = [
+        t for t in re.split(r'[\s()/·,\[\]]+', option.lower()) if t and t not in _FREE_SIZE_TOKENS
+    ]
     if not rest or any(t in name for t in rest):
         return True
     # 상품명에 색 글자가 아예 없는 단일 상품(실기 2026-10-01 롯데온 라코스테 쇼퍼백 '블랙 FREE' — 이름은 품번뿐):
@@ -1491,7 +1580,9 @@ class BuyerAgent(AgentBase):
         # (실기 2026-09-26: 로그인된 계정 4개가 모두 'fields not found'. 2026-09-28: 'host unknown'·
         # 'page did not respond' 로 6계정 전부 실패). 홈을 다시 열고 기다림을 늘려 두 번까지 다시 본다
         for retry in (1, 2):
-            if not (out.startswith(LOGIN_FIELDS_NOT_FOUND) or any(w in out for w in _LOGIN_BUSY_WORDS)):
+            if not (
+                out.startswith(LOGIN_FIELDS_NOT_FOUND) or any(w in out for w in _LOGIN_BUSY_WORDS)
+            ):
                 break
             self.note('로그인', f'{account}: 페이지가 덜 떠 다시 시도({retry}/2)')
             # 탭을 새로 열면 같은 로딩을 또 기다린다(실측 2026-09-28: 병렬 첫 호출 7~20초, 둘째 호출 0.7초).
@@ -1667,7 +1758,7 @@ class BuyerAgent(AgentBase):
         profile = json.dumps(account, ensure_ascii=False) if account else 'undefined'
         code = (
             f"const r=await tabs.open({{profile:{profile},url:'{SSG_CART_URL}'}});"
-            r"const id=(String(r).match(/tab (\S+)/)||[])[1];await sleep(4000);"
+            r'const id=(String(r).match(/tab (\S+)/)||[])[1];await sleep(4000);'
             "if(id){try{await tabs.close(id)}catch(e){}}return 'ok'"
         )
         try:
@@ -1692,20 +1783,31 @@ class BuyerAgent(AgentBase):
             return first
         return self._snapshot_once(a, account)
 
-    def _entry_vs_adpick(self, a: Assignment, account: str, first: dict[str, object]) -> dict[str, object]:
+    def _entry_vs_adpick(
+        self, a: Assignment, account: str, first: dict[str, object]
+    ) -> dict[str, object]:
         """정해진 진입 경로(H몰 = 다나와) 주문서와 애드픽 적립 링크 주문서의 원가(결제액 − 적립)를 비교한다.
 
         사용자 2026-09-27: H몰·GS샵은 애드픽 적립을 받는다. 다나와 제휴할인과 애드픽 적립은 제휴코드가 달라
         함께 받을 수 없다 — 싼 쪽으로 산다. 애드픽 링크를 못 받거나 그 주문서를 못 쓰면 첫 경로로 산다.
         """
-        if first.get('error') or first.get('already_ordered') or first.get('existing_order_no') or self._unusable(a, first):
+        if (
+            first.get('error')
+            or first.get('already_ordered')
+            or first.get('existing_order_no')
+            or self._unusable(a, first)
+        ):
             return first
         product_url = str(first.get('product_url') or a.order.product_url or '')
         link = self._adpick_link(product_url, account)
         if link is None:
             return first
         url, percent = link
-        extra: dict[str, object] = {'route': ADPICK_ROUTE, 'entry_url': url, 'adpick_percent': percent}
+        extra: dict[str, object] = {
+            'route': ADPICK_ROUTE,
+            'entry_url': url,
+            'adpick_percent': percent,
+        }
         try:
             snap = self._snapshot_once(a, account, extra, probe=True)
         except AgentFailure as e:
@@ -1735,7 +1837,9 @@ class BuyerAgent(AgentBase):
         why = self._unusable(a, again)
         if why:
             raise AgentFailure(
-                'needs_human', mask_text(f'진입 경로로 다시 들어가 주문서를 못 만들었다: {why}'), FailReason.UNKNOWN
+                'needs_human',
+                mask_text(f'진입 경로로 다시 들어가 주문서를 못 만들었다: {why}'),
+                FailReason.UNKNOWN,
             )
         again['route'] = str(source_of(self.spec.name).entry_route)
         return again
@@ -1744,9 +1848,7 @@ class BuyerAgent(AgentBase):
         """애드픽 적립 추적 링크와 적립률(%) — 그 계정 프로필의 애드픽 로그인으로 받는다. 못 받으면 None."""
         if not product_url.startswith('https://'):
             return None
-        code = (
-            f'return JSON.stringify(await affiliate.adpick({json.dumps(product_url)}, {json.dumps(account)}))'
-        )
+        code = f'return JSON.stringify(await affiliate.adpick({json.dumps(product_url)}, {json.dumps(account)}))'
         try:
             raw = self.tool('run_js', code=code, safety='no_pay')
             out = json.loads(json.loads(raw)) if raw.startswith('"') else json.loads(raw)
@@ -1754,9 +1856,16 @@ class BuyerAgent(AgentBase):
             self.note('경로 비교', mask_text(f'애드픽 링크 못 받음({str(e)[:60]})'))
             return None
         url = str(out.get('trackinglink') or '') if isinstance(out, dict) else ''
-        percent = _as_float(str(out.get('percent') or '').rstrip('%')) if isinstance(out, dict) else 0.0
+        percent = (
+            _as_float(str(out.get('percent') or '').rstrip('%')) if isinstance(out, dict) else 0.0
+        )
         if not (out.get('ok') and url.startswith('https://') and percent > 0):
-            self.note('경로 비교', mask_text(f'애드픽 링크 없음({str(out.get("note") if isinstance(out, dict) else out)[:60]})'))
+            self.note(
+                '경로 비교',
+                mask_text(
+                    f'애드픽 링크 없음({str(out.get("note") if isinstance(out, dict) else out)[:60]})'
+                ),
+            )
             return None
         return url, percent
 
@@ -1772,16 +1881,24 @@ class BuyerAgent(AgentBase):
         if known.startswith('https://'):
             return {'route': route, 'entry_url': known}
         model = str(a.options.get('model') or '') or model_code_of(a.order.sku)
-        pno = product_no_of(a.order.product_url) if _same_host(a.order.product_url or '', source.home) else ''
+        pno = (
+            product_no_of(a.order.product_url)
+            if _same_host(a.order.product_url or '', source.home)
+            else ''
+        )
         args: dict[str, object] = {'model': model, 'name': a.order.sku, 'profile': account}
         if pno:
             args['slitmCd'] = pno
         self.step(f'{self.spec.name}: {route} 진입 링크({model or "모델코드 없음"})')
         try:
-            out = self.json_tool('run_script', name=source.entry_script, args=json.dumps(args, ensure_ascii=False))
+            out = self.json_tool(
+                'run_script', name=source.entry_script, args=json.dumps(args, ensure_ascii=False)
+            )
         except AgentFailure as e:
             raise AgentFailure(
-                'needs_human', mask_text(f'{route} 진입 링크를 못 받았다 — 직접 진입하지 않는다: {e.reason[:80]}'), FailReason.UNKNOWN
+                'needs_human',
+                mask_text(f'{route} 진입 링크를 못 받았다 — 직접 진입하지 않는다: {e.reason[:80]}'),
+                FailReason.UNKNOWN,
             ) from e
         url = str(out.get('entry_url') or '')
         if not out.get('ok') or not url.startswith('https://'):
@@ -1815,17 +1932,29 @@ class BuyerAgent(AgentBase):
         # 저장 스크립트는 "열린 주문서 탭"이 있으면 계정을 따지지 않고 그것을 쓴다 — 먼저 닫아 이 계정 주문서를 새로 만든다
         # (실기 2026-09-25: buyer03 견적 뒤 기본 세션(buyer01) 주문서로 결제됐다)
         self._close_order_tabs(account)
-        args: dict[str, object] = json.loads(snapshot_args(self.spec.name, a.order, account=account))
+        args: dict[str, object] = json.loads(
+            snapshot_args(self.spec.name, a.order, account=account)
+        )
         if source.allow_department:
-            args['allow_department'] = True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
+            args['allow_department'] = (
+                True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
+            )
         if source.required_seller:
-            args['required_seller'] = source.required_seller  # 롯데온: 롯데백화점 판매 상품만(사용자 2026-09-27)
-        if source.gift_unless_poison and not is_poison_seller(a.order.seller) and self.order_type_of(a.order) == 'gift':
+            args['required_seller'] = (
+                source.required_seller
+            )  # 롯데온: 롯데백화점 판매 상품만(사용자 2026-09-27)
+        if (
+            source.gift_unless_poison
+            and not is_poison_seller(a.order.seller)
+            and self.order_type_of(a.order) == 'gift'
+        ):
             # 롯데온: 포이즌 외에는 '선물하기' 주문서로 들어간다(사용자 2026-09-27). 제주·도서산간·배대지처럼 직배·까대기로
             # 판정된 주문은 바로구매 주문서로 연다(실기 2026-09-30 제주 선물 불가)
             args['gift'] = True
         args.update(extra or {})
-        check = snapshot_problem(a.order.option, lambda sel: self._selected_matches(sel, a.order.option))
+        check = snapshot_problem(
+            a.order.option, lambda sel: self._selected_matches(sel, a.order.option)
+        )
         base_check = probe_snapshot_problem(a.order.option, check) if probe else check
         goal = (
             f'상품 {a.order.sku} 페이지에서 주문 옵션 "{a.order.option or "(없음)"}" 을 골라 주문서(구매하기)까지 가서 '
@@ -1843,7 +1972,9 @@ class BuyerAgent(AgentBase):
                 bool(a.order.option)
                 and not out.get('selected')
                 and bool(out.get('options'))
-                and note.startswith(('option ambiguous', 'option not matched', 'size not available'))
+                and note.startswith(
+                    ('option ambiguous', 'option not matched', 'size not available')
+                )
                 # 색상이 안 맞는 것은 다시 열어도 같다 — 사이즈 글자로 다시 열면 다른 색을 사게 된다
                 and '색상' not in note
             )
@@ -1860,7 +1991,9 @@ class BuyerAgent(AgentBase):
             options = [str(o) for o in (snap.get('options') or [])]  # type: ignore[union-attr]
             live = [m for m in self._match_options(options, a.order.option) if '품절' not in m]
             if len(live) == 1 and live[0] != a.order.option:
-                self.note('옵션 재선택', mask_text(f'[{a.order.option}] → [{live[0]}] 로 다시 연다'))
+                self.note(
+                    '옵션 재선택', mask_text(f'[{a.order.option}] → [{live[0]}] 로 다시 연다')
+                )
                 reselected: dict[str, str] = getattr(self, '_reselected', {})
                 reselected[str(a.order.option)] = live[0]
                 self._reselected = reselected
@@ -1869,7 +2002,9 @@ class BuyerAgent(AgentBase):
                 snap = self.script_json(
                     source.snapshot_script, {**args, 'size': live[0]}, goal=goal, check=base_check
                 )
-        if snapshot_login_required(snap) and self._login_product_host(account, str(snap.get('product_url') or '')):
+        if snapshot_login_required(snap) and self._login_product_host(
+            account, str(snap.get('product_url') or '')
+        ):
             # 홈(pay.ssg.com)은 로그인돼 있는데 상품 도메인(shinsegaemall.ssg.com)은 따로 로그인해야 했다 — 그 도메인에서
             # 로그인한 뒤 한 번 더 연다(실기 2026-10-01 SSG 신세계몰 상품: 바로구매가 로그인 팝업을 띄움)
             if snap.get('product_tab'):
@@ -1894,7 +2029,9 @@ class BuyerAgent(AgentBase):
             # 다나와 경유 도착에 제휴(ReferCode)가 없거나 다른 상품이 떴다 — 그대로 사면 규칙 위반이다(H몰 직접 진입 금지)
             raise AgentFailure(
                 'needs_human',
-                mask_text(f'진입 경로 확인 실패({snap.get("error")}): {str(snap.get("note") or "")[:100]}'),
+                mask_text(
+                    f'진입 경로 확인 실패({snap.get("error")}): {str(snap.get("note") or "")[:100]}'
+                ),
                 FailReason.UNKNOWN,
             )
         if snap.get('already_ordered') or snap.get('existing_order_no'):
@@ -1940,9 +2077,16 @@ class BuyerAgent(AgentBase):
             except AgentFailure as e:
                 # www.ssg.com 만 막히고 신세계몰 도메인은 열리는 때가 있다(실기 2026-10-01 edelvise06 프로필) —
                 # 몰을 모르는 주소가 막히면 신세계몰에서 같은 상품을 찾아 산다
-                if not (source.mall_item and mall_unknown_url(a.order.product_url) and e.fail_reason == FailReason.CAPTCHA):
+                if not (
+                    source.mall_item
+                    and mall_unknown_url(a.order.product_url)
+                    and e.fail_reason == FailReason.CAPTCHA
+                ):
                     raise
-                self.note('신세계몰 상품', '주문 링크(www.ssg.com)가 차단 화면 — 신세계몰에서 같은 모델을 찾는다')
+                self.note(
+                    '신세계몰 상품',
+                    '주문 링크(www.ssg.com)가 차단 화면 — 신세계몰에서 같은 모델을 찾는다',
+                )
                 snap = {'error': NOT_MALL_ERROR}
             if snap.get('error') == NOT_MALL_ERROR:
                 if not source.mall_item:
@@ -1952,7 +2096,8 @@ class BuyerAgent(AgentBase):
                         FailReason.UNKNOWN,
                     )
                 self.note(
-                    '신세계몰 상품', '주문 링크가 신세계몰 상품이 아니다 — 같은 모델을 신세계몰에서 찾는다'
+                    '신세계몰 상품',
+                    '주문 링크가 신세계몰 상품이 아니다 — 같은 모델을 신세계몰에서 찾는다',
                 )
                 snap = None
         picked: dict[str, object] | None = None
@@ -1982,7 +2127,9 @@ class BuyerAgent(AgentBase):
         if not model:
             raise AgentFailure(
                 'needs_human',
-                mask_text(f'주문 링크가 신세계몰 상품이 아닌데 상품명에서 모델코드를 못 찾았다: {a.order.sku[:60]}'),
+                mask_text(
+                    f'주문 링크가 신세계몰 상품이 아닌데 상품명에서 모델코드를 못 찾았다: {a.order.sku[:60]}'
+                ),
                 FailReason.UNKNOWN,
             )
         self.step(f'{self.spec.name}: 신세계몰 같은 상품 찾기({model})')
@@ -2005,7 +2152,9 @@ class BuyerAgent(AgentBase):
         items = mall_candidates(out.get('items'))
         if not items:
             raise AgentFailure(
-                'needs_human', f'신세계몰에 같은 모델({model}) 상품이 없다 — 사람이 확인한다', FailReason.UNKNOWN
+                'needs_human',
+                f'신세계몰에 같은 모델({model}) 상품이 없다 — 사람이 확인한다',
+                FailReason.UNKNOWN,
             )
         misses: list[str] = []
         for item in items[:MALL_ITEM_TRIES]:
@@ -2018,14 +2167,18 @@ class BuyerAgent(AgentBase):
             if why is None:
                 self.note(
                     '신세계몰 상품',
-                    mask_text(f'{item["item_id"]} {str(item.get("name") or "")[:40]} — 주문 옵션 맞음(후보 {len(items)}개)'),
+                    mask_text(
+                        f'{item["item_id"]} {str(item.get("name") or "")[:40]} — 주문 옵션 맞음(후보 {len(items)}개)'
+                    ),
                 )
                 return cand, snap, item
             misses.append(f'{item["item_id"]}: {why}')
             self.note('신세계몰 상품', mask_text(f'{item["item_id"]}: 불가({why})'))
         raise AgentFailure(
             'needs_human',
-            mask_text(f'신세계몰 같은 모델({model}) 후보에 주문 옵션이 맞는 상품이 없다 — {"; ".join(misses)[:200]}'),
+            mask_text(
+                f'신세계몰 같은 모델({model}) 후보에 주문 옵션이 맞는 상품이 없다 — {"; ".join(misses)[:200]}'
+            ),
             FailReason.UNKNOWN,
         )
 
@@ -2045,7 +2198,9 @@ class BuyerAgent(AgentBase):
             return f'원가 못 읽음({snap.get("note")})'
         return None
 
-    def _route_quotes(self, a: Assignment, account: str, wanted: list[str]) -> list[dict[str, object]]:
+    def _route_quotes(
+        self, a: Assignment, account: str, wanted: list[str]
+    ) -> list[dict[str, object]]:
         """진입 경로 견적(`<key>_route_quotes`) — 경로마다 진입 주소를 받는다. 못 읽으면 빈 목록(직접 경로로 산다)."""
         source = source_of(self.spec.name)
         args: dict[str, object] = {
@@ -2082,7 +2237,12 @@ class BuyerAgent(AgentBase):
         raw = out.get('routes')
         for r in raw if isinstance(raw, list) else []:
             if isinstance(r, dict) and r not in routes:
-                self.note('경로 비교', mask_text(f'{r.get("route")}: 못 씀({str(r.get("note") or "진입 불가·몰 아님·품절")[:60]})'))
+                self.note(
+                    '경로 비교',
+                    mask_text(
+                        f'{r.get("route")}: 못 씀({str(r.get("note") or "진입 불가·몰 아님·품절")[:60]})'
+                    ),
+                )
         return routes
 
     def _route_compare(
@@ -2096,7 +2256,9 @@ class BuyerAgent(AgentBase):
         """
         source = source_of(self.spec.name)
         if first is not None and (
-            first.get('already_ordered') or first.get('existing_order_no') or self._unusable(a, first)
+            first.get('already_ordered')
+            or first.get('existing_order_no')
+            or self._unusable(a, first)
         ):
             return first  # 살 수 없는 상품이면 경로를 볼 것도 없다 — 호출부가 사유를 판단한다
         wanted = list(source.routes or ROUTES_DEFAULT)
@@ -2125,7 +2287,11 @@ class BuyerAgent(AgentBase):
                     raise  # 봇 차단 — 다른 경로도 막힌다. 사람에게
                 self.note('경로 비교', mask_text(f'{route}: 불가({e.reason[:60]})'))
                 continue
-            if snap.get('error') == NOT_MALL_ERROR or snap.get('already_ordered') or snap.get('existing_order_no'):
+            if (
+                snap.get('error') == NOT_MALL_ERROR
+                or snap.get('already_ordered')
+                or snap.get('existing_order_no')
+            ):
                 return snap  # 지정 몰 아님(호출부가 같은 상품을 찾는다)·중복 구매 흔적(호출부가 거절한다)
             why = self._unusable(a, snap)
             if why:
@@ -2259,7 +2425,10 @@ class BuyerAgent(AgentBase):
             return None
         # 이 계정이 이번에 받은 쿠폰이 없거나, 받은 쿠폰 중 가장 큰 금액 이상이 이미 적용됐으면 비싼 건 실제 차이다
         # — 수리하지 않는다(실기 2026-09-25: 쿠폰 없는 계정마다 수리를 돌려 결과는 늘 genuine, 작업당 수 분 낭비)
-        issued = [_as_float(str(x).replace(',', '')) for x in getattr(self, '_issued', {}).get(account, [])]
+        issued = [
+            _as_float(str(x).replace(',', ''))
+            for x in getattr(self, '_issued', {}).get(account, [])
+        ]
         applied = _as_float(o.get('coupon')) + _as_float(o.get('cart_coupon'))
         if not issued or applied >= max(issued):
             return None
@@ -2309,9 +2478,14 @@ class BuyerAgent(AgentBase):
         ):
             # 쿠폰을 받았는데 주문서 쿠폰 0원 — 쿠폰 목록이 가끔 안 열린다(실기 2026-10-01 그랜드스테이지: 같은 주문서에서
             # 한 번은 13,900원, 한 번은 0원). 한 번 더 돌려 더 싼 쪽을 쓴다
-            self.note('쿠폰', f'{account}: 받은 쿠폰 {len(issued)}장인데 주문서 쿠폰 0원 — 한 번 더 적용')
+            self.note(
+                '쿠폰', f'{account}: 받은 쿠폰 {len(issued)}장인데 주문서 쿠폰 0원 — 한 번 더 적용'
+            )
             again = self.script_json(
-                source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
+                source.order_prep_script,
+                prep_args,
+                goal='주문서 쿠폰을 다시 최대 할인으로 적용한다',
+                check=lambda o: None,
             )
             if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
                 out = again
@@ -2324,9 +2498,14 @@ class BuyerAgent(AgentBase):
         ):
             # 주문서 쿠폰이 0원인데 나의 할인가보다 크게 비싸다 — 이미 받아 둔 쿠폰이라 '받은 쿠폰'은 비어 있고
             # 쿠폰 목록이 안 열린 경우다(실기 2026-10-01 노스페이스 폴로: 한 번은 17,850원, 다음엔 0원). 한 번 더 돌린다
-            self.note('쿠폰', f'{account}: 주문서 쿠폰 0원인데 나의 할인가보다 비싸다 — 한 번 더 적용')
+            self.note(
+                '쿠폰', f'{account}: 주문서 쿠폰 0원인데 나의 할인가보다 비싸다 — 한 번 더 적용'
+            )
             again = self.script_json(
-                source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
+                source.order_prep_script,
+                prep_args,
+                goal='주문서 쿠폰을 다시 최대 할인으로 적용한다',
+                check=lambda o: None,
             )
             if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
                 out = again
@@ -2340,9 +2519,14 @@ class BuyerAgent(AgentBase):
             # 받아 둔 쿠폰이 있어도 '받은 쿠폰'은 비고, 상품 화면가(빠른 비교)가 없는 소싱처는 견줄 값도 없다 —
             # 쿠폰 목록이 늦게 열려 0원으로 끝난 것을 가릴 수 없다(실기 2026-10-01 그랜드스테이지 P-6000: 10% 쿠폰이
             # 있는데 0원으로 결제, 같은 주문서를 다시 돌리면 13,900원). 쿠폰 0원이면 한 번 더 돌려 더 싼 쪽을 쓴다
-            self.note('쿠폰', f'{account}: 주문서 쿠폰 0원 — 목록이 늦게 열렸을 수 있어 한 번 더 적용')
+            self.note(
+                '쿠폰', f'{account}: 주문서 쿠폰 0원 — 목록이 늦게 열렸을 수 있어 한 번 더 적용'
+            )
             again = self.script_json(
-                source.order_prep_script, prep_args, goal='주문서 쿠폰을 다시 최대 할인으로 적용한다', check=lambda o: None
+                source.order_prep_script,
+                prep_args,
+                goal='주문서 쿠폰을 다시 최대 할인으로 적용한다',
+                check=lambda o: None,
             )
             if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
                 out = again
@@ -2463,7 +2647,10 @@ class BuyerAgent(AgentBase):
             # 포인트로 전액 결제 — 결제수단이 필요 없다(결제하기 한 번에 주문 완료)
             snap['pay_method'] = POINTS_ONLY_METHOD
             snap['pay_card'] = None
-            self.note('결제수단 견적', f'포인트 전액 결제 — 원가 {_as_float(snap.get("cost")):,.0f}원(사용 포인트 − 적립)')
+            self.note(
+                '결제수단 견적',
+                f'포인트 전액 결제 — 원가 {_as_float(snap.get("cost")):,.0f}원(사용 포인트 − 적립)',
+            )
             return
         # 주문서 결제수단 중 우리가 낼 수 있는 종류(간편결제·사이트 머니)가 하나도 없으면 견적할 것이 없다
         offered = [str(m) for m in (snap.get('methods') or [])]
@@ -2560,7 +2747,12 @@ class BuyerAgent(AgentBase):
         ]
         # 애드픽 적립은 견적 원가에 더하지 않는다(사용자 2026-09-27: 제휴 적립은 원가 밖)
         quotes = cheapest_quotes(
-            raw_quotes, a.options.get('card'), payable, src.easy_pay_card, src.charge_pay, src.direct_card
+            raw_quotes,
+            a.options.get('card'),
+            payable,
+            src.easy_pay_card,
+            src.charge_pay,
+            src.direct_card,
         )
         if not quotes:
             # 결제 항목은 있는데 이 주문서의 수단과 겹치지 않는다 — 모델이 고르게 두면 실결제에서 어차피 막힌다
@@ -2719,6 +2911,9 @@ class BuyerAgent(AgentBase):
             cache[key] = []
             return []
         choice = resolve_choice(str(getattr(picked, 'choice', '')), pool)
+        # 이유는 '일치하는 후보가 없다'인데 답 칸에 후보를 적어 내는 경우가 있다 — 그 답은 버린다(실기 2026-10-03)
+        if choice and _NO_MATCH_REASON_RE.search(str(getattr(picked, 'reason', ''))):
+            choice = None
         result = [choice] if choice else []
         self.note(
             '옵션 AI 매칭',
@@ -2864,7 +3059,11 @@ class BuyerAgent(AgentBase):
         snap 이 None 이면 이 사이트 견적을 못 낸 것이다(SSG 봇 차단) — 다른 사이트에서 살 수 있으면 그쪽으로 산다.
         """
         sib = self.sibling
-        if sib is None or a.options.get('no_cross') or not (a.order.product_url or model_code_of(a.order.sku)):
+        if (
+            sib is None
+            or a.options.get('no_cross')
+            or not (a.order.product_url or model_code_of(a.order.sku))
+        ):
             return None
         if snap is not None and (snap.get('already_ordered') or snap.get('existing_order_no')):
             return None  # 이 사이트에서 이미 산 흔적 — 다른 사이트에서 또 사면 중복 구매다. 호출부가 거절한다
@@ -2888,7 +3087,9 @@ class BuyerAgent(AgentBase):
             try:
                 cmp.tool('run_js', code=_CLOSE_LANE_TABS_JS, safety='no_pay')
             except AgentFailure as e:
-                self.note('교차 비교', mask_text(f'{sib_src.id} 레인 탭 정리 실패: {e.reason[:80]}'))
+                self.note(
+                    '교차 비교', mask_text(f'{sib_src.id} 레인 탭 정리 실패: {e.reason[:80]}')
+                )
 
     def _cross_compare_in_lane(
         self,
@@ -2909,7 +3110,9 @@ class BuyerAgent(AgentBase):
         try:
             found = cmp._find_same_product(a)
         except AgentFailure as e:
-            self.note('교차 비교', mask_text(f'{sib_src.id} 상품 찾기 실패({e.reason[:60]}) — {stay}'))
+            self.note(
+                '교차 비교', mask_text(f'{sib_src.id} 상품 찾기 실패({e.reason[:60]}) — {stay}')
+            )
             return None
         if not found:
             self.note('교차 비교', f'{sib_src.id} 에 같은 상품 없음 — {stay}')
@@ -2929,9 +3132,7 @@ class BuyerAgent(AgentBase):
         )
         # 찾기가 준 모델코드·진입 링크(H몰 다나와 이동 링크)를 넘긴다 — sku 가 주소로 바뀌어 모델코드를 다시 못 읽는다
         extra = {
-            k: str(found.get(k))
-            for k in ('model', 'entry_url')
-            if str(found.get(k) or '').strip()
+            k: str(found.get(k)) for k in ('model', 'entry_url') if str(found.get(k) or '').strip()
         }
         a2 = a.model_copy(
             update={'order': order2, 'options': {**a.options, **extra, 'no_cross': True}}
@@ -2965,7 +3166,9 @@ class BuyerAgent(AgentBase):
         else:
             why = '더 싸다'
         self.note('교차 비교', f'{sib_src.id} {why} — {sib_src.id} {s_acc} 로 산다')
-        self._log_cross(a, f'{sib_src.id} 선택({why}) — {here} {own_txt} vs {sib_src.id} {other:,.0f}원')
+        self._log_cross(
+            a, f'{sib_src.id} 선택({why}) — {here} {own_txt} vs {sib_src.id} {other:,.0f}원'
+        )
         # 비교용 레인의 주문서를 먼저 닫는다 — 열어 둔 채 짝 사이트가 사면 같은 계정 주문서가 둘이 되어
         # 결제수단 견적·결제창이 '주문서 탭 여러 개'로 멈춘다(실기 2026-10-02 29CM 승 2회, 9/29·9/30 각 1회)
         try:
@@ -3007,7 +3210,9 @@ class BuyerAgent(AgentBase):
                 try:
                     clone.tool('run_js', code=_CLOSE_LANE_TABS_JS, safety='no_pay')
                 except AgentFailure as e:
-                    clone.note('계정 비교', mask_text(f'{account} 레인 탭 정리 실패: {e.reason[:80]}'))
+                    clone.note(
+                        '계정 비교', mask_text(f'{account} 레인 탭 정리 실패: {e.reason[:80]}')
+                    )
 
         self.step(f'{self.spec.name}: 계정 {len(accounts)}개 동시 비교')
         # 동시 실행 수 제한 — PC 가 바쁘면 탭 6개를 한꺼번에 띄울 때 페이지 호출이 20초 제한을 넘는다
@@ -3041,7 +3246,11 @@ class BuyerAgent(AgentBase):
         import concurrent.futures
 
         def run(account: str) -> tuple[str, float | None]:
-            bridge = self.bridge.with_lane(f'{source.key}-q-{account}') if self.parallel_accounts else self.bridge
+            bridge = (
+                self.bridge.with_lane(f'{source.key}-q-{account}')
+                if self.parallel_accounts
+                else self.bridge
+            )
             try:
                 raw = bridge.call(
                     'run_script',
@@ -3084,7 +3293,9 @@ class BuyerAgent(AgentBase):
         )
         return ranked
 
-    def _quote_batch(self, a: Assignment, accounts: list[str]) -> list[tuple[str, dict[str, object]]]:
+    def _quote_batch(
+        self, a: Assignment, accounts: list[str]
+    ) -> list[tuple[str, dict[str, object]]]:
         """계정들의 견적(레인이 있으면 동시에). 살 수 있는 계정만 돌려준다."""
         if self.parallel_accounts and len(accounts) > 1:
             return self._quote_parallel(a, accounts)
@@ -3144,7 +3355,9 @@ class BuyerAgent(AgentBase):
             return quotes
         acc, snap = quotes[0]
         if snap.get('points_balance') is None:
-            return quotes  # 보유 적립금을 못 읽었으면 판단하지 않는다(모르는 값을 0 으로 보지 않는다)
+            return (
+                quotes  # 보유 적립금을 못 읽었으면 판단하지 않는다(모르는 값을 0 으로 보지 않는다)
+            )
         used = _as_float(snap.get('points_used'))
         balance = _as_float(snap.get('points_balance'))
         if used > 0 or balance >= POINTS_USE_MIN or acc not in scores:
@@ -3161,13 +3374,20 @@ class BuyerAgent(AgentBase):
         try:
             got = self._payable_only(self._audit_quotes(a, self._quote_batch(a, [other])))
         except AgentFailure as e:
-            self.note('계정 전환', mask_text(f'{other}: 견적 불가({e.reason[:60]}) — {acc} 로 산다'))
+            self.note(
+                '계정 전환', mask_text(f'{other}: 견적 불가({e.reason[:60]}) — {acc} 로 산다')
+            )
             return quotes
         if not got:
             return quotes
         acc2, snap2 = got[0]
-        if _as_float(snap2.get('points_used')) > 0 and _as_float(snap2.get('cost')) <= _as_float(snap.get('cost')):
-            self.note('계정 선택', f'{acc2} — 원가 같고 적립금 {_as_float(snap2.get("points_used")):,.0f}원 사용')
+        if _as_float(snap2.get('points_used')) > 0 and _as_float(snap2.get('cost')) <= _as_float(
+            snap.get('cost')
+        ):
+            self.note(
+                '계정 선택',
+                f'{acc2} — 원가 같고 적립금 {_as_float(snap2.get("points_used")):,.0f}원 사용',
+            )
             return got
         self.note('계정 전환', f'{acc2}: 적립금 사용 없음 또는 더 비쌈 — {acc} 로 산다')
         return quotes
@@ -3186,9 +3406,16 @@ class BuyerAgent(AgentBase):
         self._quote_errors = []
         self._quote_skips: list[str] = []
         ranked = self._quick_rank(a, accounts)
-        batches = quick_batches(ranked, getattr(self, '_quick_scores', {}) or {}) if ranked else [accounts]
+        batches = (
+            quick_batches(ranked, getattr(self, '_quick_scores', {}) or {})
+            if ranked
+            else [accounts]
+        )
         if ranked and len(batches[0]) > 1:
-            self.note('빠른 비교', '화면가는 참고만 — 계정 전부를 주문서(쿠폰·결제수단 적립·청구할인)로 비교한다')
+            self.note(
+                '빠른 비교',
+                '화면가는 참고만 — 계정 전부를 주문서(쿠폰·결제수단 적립·청구할인)로 비교한다',
+            )
         tried: list[str] = []
         quotes: list[tuple[str, dict[str, object]]] = []
         unpayable = False
@@ -3196,7 +3423,8 @@ class BuyerAgent(AgentBase):
         for batch in batches:
             if tried:
                 self.note(
-                    '계정 전환', f'{tried[-1]}: 계정 사유로 못 삼 — 다음으로 싼 계정 {batch[0]} 로 잇는다'
+                    '계정 전환',
+                    f'{tried[-1]}: 계정 사유로 못 삼 — 다음으로 싼 계정 {batch[0]} 로 잇는다',
                 )
             n_err, n_skip = len(self._quote_errors), len(self._quote_skips)
             parallel = self.parallel_accounts and len(batch) > 1
@@ -3232,7 +3460,9 @@ class BuyerAgent(AgentBase):
             ):
                 raise AgentFailure(
                     'fail',
-                    mask_text(f'{CONFIRMED_SOLD_OUT}: {", ".join(accounts)} — {self._quote_skips[0]}'),
+                    mask_text(
+                        f'{CONFIRMED_SOLD_OUT}: {", ".join(accounts)} — {self._quote_skips[0]}'
+                    ),
                     FailReason.OUT_OF_STOCK,
                 )
             # 계정별 사유를 함께 남긴다 — 진짜 품절인지 스크립트·로그인 실패인지 가려야 한다(실기: 3건 모두 원인 불명)
@@ -3244,7 +3474,9 @@ class BuyerAgent(AgentBase):
             # (실기 2026-09-28: 옵션 목록을 못 읽은 건들이 out_of_stock 으로 나가 재고X·취소요청이 찍혔다)
             raise AgentFailure(
                 'needs_human',
-                mask_text(f'모든 계정에서 살 수 없다(품절 미확인·실패): {", ".join(accounts)} — {why}'),
+                mask_text(
+                    f'모든 계정에서 살 수 없다(품절 미확인·실패): {", ".join(accounts)} — {why}'
+                ),
                 FailReason.UNKNOWN,
             )
         # min 은 같은 값이면 앞 것을 준다 — 동률이면 먼저 비교한 계정
@@ -3292,7 +3524,9 @@ class BuyerAgent(AgentBase):
                 account = accounts[0]
                 self._login_as(account)
                 snap = self._snapshot(a, account)
-                why = '작업 옵션 지정 계정' if a.options.get('account') else '키마스터의 유일한 계정'
+                why = (
+                    '작업 옵션 지정 계정' if a.options.get('account') else '키마스터의 유일한 계정'
+                )
                 self.note('계정 선택', f'{account} — {why}')
             else:
                 account, snap = self._pick_cheapest(a, accounts)
@@ -3300,7 +3534,10 @@ class BuyerAgent(AgentBase):
             # 이 사이트가 봇 차단(SSG PerimeterX)이면 교차 비교 짝(H몰)만 견적해 산다 — 이 사이트는 다시 열지 않는다
             if self.sibling is None or BLOCKED_REASON not in e.reason:
                 raise
-            self.note('교차 비교', mask_text(f'이 사이트 견적 불가({e.reason[:60]}) — 짝 소싱처만 견적한다'))
+            self.note(
+                '교차 비교',
+                mask_text(f'이 사이트 견적 불가({e.reason[:60]}) — 짝 소싱처만 견적한다'),
+            )
             delegated = self._cross_compare(a, None, None)
             if delegated is not None:
                 return delegated
@@ -3324,7 +3561,9 @@ class BuyerAgent(AgentBase):
             here = source_of(self.spec.name).id
             self.note(
                 '교차 비교',
-                mask_text(f'{here} 진행 실패({e.reason[:60]}) — {sib_id} {a3.order.account} {other:,.0f}원으로 대체 구매'),
+                mask_text(
+                    f'{here} 진행 실패({e.reason[:60]}) — {sib_id} {a3.order.account} {other:,.0f}원으로 대체 구매'
+                ),
             )
             self._log_cross(a, f'{here} 진행 실패 → {sib_id} 대체({e.reason[:60]})')
             return self._buy_sibling(sib, a3)
@@ -3371,7 +3610,9 @@ class BuyerAgent(AgentBase):
                 )
             # 선택지를 하나도 못 읽었고 품절 표시도 없다 — 스크립트가 못 읽은 것이지 품절이 아니다
             raise AgentFailure(
-                'needs_human', f'옵션 목록을 못 읽었다(품절 미확인): {a.order.sku}', FailReason.UNKNOWN
+                'needs_human',
+                f'옵션 목록을 못 읽었다(품절 미확인): {a.order.sku}',
+                FailReason.UNKNOWN,
             )
         self.note('옵션 목록', ', '.join(options))
 
@@ -3432,7 +3673,9 @@ class BuyerAgent(AgentBase):
             # 허용 결제수단만 후보(SAMBA_ALLOWED_PAY_PROVIDERS) — 견적이 없을 때도 이 밖은 고르지 않는다
             money_in_pay = source_of(self.spec.name).money_in_pay
             direct_card = source_of(self.spec.name).direct_card
-            methods = [m for m in methods if method_providers(m, money_in_pay, direct_card) & allowed_now]
+            methods = [
+                m for m in methods if method_providers(m, money_in_pay, direct_card) & allowed_now
+            ]
             if not methods:
                 raise AgentFailure(
                     'needs_human',
@@ -3517,7 +3760,11 @@ class BuyerAgent(AgentBase):
                 'cost': cost,
                 'margin_pct': margin,
                 **({'paid': paid} if paid > 0 else {}),
-                **({'points_used': snap.get('points_used')} if snap.get('points_used') is not None else {}),
+                **(
+                    {'points_used': snap.get('points_used')}
+                    if snap.get('points_used') is not None
+                    else {}
+                ),
                 **({'reward': snap.get('reward')} if snap.get('reward') is not None else {}),
                 # 결제 진입이 주문서를 대조·지정하는 데 쓴다(주문서에 담긴 옵션 글자, 스냅샷이 만든 주문서 탭 id)
                 **({'selected': str(snap.get('selected'))} if snap.get('selected') else {}),
@@ -3525,7 +3772,11 @@ class BuyerAgent(AgentBase):
                 # 실제로 산 상품의 번호·이름 — 교차 비교로 다른 사이트에서 사면 원래 주문 URL·상품명과 다르다.
                 # 결제 진입 대조(expect.product_no·name)가 이걸 먼저 쓴다(2026-09-26 29CM 리뷰 차단2)
                 **({'product_no': pno} if pno else {}),
-                **({'product_name': str(snap.get('product_name'))} if snap.get('product_name') else {}),
+                **(
+                    {'product_name': str(snap.get('product_name'))}
+                    if snap.get('product_name')
+                    else {}
+                ),
                 # 진입 경로(SSG 직접·애드픽 …)와 애드픽 적립 — 경로 비교를 한 소싱처만 싣는다
                 **({'route': str(snap.get('route'))} if snap.get('route') else {}),
                 # 결제 진입 대조(expect.product_url) — 지정 몰·경로 비교 소싱처(SSG)만. 스냅샷이 도착한 상품 주소
@@ -3539,7 +3790,11 @@ class BuyerAgent(AgentBase):
                     )
                     else {}
                 ),
-                **({'adpick_reward': snap.get('adpick_reward')} if snap.get('adpick_reward') else {}),
+                **(
+                    {'adpick_reward': snap.get('adpick_reward')}
+                    if snap.get('adpick_reward')
+                    else {}
+                ),
             },
             evidence=tuple(self.evidence),
         )
@@ -3587,12 +3842,21 @@ class BuyerAgent(AgentBase):
         if source.gift_unless_poison and not forced:
             # 롯데온·SSG: 포이즌·라자다 배대지는 사무실 수령(까대기), 그 밖은 전부 선물하기 — 정가 비교 없이 정해진다
             # (사용자 2026-09-27 롯데온, 2026-09-29 SSG "까대기 제외하고 선물하기")
-            forced = 'kkadaegi' if is_poison_seller(order.seller) or self._is_forwarder(order) else 'gift'
+            forced = (
+                'kkadaegi'
+                if is_poison_seller(order.seller) or self._is_forwarder(order)
+                else 'gift'
+            )
             if forced == 'gift' and self._gift_blocked_region(order):
                 # 롯데온: '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30) — 그 주소는 직배로 산다
                 forced = 'direct'
         forwarder = not forced and self._is_forwarder(order)
-        if not source.normal_price and not forced and not is_poison_seller(order.seller) and not forwarder:
+        if (
+            not source.normal_price
+            and not forced
+            and not is_poison_seller(order.seller)
+            and not forwarder
+        ):
             # 정가 스크립트가 없는 소싱처는 아직 자동 판정을 못 한다 — 삼바웨이브 태그(order_type)를 따른다
             return order.order_type
         normal = _as_float(snap.get('normal_price')) if snap else 0.0
@@ -3623,10 +3887,14 @@ class BuyerAgent(AgentBase):
                 shipping = self._shipping_fn(order.order_no, 'direct')
             except (WaveError, AgentFailure):
                 return False  # 못 읽으면 기존 판정대로 — 직배 입력 단계에서 다시 멈춘다
-            text = ' '.join(str(shipping.get(k) or '') for k in ('name', 'address', 'address_detail'))
+            text = ' '.join(
+                str(shipping.get(k) or '') for k in ('name', 'address', 'address_detail')
+            )
             seen[order.order_no] = 'lazada' in text.lower()
             # 선물이 막힌 지역(제주·도서산간)인지도 같이 남긴다 — 원문은 담지 않는다
-            self._gift_blocked_seen[order.order_no] = gift_blocked_address(str(shipping.get('address') or ''))
+            self._gift_blocked_seen[order.order_no] = gift_blocked_address(
+                str(shipping.get('address') or '')
+            )
         # 선물 태그 주문은 배대지 판정을 하지 않는다(예전 그대로) — 위에서 지역만 읽어 둔다
         return False if order.order_type == 'gift' else seen[order.order_no]
 
@@ -3698,7 +3966,9 @@ class BuyerAgent(AgentBase):
         """
         shipping = self._fetch_shipping(a, snap)
         if not (shipping.get('name') and shipping.get('address')):
-            raise AgentFailure('needs_human', '선물 받는 분 배송지를 받지 못했다', FailReason.UNKNOWN)
+            raise AgentFailure(
+                'needs_human', '선물 받는 분 배송지를 받지 못했다', FailReason.UNKNOWN
+            )
         url = str(snap.get('product_url') or a.order.product_url or '')
         option = str(snap.get('selected') or a.order.option or '')
         self._close_order_tabs(account)
@@ -3714,9 +3984,15 @@ class BuyerAgent(AgentBase):
             self._close_product_tabs(account, url)
             entered = self.json_tool('run_script', name=SSG_GIFT_ENTER_SCRIPT, args=enter_args)
         if not entered.get('ok'):
-            reason = FailReason.OUT_OF_STOCK if entered.get('error') == 'sold_out' else FailReason.UNKNOWN
+            reason = (
+                FailReason.OUT_OF_STOCK
+                if entered.get('error') == 'sold_out'
+                else FailReason.UNKNOWN
+            )
             raise AgentFailure(
-                'needs_human', f'SSG 선물 진입 실패: {mask_text(str(entered.get("note"))[:100])}', reason
+                'needs_human',
+                f'SSG 선물 진입 실패: {mask_text(str(entered.get("note"))[:100])}',
+                reason,
             )
         who = {
             'name': shipping.get('name'),
@@ -3741,7 +4017,9 @@ class BuyerAgent(AgentBase):
             saved = self.json_tool('run_script', name=SSG_GIFT_SAVE_SCRIPT, args='{}')
             if not saved.get('ok'):
                 raise AgentFailure(
-                    'needs_human', f'선물 받는 분 주소 저장 실패: {saved.get("note")}', FailReason.UNKNOWN
+                    'needs_human',
+                    f'선물 받는 분 주소 저장 실패: {saved.get("note")}',
+                    FailReason.UNKNOWN,
                 )
             placed = self.json_tool('run_script', name=SSG_GIFT_ADDRESS_SCRIPT, args=who_args)
         if not placed.get('ok') or not placed.get('gift') or not placed.get('order_tab'):
@@ -3761,7 +4039,9 @@ class BuyerAgent(AgentBase):
                 FailReason.MARGIN,
             )
         # 로그인이 풀린 채 결제하면 주문이 안 생긴다(실기 2026-09-29) — 결제 전에 세션을 확인한다
-        check_args = json.dumps({'back_tab': placed['order_tab'], **({'profile': account} if account else {})})
+        check_args = json.dumps(
+            {'back_tab': placed['order_tab'], **({'profile': account} if account else {})}
+        )
         check = self.json_tool('run_script', name=SSG_LOGIN_CHECK_SCRIPT, args=check_args)
         if not check.get('logged_in') and account:
             # 주문서를 만드는 사이 pay.ssg.com 세션이 풀렸다(실기 2026-10-01) — 키마스터로 다시 로그인하고 한 번 더 본다
@@ -3770,7 +4050,9 @@ class BuyerAgent(AgentBase):
             check = self.json_tool('run_script', name=SSG_LOGIN_CHECK_SCRIPT, args=check_args)
         if not check.get('logged_in'):
             raise AgentFailure(
-                'needs_human', 'SSG 로그인이 풀려 있다 — 선물 주문서까지 만들었지만 결제하지 않음', FailReason.UNKNOWN
+                'needs_human',
+                'SSG 로그인이 풀려 있다 — 선물 주문서까지 만들었지만 결제하지 않음',
+                FailReason.UNKNOWN,
             )
         snap['order_tab'] = str(placed['order_tab'])
         self.note(
@@ -3821,7 +4103,9 @@ class BuyerAgent(AgentBase):
                     self.note('배송지', '기존 항목 선택 시간 초과 — 한 번 더')
                     self.tool('wait', ms=SELECT_SHIPPING_RETRY_MS)
                     continue
-                self.note('배송지', mask_text(f'기존 항목 선택 불가({e.reason[:60]}) — 신규 입력으로'))
+                self.note(
+                    '배송지', mask_text(f'기존 항목 선택 불가({e.reason[:60]}) — 신규 입력으로')
+                )
                 return False
         if not out.get('ok') or not shipping_matches(shipping, out):
             self.note(
@@ -3851,7 +4135,9 @@ class BuyerAgent(AgentBase):
         # 주소 검색 팝업이 첫 시도에 안 뜨는 사이트가 있다(실측 2026-09-29 SSG: 첫 시도 '우편번호 팝업 안 뜸',
         # 팝업을 닫고 다시 부르면 뜬다) — 팝업을 닫고 두 번까지 다시 넣는다
         for _retry in (1, 2):
-            if shipping_matches(shipping, applied) or '팝업 안 뜸' not in str(applied.get('note') or ''):
+            if shipping_matches(shipping, applied) or '팝업 안 뜸' not in str(
+                applied.get('note') or ''
+            ):
                 break
             self.note('배송지', f'주소 검색 팝업이 안 떠 다시 시도({_retry}/2)')
             self._close_popups()
@@ -3932,9 +4218,9 @@ class BuyerAgent(AgentBase):
             # (실기 2026-09-30 롯데온 선물: 다시 돌리면 선택으로 통과했다)
             account = str(args.get('profile') or '')
             note = str(confirmed.get('note') or '')
-            if ('저장 뒤 목록에 없음' in note or '주문서에 받는 분' in note) and self._select_existing_shipping(
-                dict(shipping), account
-            ):
+            if (
+                '저장 뒤 목록에 없음' in note or '주문서에 받는 분' in note
+            ) and self._select_existing_shipping(dict(shipping), account):
                 self.note('배송지 확정', '저장 뒤 목록 확인을 놓쳐 기존 배송지 선택으로 반영')
                 return
             raise AgentFailure(
