@@ -73,6 +73,17 @@ def header_price(nodes: list[Node]) -> float | None:
     return None
 
 
+def pay_method_of(nodes: list[Node]) -> str:
+    """구매 확인 화면의 '支付方式' 줄에 고른 결제수단 글자(云闪付·支付宝…). 못 찾으면 빈 글."""
+    ordered = sorted((n for n in nodes if n.text), key=lambda n: (n.y, n.x))
+    for i, n in enumerate(ordered):
+        if n.text.strip() == '支付方式':
+            for m in ordered[i + 1 : i + 4]:
+                if m.text.strip() and m.text.strip() != '切换更多支付方式':
+                    return m.text.strip()
+    return ''
+
+
 def order_no_after_label(nodes: list[Node]) -> str | None:
     """주문 상세의 '订单编号' 뒤에 오는 숫자."""
     seen = False
@@ -100,7 +111,9 @@ def buy_on_dewu(
     approve(원화 금액) 는 앱의 phone_approve_payment(provider='alipay') 를 부르고 결과 글자('ok'·'refused: …')를 준다.
     """
 
-    def wait_for(check: Callable[[list[Node]], bool], seconds: float, step: float = 1.5) -> list[Node]:
+    def wait_for(
+        check: Callable[[list[Node]], bool], seconds: float, step: float = 1.5
+    ) -> list[Node]:
         end = time.monotonic() + seconds
         nodes = phone.nodes()
         while not check(nodes) and time.monotonic() < end:
@@ -135,7 +148,11 @@ def buy_on_dewu(
     nodes = wait_for(lambda ns: find_text(ns, '商品') is not None, 15)
     title = find_text(nodes, '商品')
     card = next(
-        (n for n in sorted(nodes, key=lambda n: n.y) if title and n.y > title.y and _PRICE.match(n.text.replace(' ', ''))),
+        (
+            n
+            for n in sorted(nodes, key=lambda n: n.y)
+            if title and n.y > title.y and _PRICE.match(n.text.replace(' ', ''))
+        ),
         None,
     )
     if card is None:
@@ -169,10 +186,31 @@ def buy_on_dewu(
     if price is None:
         raise DewuOrderError('得物 구매창 가격을 못 읽었다')
     if price > max_cny:
-        raise DewuOrderError(f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)')
-    # 5) 하단 결제 버튼 → 알리페이 결제창
+        raise DewuOrderError(
+            f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)'
+        )
+    # 5) 결제수단이 알리페이가 아니면 바꾼다 — 云闪付 가 골라져 있으면 알리페이 창이 영영 안 뜬다(실기 2026-10-03)
+    if '支付宝' not in pay_method_of(nodes):
+        more = find_text(nodes, '切换更多支付方式')
+        if more is not None:
+            phone.tap(more.x, more.y)
+            sleep(2.5)
+            ali = next((n for n in phone.nodes() if '支付宝' in n.text), None)
+            if ali is not None:
+                phone.tap(ali.x, ali.y)
+                sleep(2.5)
+                nodes = phone.nodes()
+        if '支付宝' not in pay_method_of(nodes):
+            raise DewuOrderError(
+                f'得物 결제수단을 알리페이로 못 바꿨다(지금 {pay_method_of(nodes) or "모름"}) — 결제하지 않음'
+            )
+    # 6) 하단 결제 버튼 → 알리페이 결제창
     pay = next(
-        (n for n in sorted(nodes, key=lambda n: -n.y) if n.y > 1380 and _PRICE.match(n.text.replace(' ', ''))),
+        (
+            n
+            for n in sorted(nodes, key=lambda n: -n.y)
+            if n.y > 1380 and _PRICE.match(n.text.replace(' ', ''))
+        ),
         None,
     )
     if pay is None:
@@ -190,7 +228,9 @@ def buy_on_dewu(
     # 6) 支付成功 + 청구 위안 → 완료
     nodes = wait_for(lambda ns: has_text(ns, '支付成功'), 20)
     if not has_text(nodes, '支付成功'):
-        raise DewuOrderError('알리페이 완료 화면(支付成功)이 안 보인다 — 得物 주문내역 확인(재결제 금지)', paid=True)
+        raise DewuOrderError(
+            '알리페이 완료 화면(支付成功)이 안 보인다 — 得物 주문내역 확인(재결제 금지)', paid=True
+        )
     amounts = [float(n.text) for n in nodes if re.fullmatch(r'\d+\.\d{2}', n.text)]
     paid_cny = amounts[0] if amounts else round(price * 1.03, 2)
     done = find_text(nodes, '완료') or find_text(nodes, '完成')
@@ -199,7 +239,9 @@ def buy_on_dewu(
         sleep(3)
     order_no = _latest_order_no(phone, sleep)
     if order_no is None:
-        raise DewuOrderError(f'결제는 됐는데(¥{paid_cny}) 得物 주문번호를 못 읽었다 — 주문내역 확인', paid=True)
+        raise DewuOrderError(
+            f'결제는 됐는데(¥{paid_cny}) 得物 주문번호를 못 읽었다 — 주문내역 확인', paid=True
+        )
     return DewuResult(order_no=order_no, paid_cny=paid_cny, item_cny=price, rate=rate)
 
 
@@ -257,11 +299,19 @@ def make_shihuo_handler(
         detail = wave.get_order(order_no)  # type: ignore[attr-defined]
         seller = (detail.source_seller or '').strip()
         if seller != '得物':
-            return 'needs_human', 'unknown', f'판매처 {seller or "모름"} — 得物 외 판매처는 사람이 산다'
+            return (
+                'needs_human',
+                'unknown',
+                f'판매처 {seller or "모름"} — 得物 외 판매처는 사람이 산다',
+            )
         eu = (detail.registered_option or '').strip()
         model = (detail.source_product_code or '').strip()
         if not eu or not model:
-            return 'needs_human', 'unknown', f'EU 사이즈({eu or "-"})·품번({model or "-"})이 없어 살 수 없다'
+            return (
+                'needs_human',
+                'unknown',
+                f'EU 사이즈({eu or "-"})·품번({model or "-"})이 없어 살 수 없다',
+            )
         rate = rate_of()
         if rate <= 0:
             return 'needs_human', 'unknown', '위안 환율을 못 받아 원가를 낼 수 없다 — 결제하지 않음'
@@ -274,7 +324,9 @@ def make_shihuo_handler(
         if serial is None:
             return 'needs_human', 'unknown', '결제 폰(임성희폰)이 연결돼 있지 않다'
         try:
-            res = buy_on_dewu(Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate)
+            res = buy_on_dewu(
+                Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate
+            )
         except DewuOrderError as e:
             fail = 'margin' if '마진' in str(e) else ('pay_interrupted' if e.paid else 'unknown')
             return 'needs_human', fail, str(e)
@@ -294,6 +346,10 @@ def make_shihuo_handler(
             notes=note,
         )
         margin = (revenue - res.cost_krw - CN_SHIPPING_FEE) / revenue * 100
-        return 'done', None, f'得物 {res.order_no} 원가 {res.cost_krw:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%'
+        return (
+            'done',
+            None,
+            f'得物 {res.order_no} 원가 {res.cost_krw:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%',
+        )
 
     return handle
