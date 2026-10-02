@@ -39,9 +39,9 @@ from samba_agent.ops.crosscheck import CrossChecker, LedgerRow
 from samba_agent.ops.crosscheck import configure as configure_crosscheck
 from samba_agent.ops.dewu_order import make_shihuo_handler
 from samba_agent.ops.dewu_tracking import start_dewu_tracking_loop
-from samba_agent.ops.lotteon_gift_tracking import start_lotteon_gift_tracking_loop
 from samba_agent.ops.diagnose import diagnose
 from samba_agent.ops.events import EventLog
+from samba_agent.ops.lotteon_gift_tracking import start_lotteon_gift_tracking_loop
 from samba_agent.ops.masking import mask_text
 from samba_agent.ops.releases import ReleaseStore
 from samba_agent.ops.site_scripts import install_missing
