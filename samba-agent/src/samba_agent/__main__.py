@@ -203,7 +203,11 @@ def _bridge_ready(bridge: BridgeClient) -> bool:
 def main() -> None:
     settings = load_settings()
     # 시각을 붙인다 — 도구 호출 사이 간격으로 어느 단계가 느린지 잰다(2026-09-26 주문 1건 수 분 문제)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s', datefmt='%H:%M:%S')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s',
+        datefmt='%H:%M:%S',
+    )
     configure_tracing(settings)
 
     reg = Registry.load(settings.root)
@@ -248,9 +252,11 @@ def main() -> None:
     flagger = (
         FlagMarker(
             wave,
-            lambda name, args: flag_bridge.call(
-                'run_script', name=name, args=json.dumps(args, ensure_ascii=False)
-            ).result,
+            lambda name, args: (
+                flag_bridge.call(
+                    'run_script', name=name, args=json.dumps(args, ensure_ascii=False)
+                ).result
+            ),
             on_cancelled=make_cancel_export(settings, wave),
         )
         if wave is not None
@@ -387,7 +393,13 @@ def main() -> None:
             after_done=make_after_done(_source_sku_of),
             # 중국 크림(식화) 주문은 폰 得物 앱으로 산다 — 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다
             phone_sources=(
-                {'SHIHUO': make_shihuo_handler(wave, _alipay_approve(bridge))} if wave is not None else {}
+                {
+                    'SHIHUO': make_shihuo_handler(
+                        wave, _alipay_approve(bridge.scoped(['phone_approve_payment']))
+                    )
+                }
+                if wave is not None
+                else {}
             ),
             sources=frozenset(
                 x.strip().upper() for x in settings.intake_sources.split(',') if x.strip()
@@ -406,7 +418,9 @@ def main() -> None:
     if wave is not None:
         # 중국 크림 得物 주문 송장 — 30분마다 큐가 비었을 때 폰 得物 앱에서 읽어 해외송장에 넣는다(사용자 2026-10-01)
         # 사람 대기(needs_human)는 폰을 쓰지 않으니 빼고, 대기·실행 중인 작업이 없을 때만 돈다
-        start_dewu_tracking_loop(wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()))
+        start_dewu_tracking_loop(
+            wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live())
+        )
         # 롯데ON 선물 주문 송장 — 카카오톡 알림톡으로만 온다. 20분마다 폰에서 읽어 삼바에 넣고 마켓으로 보낸다(사용자 2026-10-02)
         start_lotteon_gift_tracking_loop(
             wave,
@@ -495,7 +509,9 @@ def main() -> None:
                 raw = xbridge.call(
                     'run_script',
                     name='musinsa_order_detail',
-                    args=json.dumps({'source_order_no': row.source_order_no, 'profile': row.account}),
+                    args=json.dumps(
+                        {'source_order_no': row.source_order_no, 'profile': row.account}
+                    ),
                 ).result
                 start = raw.rfind('{"source_order_no"')
                 out = json.loads(raw[start:]) if start >= 0 else {}
@@ -530,13 +546,19 @@ def main() -> None:
 
         def _known_numbers() -> set[str] | None:
             try:
-                return wave.sourcing_numbers(14) | {r.source_order_no for r in crosscheck_ledger.recent(14)}
+                return wave.sourcing_numbers(14) | {
+                    r.source_order_no for r in crosscheck_ledger.recent(14)
+                }
             except WaveError:
                 return None
 
         source_audit = SourceAudit(
             accounts=lambda: sorted(
-                {r.account for r in crosscheck_ledger.recent(14) if r.site == 'MUSINSA' and r.account}
+                {
+                    r.account
+                    for r in crosscheck_ledger.recent(14)
+                    if r.site == 'MUSINSA' and r.account
+                }
             ),
             list_orders=_musinsa_orders,
             detail=_musinsa_detail,
@@ -549,7 +571,9 @@ def main() -> None:
             lambda text: bot.post_new(text),
             source_status=_source_status,
             source_detail=lambda row: (
-                _musinsa_detail(row.account, row.source_order_no) if row.site == 'MUSINSA' and row.account else None
+                _musinsa_detail(row.account, row.source_order_no)
+                if row.site == 'MUSINSA' and row.account
+                else None
             ),
             source_audit=source_audit,
             # 주문 작업이 도는 동안에는 브라우저를 건드리지 않는다
