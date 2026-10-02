@@ -1681,6 +1681,12 @@ class BuyerAgent(AgentBase):
         if ranks:
             big = 10**6
             labels = sorted(labels, key=lambda acc: (ranks.get(acc, big), labels.index(acc)))
+        # 직전 시도에서 결제창 계정 문제(결제 앱 로그아웃 등)로 못 쓴 계정은 뺀다 — 키마스터 목록으로 비교하는
+        # 소싱처도 같다(실기 2026-10-03: 29CM 최저 계정의 페이코가 로그아웃이라 같은 계정으로만 되풀이해 멈췄다)
+        skip = {x for x in str(a.options.get('skip_accounts') or '').split(',') if x}
+        if skip and len(labels) > len(skip & set(labels)):
+            labels = [x for x in labels if x not in skip]
+            self.note('계정 후보', mask_text(f'{source.id}: 결제창 계정 문제로 제외 {len(skip)}개'))
         cap = self.compare_accounts_max
         if len(labels) > cap:
             self.note(
