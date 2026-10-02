@@ -212,23 +212,7 @@ def buy_on_dewu(
         raise DewuOrderError(
             f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)'
         )
-    # 5) 결제수단이 알리페이가 아니면 바꾼다 — 云闪付 가 골라져 있으면 알리페이 창이 영영 안 뜬다(실기 2026-10-03)
-    if '支付宝' not in pay_method_of(nodes):
-        more = find_text(nodes, '切换更多支付方式')
-        if more is not None:
-            phone.tap(more.x, more.y)
-            sleep(2.5)
-            ali = next((n for n in phone.nodes() if '支付宝' in n.text), None)
-            if ali is not None:
-                phone.tap(ali.x, ali.y)
-                sleep(2.5)
-                nodes = phone.nodes()
-        if '支付宝' not in pay_method_of(nodes):
-            seen = ' | '.join(n.text.strip()[:12] for n in nodes if n.text.strip())[:160]
-            raise DewuOrderError(
-                f'得物 결제수단을 알리페이로 못 바꿨다(지금 {pay_method_of(nodes) or "모름"}; 화면: {seen}) — 결제하지 않음'
-            )
-    # 6) 하단 결제 버튼 → 알리페이 결제창
+    # 5) 하단 결제 버튼 → 바로 알리페이가 뜨거나, 먼저 '确认订单'(주문 확인) 화면이 뜬다
     pay = next(
         (
             n
@@ -243,8 +227,38 @@ def buy_on_dewu(
     end = time.monotonic() + 20
     while phone.top_package() != ALIPAY and time.monotonic() < end:
         sleep(1.5)
+        if phone.top_package() == DEWU and find_text(phone.nodes(), '确认订单') is not None:
+            break
     if phone.top_package() != ALIPAY:
-        raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
+        # 주문 확인 화면 — 결제수단이 알리페이가 아니면(云闪付) 바꾸고 '立即支付' 를 누른다
+        # (실기 2026-10-03: 云闪付 가 골라져 있어 알리페이 창이 영영 안 떴다)
+        nodes = phone.nodes()
+        if find_text(nodes, '确认订单') is None and find_text(nodes, '立即支付') is None:
+            raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
+        if '支付宝' not in pay_method_of(nodes):
+            more = find_text(nodes, '切换更多支付方式')
+            if more is not None:
+                phone.tap(more.x, more.y)
+                sleep(2.5)
+                ali = next((n for n in phone.nodes() if '支付宝' in n.text), None)
+                if ali is not None:
+                    phone.tap(ali.x, ali.y)
+                    sleep(2.5)
+                    nodes = phone.nodes()
+            if '支付宝' not in pay_method_of(nodes):
+                seen = ' | '.join(n.text.strip()[:12] for n in nodes if n.text.strip())[:160]
+                raise DewuOrderError(
+                    f'得物 결제수단을 알리페이로 못 바꿨다(지금 {pay_method_of(nodes) or "모름"}; 화면: {seen}) — 결제하지 않음'
+                )
+        go = find_text(nodes, '立即支付')
+        if go is None:
+            raise DewuOrderError('주문 확인 화면에서 立即支付 를 못 찾았다')
+        phone.tap(go.x, go.y)
+        end = time.monotonic() + 20
+        while phone.top_package() != ALIPAY and time.monotonic() < end:
+            sleep(1.5)
+        if phone.top_package() != ALIPAY:
+            raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
     paid_hint = round(price * 1.03 * rate)
     out = approve(paid_hint).strip()
     if not out.startswith('ok'):
