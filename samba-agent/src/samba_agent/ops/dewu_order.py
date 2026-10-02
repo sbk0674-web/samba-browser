@@ -125,13 +125,23 @@ def buy_on_dewu(
     phone.launch(DEWU)
     sleep(4)
     nodes = phone.nodes()
-    for _ in range(5):
-        if find_text(nodes, '搜索') or find_text(nodes, '立即购买'):
+    box = None
+    for _ in range(6):
+        # 지난 시도가 남긴 상품·구매 화면에서 시작할 수 있다 — 검색창이 보일 때까지 뒤로 간다
+        # (실기 2026-10-03: 상품 화면의 '立即购买' 를 보고 멈춰 '검색창을 못 찾았다')
+        box = next(
+            (n for n in nodes if n.y < 140 and n.x < 520 and n.text and n.text != '搜索'), None
+        )
+        if box is not None and find_text(nodes, '搜索') is not None:
             break
+        box = None
         phone.key('4')
         sleep(1.5)
         nodes = phone.nodes()
-    box = next((n for n in nodes if n.y < 140 and n.x < 520 and n.text and n.text != '搜索'), None)
+        if phone.top_package() != DEWU:
+            phone.launch(DEWU)
+            sleep(4)
+            nodes = phone.nodes()
     if box is None:
         raise DewuOrderError('得物 검색창을 못 찾았다')
     phone.tap(box.x, box.y)
