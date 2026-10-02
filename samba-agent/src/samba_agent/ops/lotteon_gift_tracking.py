@@ -142,12 +142,13 @@ def read_notices(
     *,
     idle: Callable[[], bool] | None = None,
     max_pages: int = MAX_PAGES,
+    quiet_pages: int = QUIET_PAGES,
     known: Callable[[str], bool] = lambda number: False,
     sleep: Callable[[float], None] = time.sleep,
 ) -> list[GiftNotice] | None:
     """방을 위로 올려 가며 선물 배송 알림을 모은다. 방을 못 열었거나 도중에 주문 작업이 시작되면 None.
 
-    known(송장번호)가 참인 알림만 나오는 쪽이 QUIET_PAGES 번 이어지면 멈춘다 — 이미 처리한 옛 알림이다.
+    known(송장번호)가 참인 알림만 나오는 쪽이 quiet_pages 번 이어지면 멈춘다 — 이미 처리한 옛 알림이다.
     """
     if not open_room(phone, sleep=sleep):
         return None
@@ -169,7 +170,7 @@ def read_notices(
             if notice.number and not known(notice.number):
                 fresh = True
         quiet = 0 if fresh else quiet + 1
-        if quiet >= QUIET_PAGES:
+        if quiet >= quiet_pages:
             break
         # 옛 알림 쪽으로 — 손가락을 아래로 끈다
         phone._run('shell', 'input', 'swipe', '360', '500', '360', '1300', '400')
@@ -214,10 +215,13 @@ def collect_lotteon_gift_tracking(
     idle: Callable[[], bool] | None = None,
     dry_run: bool = False,
     max_pages: int = MAX_PAGES,
+    quiet_pages: int = QUIET_PAGES,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, int] | None:
     """알림을 읽어 새 송장을 삼바에 넣는다. 결과 {'read', 'sent', 'skipped'} — 폰을 못 읽었으면 None."""
-    notices = read_notices(phone, idle=idle, max_pages=max_pages, known=seen.done, sleep=sleep)
+    notices = read_notices(
+        phone, idle=idle, max_pages=max_pages, quiet_pages=quiet_pages, known=seen.done, sleep=sleep
+    )
     phone.key('4')
     phone.key('3')  # HOME
     if notices is None:
@@ -324,7 +328,10 @@ def start_lotteon_gift_tracking_loop(
 
 
 def main() -> None:
-    """손으로 한 번 돌린다: python -m samba_agent.ops.lotteon_gift_tracking [--send] [쪽수]. 기본은 시험(넣지 않음)."""
+    """손으로 한 번 돌린다: python -m samba_agent.ops.lotteon_gift_tracking [--send] [--deep] [쪽수].
+
+    기본은 시험(넣지 않음). --deep 은 이미 처리한 알림이 이어져도 멈추지 않고 쪽수만큼 끝까지 올린다(밀린 송장 채우기).
+    """
     import sys
 
     from samba_agent.__main__ import make_wave
@@ -333,6 +340,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     send = '--send' in sys.argv[1:]
     pages = next((int(a) for a in sys.argv[1:] if a.isdigit()), MAX_PAGES)
+    quiet = pages if '--deep' in sys.argv[1:] else QUIET_PAGES
     settings = load_settings()
     wave = make_wave(settings)
     serial = find_phone_serial(
@@ -349,6 +357,7 @@ def main() -> None:
             seen,
             dry_run=not send,
             max_pages=pages,
+            quiet_pages=quiet,
         )
     print(res)
 
