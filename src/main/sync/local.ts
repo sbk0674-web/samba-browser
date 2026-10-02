@@ -320,6 +320,17 @@ export class SyncLocal {
     this.db.scheduleSave()
   }
 
+  /** 살아 있는 행의 수정 시각을 올린다 — 서버에 다시 올려 옛 삭제 표식을 덮을 때 쓴다 */
+  touchLiveRow(table: 'accounts' | 'vault_items', id: number, at: number): void {
+    const t = table === 'accounts' ? accounts : vaultItems
+    this.d
+      .update(t)
+      .set({ updatedAt: at })
+      .where(and(eq(t.id, id), isNull(t.deletedAt)))
+      .run()
+    this.db.scheduleSave()
+  }
+
   // --- 복호화 실패 메모 -------------------------------------------------------
   // 풀에서 열지 못한 금고 행의 원격 id 와 그 행의 updated_at. 커서가 그 행에 붙박이지 않게 넘기고,
   // 같은 행(같은 판)에 대한 경고는 한 번만 남긴다

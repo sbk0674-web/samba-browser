@@ -295,6 +295,10 @@ async function pullAccounts(
     const byRemote = remote.remoteId ? local.accountIdByRemote(remote.remoteId) : null
     if (byRemote !== null) {
       const current = local.accountForSync(byRemote)
+      if (current && staleRemoteTombstone(current.deletedAt, remote.deletedAt)) {
+        restoreOverStaleTombstone(deps, local, 'accounts', byRemote, result)
+        continue
+      }
       if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
         local.applyAccount(remote, byRemote)
         result.applied += 1
@@ -360,6 +364,36 @@ async function pullAccounts(
     result.applied += 1
   }
   return seen
+}
+
+/**
+ * 원격의 삭제 표식이 기준 이전에 지운 것인가(이 PC 에는 살아 있다) — 기준을 모르는 옛 코드 PC 가
+ * 예전 삭제를 뒤늦게 다시 올린 것이다. 받으면 기준 PC 의 계정이 지워진다
+ */
+function staleRemoteTombstone(
+  localDeletedAt: number | null,
+  remoteDeletedAt: number | null
+): boolean {
+  return (
+    baselineAt > 0 &&
+    localDeletedAt === null &&
+    remoteDeletedAt !== null &&
+    // 기준 선언이 올린 삭제 표식(시각 = 기준 시각)은 받아야 한다 — 그보다 앞선 삭제만 거른다
+    remoteDeletedAt < baselineAt
+  )
+}
+
+/** 옛 삭제 표식을 받지 않고, 이 PC 의 살아 있는 행을 지금 시각으로 다시 올려 서버를 되돌린다 */
+function restoreOverStaleTombstone(
+  deps: PullDeps,
+  local: SyncLocal,
+  table: 'accounts' | 'vault_items',
+  localId: number,
+  result: PullResult
+): void {
+  local.touchLiveRow(table, localId, Date.now())
+  deps.outbox.record(table, String(localId), 'upsert', undefined, deps.workspace().localId)
+  result.conflicts += 1
 }
 
 /**
@@ -455,6 +489,10 @@ async function pullVaultItems(
       const byRemote = local.vaultItemIdByRemote(remote.remoteId)
       if (byRemote !== null) {
         const current = local.vaultItemForSync(byRemote)
+        if (current && staleRemoteTombstone(current.deletedAt, remote.deletedAt)) {
+          restoreOverStaleTombstone(deps, local, 'vault_items', byRemote, result)
+          continue
+        }
         if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
           local.applyVaultItem(remote, byRemote)
           result.applied += 1

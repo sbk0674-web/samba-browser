@@ -22,7 +22,7 @@ import {
   type WebFrameMain
 } from 'electron'
 import { join } from 'node:path'
-import { readdirSync } from 'node:fs'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { profileNames } from '../../shared/profiles'
 import { PHONE_SYNC_KEYS, PhoneRegistrySync } from '../phone/registry-sync'
 import { declareKeymasterBaseline } from '../sync/authority'
@@ -1262,7 +1262,13 @@ export function registerIpc(
             scope.isDefault || accountWorkspaces.isAccountWorkspace(scope.id)
           )
         },
-        settings
+        settings,
+        // 서버에만 있던 행은 지우기 전에 앱 데이터 폴더에 남긴다(암호문 그대로 — 되돌릴 때 쓴다)
+        backup: (table, rows, at) => {
+          const dir = join(app.getPath('userData'), 'keymaster-baseline-backup')
+          mkdirSync(dir, { recursive: true })
+          writeFileSync(join(dir, `${at}-${table}.json`), JSON.stringify(rows))
+        }
       },
       { dryRun: dryRun !== false }
     )

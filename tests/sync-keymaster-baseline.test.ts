@@ -189,3 +189,35 @@ describe('키마스터 기준 선언', () => {
     expect(pc1.labels()).toEqual(['A', 'B'])
   })
 })
+
+describe('키마스터 기준 선언 — 기준을 모르는 옛 코드 PC', () => {
+  it('예전 삭제를 뒤늦게 다시 올려도 기준 PC 의 계정은 지워지지 않고 서버도 되돌아간다', async () => {
+    const backend = createFakeBackend()
+    const pc1 = makePc(await openDatabase(':memory:'), backend)
+    await pc1.vault.setup(MASTER)
+    add(pc1, 'a', 'A')
+    add(pc1, 'b', 'B')
+    await sync(pc1)
+    const before = Date.now() - 60_000
+    await new Promise((r) => setTimeout(r, 5))
+    await declareKeymasterBaseline(
+      { db: pc1.db, backend, workspace: pc1.deps.workspace(), settings: pc1.settings },
+      { dryRun: false }
+    )
+    await sync(pc1)
+
+    // 옛 코드 PC: 기준 전에 지웠던 B 의 삭제 표식을 "지금" 시각으로 다시 올린다
+    const row = backend.rows('accounts_sync').find((r) => r.username === 'b')!
+    await new Promise((r) => setTimeout(r, 5))
+    await backend.upsert('accounts_sync', [
+      { ...row, deleted_at: new Date(before).toISOString(), updated_at: new Date().toISOString() }
+    ])
+
+    await sync(pc1)
+    expect(pc1.labels()).toEqual(['A', 'B'])
+    const after = backend.rows('accounts_sync').find((r) => r.username === 'b')!
+    expect(after.deleted_at ?? null).toBeNull()
+    pc1.vault.dispose()
+    pc1.db.close()
+  })
+})

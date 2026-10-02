@@ -27,6 +27,8 @@ export interface BaselineDeps {
   backend: SyncBackend
   workspace: { localId: number; remoteId: string }
   settings: { set(patch: Partial<Settings>): Settings }
+  /** 삭제 표식을 올리기 직전에, 그 대상 행(서버에만 살아 있던 행)을 받아 보관한다 — 되돌릴 근거 */
+  backup?: (table: string, rows: RemoteRow[], at: number) => void
   now?: () => number
 }
 
@@ -111,6 +113,7 @@ export async function declareKeymasterBaseline(
   // 서버에만 살아 있는 행 → 삭제 표식(시각 T). 받은 행 그대로에 두 시각만 바꿔 올린다
   const stamp = toIso(at)
   for (const table of TABLES) {
+    deps.backup?.(table, plans.get(table)!.remoteOnly, at)
     const rows = plans
       .get(table)!
       .remoteOnly.map((r) => ({ ...r, deleted_at: stamp, updated_at: stamp }))
