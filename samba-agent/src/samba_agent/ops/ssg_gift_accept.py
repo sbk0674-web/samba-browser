@@ -47,7 +47,9 @@ SCREEN_BOTTOM = 1500
 # 맨 아래 알림이 다른 주문의 선물이면 그 위 알림을 이만큼까지 본다(앞 주문 수락이 밀려 있을 때)
 MAX_NOTICES = 3
 # 상품명 낱말로 같은 상품인지 볼 때 세지 않는 말
-_GENERIC_WORDS = frozenset({'매장정품', '정품', '남성', '여성', '공용', '아동', '키즈', '신발', '의류'})
+_GENERIC_WORDS = frozenset(
+    {'매장정품', '정품', '남성', '여성', '공용', '아동', '키즈', '신발', '의류'}
+)
 
 
 @dataclass(frozen=True)
@@ -121,7 +123,15 @@ class Phone:
 
     def top_package(self) -> str:
         out = self._run('shell', 'dumpsys', 'activity', 'activities')
-        m = re.search(r'topResumedActivity=ActivityRecord\{\S+ \S+ ([\w.]+)/', out)
+        m = re.search(
+            r'(?:topResumedActivity|ResumedActivity:?)\s*=?\s*ActivityRecord\{\S+ \S+ ([\w.]+)/',
+            out,
+        )
+        if m:
+            return m.group(1)
+        # 기록이 비는 순간이 있다(실기 2026-10-03: 카카오톡이 앞인데 '') — 창 포커스로 한 번 더 본다
+        win = self._run('shell', 'dumpsys', 'window')
+        m = re.search(r'mCurrentFocus=Window\{\S+ \S+ ([\w.]+)/', win)
         return m.group(1) if m else ''
 
     def tap(self, x: int, y: int) -> None:
@@ -169,13 +179,17 @@ def find_phone_serial(adb: str, want: str = DEFAULT_PHONE) -> str | None:
     # 무선 IP:포트는 이름에 시리얼이 없다 — 각 기기의 실제 시리얼을 물어 맞춘다
     for r in rows:
         try:
-            got = subprocess.run(
-                [adb, '-s', r, 'shell', 'getprop', 'ro.serialno'],
-                capture_output=True,
-                timeout=10,
-                check=False,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-            ).stdout.decode('utf-8', 'replace').strip()
+            got = (
+                subprocess.run(
+                    [adb, '-s', r, 'shell', 'getprop', 'ro.serialno'],
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+                )
+                .stdout.decode('utf-8', 'replace')
+                .strip()
+            )
         except (OSError, subprocess.TimeoutExpired):
             continue
         if got == want:
@@ -208,7 +222,11 @@ def same_product(model_code: str, sku: str, texts: list[str]) -> bool:
     실기 2026-10-02: 품번 YMM23342CT 인데 화면은 'YMM23342[다이나핏]…' — 전체 일치만 보면 제 선물도 못 받는다.
     """
     code = model_code.strip().upper()
-    words = [w for w in re.split(r'[^0-9A-Za-z가-힣]+', sku) if len(w) >= 2 and not w.isdigit() and w not in _GENERIC_WORDS]
+    words = [
+        w
+        for w in re.split(r'[^0-9A-Za-z가-힣]+', sku)
+        if len(w) >= 2 and not w.isdigit() and w not in _GENERIC_WORDS
+    ]
     if not code and not words:
         return True  # 견줄 값이 없다 — 예전처럼 맨 아래 알림을 받는다
     joined = ' '.join(texts).upper()
@@ -233,7 +251,9 @@ def accept_ssg_gift(
     맨 아래 알림이 다른 상품이면 그 위 알림을 차례로 본다.
     """
 
-    def wait_for(check: Callable[[list[Node]], bool], seconds: float, step: float = 2) -> list[Node]:
+    def wait_for(
+        check: Callable[[list[Node]], bool], seconds: float, step: float = 2
+    ) -> list[Node]:
         end = time.monotonic() + seconds
         nodes = phone.nodes()
         while not check(nodes) and time.monotonic() < end:
@@ -260,7 +280,9 @@ def accept_ssg_gift(
     # 2) 결제 직후엔 알림톡이 늦게 온다 — 맨 아래 선물 버튼이 생길 때까지 기다린다
     nodes = wait_for(lambda ns: bool(_go_buttons(ns)), wait_message_s, step=10)
     if not _go_buttons(nodes):
-        raise GiftAcceptError(f'SSG닷컴 알림톡에 "{GO_GIFT}" 버튼이 {int(wait_message_s)}초 안에 안 왔다')
+        raise GiftAcceptError(
+            f'SSG닷컴 알림톡에 "{GO_GIFT}" 버튼이 {int(wait_message_s)}초 안에 안 왔다'
+        )
     wanted = model_code or '이 주문'
     for k in range(MAX_NOTICES):
         gos = _go_buttons(nodes)
@@ -274,7 +296,9 @@ def accept_ssg_gift(
             return '이미 받은 선물(완료 화면) — 브라우저 닫음'
         check_btn = _starts(nodes, CHECK_BTN)
         if check_btn is None:
-            raise GiftAcceptError('선물받기 화면에서 "옵션/배송지 확인"이 안 보인다(인앱 브라우저 로딩 멈춤일 수 있다)')
+            raise GiftAcceptError(
+                '선물받기 화면에서 "옵션/배송지 확인"이 안 보인다(인앱 브라우저 로딩 멈춤일 수 있다)'
+            )
         if check_btn.y > SCREEN_BOTTOM - 100 and phone.top_package() == SSG_APP:
             # SSG 앱은 아래 메뉴 막대가 버튼을 가린다 — 조금 올려서 누른다
             phone.swipe_up()
@@ -366,7 +390,9 @@ def make_after_done(
         line = _after(job, out)
         if line:
             # 결과가 슬랙에만 가서 수락 실패가 로그에 안 보였다(실기 2026-10-02: 2건이 주문접수로 남음)
-            log.warning('선물 수락: %s', line) if '실패' in line or '못 함' in line else log.info('선물 수락: %s', line)
+            log.warning('선물 수락: %s', line) if '실패' in line or '못 함' in line else log.info(
+                '선물 수락: %s', line
+            )
         return line
 
     def _after(job: object, out: dict) -> str | None:
@@ -377,10 +403,14 @@ def make_after_done(
         if serial is None:
             return 'SSG 선물 수락 못 함 — 결제 폰이 연결돼 있지 않다(카카오톡에서 직접 수락 필요, 기한 1주일)'
         try:
-            return 'SSG ' + accept_ssg_gift(Phone(adb_path, serial), model_code_of(sku) or '', sku=sku)
+            return 'SSG ' + accept_ssg_gift(
+                Phone(adb_path, serial), model_code_of(sku) or '', sku=sku
+            )
         except GiftAcceptError as e:
             return f'SSG 선물 수락 실패 — {e}(카카오톡에서 직접 수락 필요)'
         except (OSError, subprocess.TimeoutExpired) as e:
-            return f'SSG 선물 수락 실패 — 폰 명령 오류 {type(e).__name__}(카카오톡에서 직접 수락 필요)'
+            return (
+                f'SSG 선물 수락 실패 — 폰 명령 오류 {type(e).__name__}(카카오톡에서 직접 수락 필요)'
+            )
 
     return after
