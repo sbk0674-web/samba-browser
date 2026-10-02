@@ -88,6 +88,9 @@ PAY_SUCCESS_MARKERS = ('결제 완료', '결제완료', '주문완료', '주문 
 ORDER_DONE_URL_RE = re.compile(r'/order/(?:result|complete)/\d|orderComplete|order_complete|/order/done', re.IGNORECASE)
 # _press_keypad 가 키패드 없이 결제 완료 화면을 본 경우 돌려주는 값(앱 응답처럼 'ok' 로 시작한다)
 NO_KEYPAD_PAID = 'ok: paid without keypad (order complete page)'
+# 키패드가 없을 때 주문 완료 화면을 몇 번, 얼마 간격으로 더 볼지
+NO_KEYPAD_DONE_CHECKS = 4
+NO_KEYPAD_DONE_WAIT_MS = 3000
 # 결제 "전" 검사용 — 결제창·주문서에도 흔한 '결제 완료 시 적립' 같은 글자로 멈추지 않게 좁힌다
 # (실기: 무신사페이 결제창 문구에 걸려 결제 전 pay_interrupted). 주문 완료 주소의 탭이 있거나,
 # 화면에 주문 완료 문구와 주문번호가 함께 있어야 이미 결제된 것으로 본다
@@ -1193,13 +1196,19 @@ class PayerAgent(AgentBase):
             # 완료 화면이면 키패드 없이 성공으로 넘긴다(확인 단계가 주문번호를 읽는다)
             if dry_run_digits is None:
                 # 결제창 글자('결제 완료 시 적립')로 오판하지 않게 주문 완료 주소의 탭이 있을 때만 본다
-                try:
-                    done_tabs = str(self.tool('list_tabs'))
-                except AgentFailure:
-                    done_tabs = ''
-                if ORDER_DONE_URL_RE.search(done_tabs):
-                    self.note('키패드 입력', '키패드 없이 결제 완료 화면 — 비밀번호 없는 결제로 본다')
-                    return NO_KEYPAD_PAID
+                # 완료 화면은 결제 뒤 몇 초 늦게 뜬다 — 한 번만 보고 '결제 안 됨'으로 끝내면, 실제로는 결제된 주문이
+                # 다시 돌며 한 번 더 결제된다(실기 2026-09-29 탑텐키즈·09-30 크록스키즈: 무신사페이가 비밀번호 없이
+                # 결제됐는데 키패드 없음으로 끝나 재시도에서 중복 구매). 몇 번 더 기다리며 본다
+                for wait_i in range(NO_KEYPAD_DONE_CHECKS):
+                    try:
+                        done_tabs = str(self.tool('list_tabs'))
+                    except AgentFailure:
+                        done_tabs = ''
+                    if ORDER_DONE_URL_RE.search(done_tabs):
+                        self.note('키패드 입력', '키패드 없이 결제 완료 화면 — 비밀번호 없는 결제로 본다')
+                        return NO_KEYPAD_PAID
+                    if wait_i + 1 < NO_KEYPAD_DONE_CHECKS:
+                        self.tool('wait', ms=NO_KEYPAD_DONE_WAIT_MS)
             raise AgentFailure(
                 'needs_human',
                 f'결제 비밀번호 키패드가 뜨지 않았다({calls}회 확인) — 비밀번호를 넣지 않았다(결제 안 됨): '
