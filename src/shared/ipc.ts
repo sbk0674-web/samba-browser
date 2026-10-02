@@ -109,6 +109,7 @@ export const IPC = {
   // --- 동기화(2b) — 상태 조회·즉시 동기화. 토큰·비밀값은 오가지 않는다 ---------
   syncStatus: 'sync:status',
   syncNow: 'sync:now',
+  syncKeymasterBaseline: 'sync:keymasterBaseline',
   syncStatusChanged: 'sync:statusChanged', // main → renderer 이벤트
   // --- 기기(2b) — 목록과 원격 로그아웃. 토큰은 오가지 않는다 -------------------
   devicesList: 'devices:list',
@@ -353,7 +354,7 @@ export type {
   BookmarkLinkDto
 } from './import'
 
-export type { SyncStatus, DeviceDto } from './sync'
+export type { SyncStatus, DeviceDto, BaselineReport } from './sync'
 
 export type {
   TranslateLang,

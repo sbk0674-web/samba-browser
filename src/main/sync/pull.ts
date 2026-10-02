@@ -66,6 +66,21 @@ export function legacyTableCursorKey(table: PullTable): string {
   return `pullCursor:${table}`
 }
 
+/** 이 PC 가 마지막으로 반영한 키마스터 기준 시각(sync_state). 기준이 더 새로워지면 정리를 한 번 돌린다 */
+export const BASELINE_APPLIED_KEY = 'keymasterBaselineApplied'
+
+// 이번 주기의 키마스터 기준 시각. 풀 시작 때 정하고 판정 함수들이 읽는다(주기는 겹쳐 돌지 않는다).
+// 기준 이전의 삭제는 기준 이후에 올라온 살아 있는 행을 이기지 못한다 — 옛 PC 가 예전 삭제를 다시 올려
+// 기준 PC 의 계정까지 지우던 것을 막는다(실기 2026-10-02 "PC 마다 설정 다르고 지워지고")
+let baselineAt = 0
+
+/** 기준 이전의 삭제인가 — 그렇다면 기준 뒤에 고쳐진 원격 행에게 진다 */
+function staleDeletion(deletedAt: number | null, remoteUpdatedAt: number): boolean {
+  return (
+    deletedAt !== null && baselineAt > 0 && deletedAt <= baselineAt && remoteUpdatedAt > baselineAt
+  )
+}
+
 /** 마지막으로 풀에 성공한 시각(로컬 시계). 상태 표시줄에 그대로 보여 준다 */
 export const LAST_PULLED_AT_KEY = 'lastPulledAt'
 
@@ -158,6 +173,20 @@ export async function pullAll(deps: PullDeps): Promise<PullResult> {
   const vaultCursorKey = pullCursorKey(workspaceLocalId, 'vault_items')
   const vaultCursorBefore = local.getState(vaultCursorKey)
 
+  // 키마스터 기준 선언을 계정보다 먼저 읽는다 — 설정 표는 맨 끝에 받기 때문에, 미리 보지 않으면 같은 주기에
+  // 내려온 기준 PC 의 계정을 옛 삭제 기록으로 되지우고(삭제 표식 재전송) 만다
+  baselineAt = Math.max(
+    deps.settings.get().keymasterBaselineAt,
+    await peekBaseline(deps, local, workspaceLocalId)
+  )
+  if (baselineAt > (local.getStateNumber(BASELINE_APPLIED_KEY) ?? 0)) {
+    const cleaned = local.applyKeymasterBaseline(baselineAt)
+    local.setStateNumber(BASELINE_APPLIED_KEY, baselineAt)
+    console.log(
+      `동기화: 키마스터 기준(${new Date(baselineAt).toISOString()}) 반영 — 안 올린 행 ${cleaned.localOnly}개·대기 변경 ${cleaned.outbox}개 정리`
+    )
+  }
+
   await step('accounts', (cursor, limit) => pullAccounts(deps, local, cursor, limit, result))
   await step('vault_items', (cursor, limit) => pullVaultItems(deps, local, cursor, limit, result))
   await step('bookmarks', (cursor, limit) => pullBookmarks(deps, local, cursor, limit, result))
@@ -182,6 +211,35 @@ export async function pullAll(deps: PullDeps): Promise<PullResult> {
 }
 
 /**
+ * 아직 받지 않은 설정 행에서 키마스터 기준 시각만 미리 읽는다(적용은 settings 단계가 한다).
+ * 읽지 못하면 0 — 기준이 없는 것으로 보고 평소대로 돈다
+ */
+async function peekBaseline(
+  deps: PullDeps,
+  local: SyncLocal,
+  workspaceLocalId: number
+): Promise<number> {
+  try {
+    const cursor = parsePullCursor(local.getState(pullCursorKey(workspaceLocalId, 'settings')))
+    const rows = await deps.backend.selectKeyed(
+      'settings_sync',
+      cursor,
+      workspaceOf(deps),
+      PULL_PAGE_SIZE
+    )
+    let at = 0
+    for (const raw of rows) {
+      const remote = settingFromRemote(raw)
+      if (remote.key !== 'keymasterBaselineAt') continue
+      if (typeof remote.value === 'number' && remote.value > at) at = remote.value
+    }
+    return at
+  } catch {
+    return 0
+  }
+}
+
+/**
  * 로컬·원격 중 누가 이겼는지 판정한다.
  * 로컬이 이기면 충돌로 센다 — 로컬 값이 그대로 남고, 다음 푸시가 원격을 덮는다
  */
@@ -189,7 +247,13 @@ function wins(localRow: Syncable | null, remoteRow: Syncable, result: PullResult
   // 로컬에서 지운 행(tombstone)은 원격의 "살아 있는" 갱신이 더 늦어도 되살리지 않는다 — 옛 복제본(병렬
   // 인스턴스)이 지운 뒤에 그 행을 만지고 upsert 하면 LWW 로는 삭제가 뒤집혔다(실기: 키마스터에서 지운
   // 계정·사이트가 자꾸 원복). 삭제는 사용자 의도라 이긴다. 다음 푸시가 tombstone 을 다시 올린다
-  if (localRow !== null && localRow.deletedAt !== null && remoteRow.deletedAt === null) {
+  // 단, 키마스터 기준 선언보다 앞선 삭제는 기준 뒤에 올라온 행에게 진다(아래 LWW 로 넘어간다)
+  if (
+    localRow !== null &&
+    localRow.deletedAt !== null &&
+    remoteRow.deletedAt === null &&
+    !staleDeletion(localRow.deletedAt, remoteRow.updatedAt)
+  ) {
     result.conflicts += 1
     return false
   }
@@ -259,7 +323,12 @@ async function pullAccounts(
 
     // 3) 처음 보는 원격 id 의 살아 있는 행
     // 3-1) 이 원격 id 를 로컬에서 지운 기억(삭제 메모)이 있으면 되살리지 않는다 — 같은 id 는 삭제가 이긴다
-    const memo = remote.remoteId ? local.tombstoneAt('accounts', remote.remoteId) : null
+    let memo = remote.remoteId ? local.tombstoneAt('accounts', remote.remoteId) : null
+    if (memo !== null && remote.remoteId && staleDeletion(memo, remote.updatedAt)) {
+      // 기준 이전의 삭제 기억 — 버리고 받는다
+      local.forgetTombstone('accounts', remote.remoteId)
+      memo = null
+    }
     if (memo !== null) {
       result.conflicts += 1
       requeueRemoteTombstone(deps, 'accounts', { id: 0, ...remote, deletedAt: memo })
@@ -410,7 +479,11 @@ async function pullVaultItems(
       }
       // 처음 보는 원격 id 의 살아 있는 행 — 이 id 를 지운 기억이 있거나, 같은 항목·딸린 계정을
       // 그 행보다 뒤에 지웠으면 삽입하지 않고 그 원격 id 에 삭제 표식을 올린다
-      const memo = local.tombstoneAt('vault_items', remote.remoteId)
+      let memo = local.tombstoneAt('vault_items', remote.remoteId)
+      if (memo !== null && staleDeletion(memo, remote.updatedAt)) {
+        local.forgetTombstone('vault_items', remote.remoteId)
+        memo = null
+      }
       const deletedByKey = identityAllowed
         ? local.deletedVaultItemAtByIdentity(accountLocalId, remote.type, remote.label)
         : null

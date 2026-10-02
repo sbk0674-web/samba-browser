@@ -25,6 +25,7 @@ import { join } from 'node:path'
 import { readdirSync } from 'node:fs'
 import { profileNames } from '../../shared/profiles'
 import { PHONE_SYNC_KEYS, PhoneRegistrySync } from '../phone/registry-sync'
+import { declareKeymasterBaseline } from '../sync/authority'
 import * as os from 'node:os'
 import { IPC, type IpcResult, type Layout, type Settings } from '../../shared/ipc'
 import { defaultTabUrl } from '../../shared/settings'
@@ -155,6 +156,10 @@ import { registerCaptureIpc } from '../capture/capture-ipc'
 import { isAllowedCaptureDir } from '../capture/paths'
 import type { CaptureShortcutInput } from '../../shared/capture'
 import { tr } from '../i18n'
+
+// 빌드가 넣어 주는 코드 판(커밋 짧은 해시·날짜, electron.vite.config.ts). 시험 환경에는 없다
+declare const __APP_REV__: string | undefined
+const APP_REV = typeof __APP_REV__ === 'string' ? __APP_REV__ : 'dev'
 
 /**
  * 렌더러가 보낸 툴바 버튼 좌표를 숫자만 남긴 형태로 받는다.
@@ -1232,7 +1237,7 @@ export function registerIpc(
     device: {
       hostname: () => os.hostname(),
       osLabel: () => `${os.type()} ${os.release()}`,
-      appVersion: () => app.getVersion()
+      appVersion: () => `${app.getVersion()}+${APP_REV}`
     },
     // 서버 키 재료가 다르면 계정 비밀번호로 자동으로 맞춘다(사용자 개입 없음)
     onVaultKeyMismatch: () => void account.onVaultKeyMismatch()
@@ -1240,6 +1245,30 @@ export function registerIpc(
   onDataBackend = (backend) => connection.setBackend(backend)
   // 수동 동기화는 연결을 거친다 — 최초 업로드가 놓친 행을 먼저 보충하고 한 주기를 돈다
   handleFromRenderer(IPC.syncNow, () => connection.syncNow())
+  // 이 PC 의 키마스터를 기준으로 선언한다(sync/authority.ts). 실행했으면 곧바로 한 주기 돌려 올린다
+  handleFromRenderer(IPC.syncKeymasterBaseline, async (dryRun: boolean) => {
+    if (!syncBackend || !auth.state().signedIn) throw new Error(tr('ipc.loginRequired'))
+    if (vault.state() !== 'unlocked') throw new Error(tr('vault.locked'))
+    const scope = workspace.scope()
+    const report = await declareKeymasterBaseline(
+      {
+        db,
+        backend: syncBackend,
+        workspace: {
+          localId: scope.id,
+          remoteId: workspaceRemoteId(
+            db,
+            scope.id,
+            scope.isDefault || accountWorkspaces.isAccountWorkspace(scope.id)
+          )
+        },
+        settings
+      },
+      { dryRun: dryRun !== false }
+    )
+    if (!report.dryRun) await connection.syncNow()
+    return report
+  })
   // 저장된 세션이 있으면 조용히 되살린다(디렉터리 → 주소 내려받기 → 데이터 세션). 실패는 로그아웃으로 본다.
   // 연결부가 만들어진 뒤에 돌려야 새 백엔드 교체가 연결부까지 닿는다
   void account.restore().then(() => connection.refresh())

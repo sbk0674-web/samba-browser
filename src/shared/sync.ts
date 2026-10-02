@@ -213,7 +213,9 @@ export const SYNCED_SETTING_KEYS = [
   'defaultPhoneSerial',
   'phoneIgnoredSerials',
   'phoneRegistry',
-  'phoneAccountLinks'
+  'phoneAccountLinks',
+  // 키마스터 기준 선언 — 한 PC 의 키마스터로 나머지를 맞출 때 쓴다(sync/authority.ts)
+  'keymasterBaselineAt'
 ] as const
 
 /**
@@ -239,3 +241,23 @@ export type VaultKeyApplyResult =
 
 /** 로컬·원격의 마스터 키 재료가 다를 때 상태 표시줄에 올리는 표식 */
 export const VAULT_KEY_MISMATCH_ERROR = 'sync:vaultKeyMismatch'
+
+// --- 키마스터 기준 선언(main/sync/authority.ts)의 결과 -------------------------
+export interface BaselineCounts {
+  /** 이 PC 의 살아 있는 행 */
+  local: number
+  /** 서버의 살아 있는 행 */
+  remoteLive: number
+  /** 서버에만 살아 있어 삭제 표식을 올릴 행 */
+  remoteOnly: number
+  /** 이 PC 에만 있고 서버에 아직 없는 행(새로 올라간다) */
+  localOnly: number
+}
+
+export interface BaselineReport {
+  dryRun: boolean
+  /** 기준 시각(ms). dryRun 이면 0 */
+  at: number
+  accounts: BaselineCounts
+  vaultItems: BaselineCounts
+}

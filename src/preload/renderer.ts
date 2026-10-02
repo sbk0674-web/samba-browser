@@ -29,6 +29,7 @@ import {
   type TaskModelKey,
   type TaskModels,
   type SyncStatus,
+  type BaselineReport,
   type ExtensionActionResult,
   type ExtensionAnchorDto,
   type ExtensionDto,
@@ -450,6 +451,12 @@ const api = {
   sync: {
     status: (): Promise<IpcResult<SyncStatus>> => invoke(IPC.syncStatus),
     now: (): Promise<IpcResult<SyncStatus>> => invoke(IPC.syncNow),
+    /**
+     * 이 PC 의 키마스터를 기준으로 선언해 다른 PC 를 맞춘다. dryRun 이면 서버와 견준 숫자만 돌려준다.
+     * 서버에만 있는 계정·항목에는 삭제 표식이 올라가므로 화면은 숫자를 보여 주고 확인받은 뒤에 실행한다
+     */
+    keymasterBaseline: (dryRun: boolean): Promise<IpcResult<BaselineReport>> =>
+      invoke(IPC.syncKeymasterBaseline, dryRun),
     onStatusChanged: (cb: (status: SyncStatus) => void): (() => void) => {
       const h = (_: unknown, status: SyncStatus): void => cb(status)
       ipcRenderer.on(IPC.syncStatusChanged, h)

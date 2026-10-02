@@ -206,6 +206,9 @@ export const DEFAULT_SETTINGS = {
   // 주소 연결·페어링을 직접 하면 비운다. 이 PC 의 사정이라 SYNCED_SETTING_KEYS 에 넣지 않는다
   phoneIgnoredSerials: [] as string[],
   // 폰 연동 동기화(phone-registry.ts) — 폰 목록과 계정↔담당 폰. 폰 표(로컬)의 사본이라 화면에서 직접 고치지 않는다
+  // 키마스터 기준 시각(ms) — "이 시각에 이 PC 의 키마스터가 기준"이라는 선언(sync/authority.ts).
+  // 다른 PC 는 이보다 앞선 자기 삭제 기록·안 올린 행을 버리고 서버 내용을 그대로 받는다. 0 이면 선언 없음
+  keymasterBaselineAt: 0,
   phoneRegistry: [] as PhoneRegistryEntry[],
   phoneAccountLinks: [] as PhoneAccountLink[],
   // 결제 비밀번호 키패드 배치를 외부 AI(Visual)에게 물어볼지.
@@ -412,6 +415,7 @@ export const settingsSchema = z.object({
     .catch(DEFAULT_SETTINGS.phoneScreenFps),
   phoneAutoReconnect: z.boolean().catch(DEFAULT_SETTINGS.phoneAutoReconnect),
   phoneIgnoredSerials: z.array(z.string().max(120)).max(50).catch([]),
+  keymasterBaselineAt: z.number().int().min(0).catch(0),
   phoneRegistry: z
     .array(
       z.object({

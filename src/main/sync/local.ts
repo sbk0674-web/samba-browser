@@ -3,7 +3,7 @@
 // 기존 저장소(VaultRepo·BookmarkRepo)는 "앱 기능" 관점의 질의만 담당하고,
 // 여기에는 remote_id·deleted_at 처럼 동기화에만 쓰는 컬럼 질의를 둔다
 
-import { and, eq, isNotNull, isNull, like, lt, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, like, lt, lte, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import {
   accounts,
@@ -12,6 +12,7 @@ import {
   chatMessages,
   chats,
   sites,
+  syncOutbox,
   syncState,
   vaultItems
 } from '../db/schema'
@@ -861,6 +862,76 @@ export class SyncLocal {
     if (table === 'chats') return this.chatForSync(rowId)
     if (table === 'chat_messages') return this.chatMessageForSync(rowId)
     return null
+  }
+
+  // --- 키마스터 기준 반영 ----------------------------------------------------
+
+  /**
+   * 다른 PC 가 "내 키마스터가 기준"이라고 선언했을 때 이 PC 를 정리한다(기준 PC 자신은 부르지 않는다).
+   * - 서버에 올라간 적 없는(원격 id 없는) 살아 있는 계정·항목 중 기준 이전 것은 지운다(로컬 삭제 표식) —
+   *   기준 PC 에 없는 행이고, 두면 나중에 올라가 기준 PC 에 섞인다
+   * - 기준 이전에 쌓인 계정·항목의 대기 변경(옛 삭제 재전송 포함)을 버린다 — 올라가면 기준 PC 의 행을 덮는다
+   * 서버에 올라가 있던 행은 건드리지 않는다. 기준 PC 가 올린 삭제 표식·최신 값이 풀로 내려와 맞춰진다
+   */
+  applyKeymasterBaseline(at: number): { localOnly: number; outbox: number } {
+    const scopeA =
+      this.workspaceLocalId === null
+        ? undefined
+        : or(isNull(accounts.workspaceId), eq(accounts.workspaceId, this.workspaceLocalId))
+    const scopeI =
+      this.workspaceLocalId === null
+        ? undefined
+        : or(isNull(vaultItems.workspaceId), eq(vaultItems.workspaceId, this.workspaceLocalId))
+    let localOnly = 0
+    const staleAccounts = this.d
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(
+        and(
+          isNull(accounts.remoteId),
+          isNull(accounts.deletedAt),
+          lte(accounts.updatedAt, at),
+          scopeA
+        )
+      )
+      .all()
+    for (const row of staleAccounts) {
+      this.markAccountDeleted(row.id, at)
+      localOnly += 1
+    }
+    const staleItems = this.d
+      .select({ id: vaultItems.id })
+      .from(vaultItems)
+      .where(
+        and(
+          isNull(vaultItems.remoteId),
+          isNull(vaultItems.deletedAt),
+          lte(vaultItems.updatedAt, at),
+          scopeI
+        )
+      )
+      .all()
+    for (const row of staleItems) {
+      this.markVaultItemDeleted(row.id, at)
+      localOnly += 1
+    }
+    const pending = this.d
+      .select({ id: syncOutbox.id })
+      .from(syncOutbox)
+      .where(
+        and(inArray(syncOutbox.table, ['accounts', 'vault_items']), lte(syncOutbox.createdAt, at))
+      )
+      .all()
+    if (pending.length > 0) {
+      this.d
+        .delete(syncOutbox)
+        .where(
+          and(inArray(syncOutbox.table, ['accounts', 'vault_items']), lte(syncOutbox.createdAt, at))
+        )
+        .run()
+    }
+    if (localOnly > 0 || pending.length > 0) this.db.scheduleSave()
+    return { localOnly, outbox: pending.length }
   }
 
   // --- tombstone 정리 --------------------------------------------------------
