@@ -230,6 +230,31 @@ def buy_on_dewu(
         if phone.top_package() == DEWU and find_text(phone.nodes(), '确认订单') is not None:
             break
     if phone.top_package() != ALIPAY:
+        nodes = phone.nodes()
+        # 지난 시도가 남긴 미결제 주문이 있으면 '您有未支付的订单' 창이 뜬다 — 같은 상품·사이즈면 그 주문을 결제한다
+        # (새 주문을 또 만들지 않는다. 실기 2026-10-03: 결제수단 문제로 멈춘 뒤 미결제 주문이 남아 다음 시도가 막혔다)
+        if has_text(nodes, '未支付的订单'):
+            if not has_text(nodes, eu_size):
+                raise DewuOrderError(
+                    f'得物에 다른 사이즈의 미결제 주문이 남아 있다 — 사람이 취소해야 한다(EU {eu_size} 아님)'
+                )
+            go_pay = find_text(nodes, '去支付')
+            if go_pay is None:
+                raise DewuOrderError('미결제 주문 창에서 去支付 를 못 찾았다')
+            phone.tap(go_pay.x, go_pay.y)
+            end = time.monotonic() + 20
+            while phone.top_package() != ALIPAY and time.monotonic() < end:
+                sleep(1.5)
+                if phone.top_package() == DEWU and (
+                    find_text(phone.nodes(), '立即支付') is not None
+                    or find_text(phone.nodes(), '确认订单') is not None
+                ):
+                    break
+            if phone.top_package() == ALIPAY:
+                nodes = []
+            else:
+                nodes = phone.nodes()
+    if phone.top_package() != ALIPAY:
         # 주문 확인 화면 — 결제수단이 알리페이가 아니면(云闪付) 바꾸고 '立即支付' 를 누른다
         # (실기 2026-10-03: 云闪付 가 골라져 있어 알리페이 창이 영영 안 떴다)
         nodes = phone.nodes()
