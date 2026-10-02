@@ -173,6 +173,8 @@ class Worker:
             )
         self.d.queue.progress(job.id, agent=None, step=None)
         self.d.queue.finish(job.id, outcome, error=fail)
+        # 슬랙 보고와 별개로 로그에도 남긴다 — 폰 구매는 그래프 이벤트가 없어 실패 사유를 로그에서 못 찾았다(실기 10/3)
+        _log.info('[폰 구매] %s', mask_text(f'{job.order_no} {outcome} — {line}')[:300])
         self.d.report(job, mask_text(f'{job.order_no} {outcome} — {line}')[:300])
         return self.d.queue.get(job.order_no)
 
