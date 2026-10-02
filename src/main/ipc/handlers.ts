@@ -22,6 +22,8 @@ import {
   type WebFrameMain
 } from 'electron'
 import { join } from 'node:path'
+import { readdirSync } from 'node:fs'
+import { profileNames } from '../../shared/profiles'
 import * as os from 'node:os'
 import { IPC, type IpcResult, type Layout, type Settings } from '../../shared/ipc'
 import { defaultTabUrl } from '../../shared/settings'
@@ -401,6 +403,23 @@ export function registerIpc(
   handleFromRenderer(IPC.tabForward, (id: string) => tabs.forward(id))
   handleFromRenderer(IPC.tabReload, (id: string) => tabs.reload(id))
   handleFromRenderer(IPC.tabSetMobile, (id: string, mobile: boolean) => tabs.setMobile(id, mobile))
+  // 프로필 메뉴용 목록 — 이 작업공간에서 한 번이라도 쓴 프로필(세션 폴더)과 지금 열린 탭의 프로필
+  handleFromRenderer(IPC.profileList, () => {
+    const dirPrefix = workspace.partitionPrefix().replace(/^persist:/, '')
+    let dirs: string[] = []
+    try {
+      dirs = readdirSync(join(app.getPath('userData'), 'Partitions'), { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+    } catch {
+      // 아직 프로필 탭을 연 적이 없으면 폴더가 없다
+    }
+    return profileNames(
+      dirs,
+      dirPrefix,
+      tabs.listAll().map((t) => t.profile)
+    )
+  })
   handleFromRenderer(IPC.layoutSet, (l: Layout) => tabs.setLayout(l))
 
   // 실행 시작만 즉시 확인해 주고, 완료·실패는 status 이벤트로만 알린다.

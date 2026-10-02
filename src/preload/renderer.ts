@@ -151,6 +151,8 @@ const api = {
     reload: (id: string): Promise<IpcResult<void>> => invoke(IPC.tabReload, id),
     setMobile: (id: string, mobile: boolean): Promise<IpcResult<void>> =>
       invoke(IPC.tabSetMobile, id, mobile),
+    /** 이 작업공간에서 쓴 프로필(계정별 세션) 이름 목록 — 기본 프로필은 빠져 있다 */
+    profiles: (): Promise<IpcResult<string[]>> => invoke(IPC.profileList),
     onUpdated: (cb: (tabs: TabInfo[]) => void): (() => void) => {
       const h = (_: unknown, tabs: TabInfo[]): void => cb(tabs)
       ipcRenderer.on(IPC.tabUpdated, h)
