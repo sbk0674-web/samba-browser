@@ -114,25 +114,34 @@ def open_room(phone: Phone, *, sleep: Callable[[float], None] = time.sleep) -> b
     """카카오톡 '롯데ON' 방을 맨 아래(최근 알림)에서 연다."""
     phone.launch(KAKAO)
     sleep(3)
+    reopened = False
     for _ in range(5):
         nodes = phone.nodes()
+        if reopened and _in_room(nodes):
+            return True  # 방금 새로 열린 방이다 — 맨 아래에 있다
         room = _room_row(nodes)
         if room is not None:
             phone.tap(room.x, room.y)
             sleep(3)
-            return any(n.text.startswith(PREFIX) for n in phone.nodes())
+            return _in_room(phone.nodes())
         # 다른 방·다른 화면이면 채팅 목록까지 뒤로 나온다(이미 그 방 안이어도 나갔다 들어와 맨 아래로 간다)
         phone.key('4')
         sleep(1.5)
         if phone.top_package() != KAKAO:
+            # 방이 맨 밑 화면이었다(알림으로 바로 열린 방) — 뒤로 가면 카카오톡이 닫힌다. 다시 열면 그 방이 새로 뜬다(실기 2026-10-02)
             phone.launch(KAKAO)
             sleep(3)
+            reopened = True
     return False
+
+
+def _in_room(nodes: list[Node]) -> bool:
+    return any(n.text.startswith(PREFIX) for n in nodes)
 
 
 def _room_row(nodes: list[Node]) -> Node | None:
     """채팅 목록의 '롯데ON' 줄. 방 안(알림 글이 보이는 화면)의 제목은 치지 않는다."""
-    if any(n.text.startswith(PREFIX) for n in nodes):
+    if _in_room(nodes):
         return None
     return next((n for n in nodes if n.text == ROOM), None)
 

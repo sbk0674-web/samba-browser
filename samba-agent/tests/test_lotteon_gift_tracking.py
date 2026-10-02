@@ -158,3 +158,33 @@ def test_주문_작업이_시작되면_손을_뗀다(tmp_path: Path):
         sleep=lambda s: None,
     )
     assert res is None and wave.calls == []
+
+
+class _DeepLinkedPhone(_Phone):
+    """방이 카카오톡의 맨 밑 화면인 폰 — 뒤로 가면 카카오톡이 닫히고, 다시 열면 그 방이 뜬다."""
+
+    def __init__(self, pages: list[list[str]]) -> None:
+        super().__init__(pages)
+        self.at = 0
+        self.top = 'com.kakao.talk'
+
+    def launch(self, package: str) -> None:
+        self.top, self.at = package, 0
+
+    def top_package(self) -> str:
+        return self.top
+
+    def key(self, code: str) -> None:
+        if code == '4':
+            self.top = 'com.sec.android.app.launcher'
+
+
+def test_방이_맨_밑_화면이어도_연다(tmp_path: Path):
+    wave = _Wave()
+    res = collect_lotteon_gift_tracking(
+        wave,
+        _DeepLinkedPhone([[ORDER, TRACK]]),
+        SeenStore(tmp_path / 'seen.json'),
+        sleep=lambda s: None,
+    )
+    assert res == {'read': 1, 'sent': 1, 'skipped': 0}
