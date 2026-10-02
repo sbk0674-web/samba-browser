@@ -133,7 +133,20 @@ class Phone:
     def key(self, code: str) -> None:
         self._run('shell', 'input', 'keyevent', code)
 
+    def wake(self) -> None:
+        """화면이 꺼져 있으면 켜고 잠금 화면을 올린다(밀어서 잠금 해제) — 꺼진 채로는 어느 앱도 못 연다.
+
+        실기 2026-10-03: 폰이 Dozing 상태라 카카오톡·得物 화면을 못 읽어 롯데ON 선물 송장·식화 주문이 몇 시간 멈췄다.
+        """
+        power = self._run('shell', 'dumpsys', 'power')
+        if 'mWakefulness=Awake' not in power:
+            self.key('224')  # KEYCODE_WAKEUP
+            time.sleep(1.5)
+            self._run('shell', 'input', 'swipe', '360', '1300', '360', '400', '300')
+            time.sleep(1.5)
+
     def launch(self, package: str) -> None:
+        self.wake()
         self._run('shell', 'monkey', '-p', package, '-c', 'android.intent.category.LAUNCHER', '1')
 
 
