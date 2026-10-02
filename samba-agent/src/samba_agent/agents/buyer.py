@@ -1188,6 +1188,12 @@ def is_account_failure(e: AgentFailure) -> bool:
     )
 
 
+def shipping_not_listed(out: dict[str, object]) -> bool:
+    """기존 배송지 선택 스크립트가 '목록에 없다'고 답했는가 — 스크립트 고장이 아니라 처음 보내는 배송지다."""
+    note = str(out.get('note') or '')
+    return not out.get('ok') and '목록에' in note and '없음' in note
+
+
 def snapshot_problem(
     option: str | None, selected_ok: Callable[[str], bool] | None = None
 ) -> Callable[[dict[str, object]], str | None]:
@@ -3799,9 +3805,11 @@ class BuyerAgent(AgentBase):
                         '주문서 배송지 변경 목록에서 이름·주소가 args 와 같은 기존 배송지를 골라 주문서에 반영하고, '
                         '반영된 이름·주소를 되읽어 ok:true 와 함께 돌려준다. 목록에 정말 없을 때만 ok:false. 새 배송지는 만들지 않는다.'
                     ),
+                    # 목록에 그 배송지가 없는 것은 스크립트 고장이 아니다(처음 보내는 고객) — 수리로 넘기지 않고 신규 입력으로 간다.
+                    # 수리로 넘기면 AI 가 없는 배송지를 찾느라 시간 초과(15분)까지 주문 처리가 멈춘다(실기 2026-10-02 롯데온)
                     check=lambda o: (
                         None
-                        if o.get('ok') and shipping_matches(shipping, o)
+                        if (o.get('ok') and shipping_matches(shipping, o)) or shipping_not_listed(o)
                         else f'기존 배송지 선택 실패: note={o.get("note")}'
                     ),
                 )

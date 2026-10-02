@@ -1820,3 +1820,13 @@ def test_네이버페이는_현대카드_청구할인을_원가에_반영한다(
     assert effective_cost({'card': '네이버페이', 'cost': 100000}) == 97300  # 주문 상세의 결제수단 글자
     assert effective_cost({'card': '네이버페이 - 롯데카드', 'cost': 100000}) == 98000
     assert effective_cost({'method': '토스페이', 'card': None, 'cost': 100000}) == 100000
+
+
+def test_목록에_없는_배송지는_스크립트_고장이_아니다():
+    from samba_agent.agents.buyer import shipping_not_listed
+
+    assert shipping_not_listed({'ok': False, 'note': '목록에 같은 배송지 없음(이름 라벨 0개, 이름 글자 0곳)'})
+    assert shipping_not_listed({'ok': False, 'note': '목록에 없음'})
+    # 창을 못 열었거나 다른 사유는 고장일 수 있다 — 수리로 넘긴다
+    assert not shipping_not_listed({'ok': False, 'note': '배송지 변경 버튼 없음'})
+    assert not shipping_not_listed({'ok': True, 'note': None})
