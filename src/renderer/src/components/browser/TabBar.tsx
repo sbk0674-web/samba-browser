@@ -5,6 +5,7 @@ import { useBrowserStore } from '@renderer/stores/browserStore'
 import { Badge } from '@renderer/components/ui/badge'
 import { cn } from '@renderer/lib/utils'
 import { profileColor, profileTint } from '@renderer/lib/profile-color'
+import { ProfileMenu } from './ProfileMenu'
 
 export function TabBar(): React.JSX.Element {
   const { t } = useTranslation()
@@ -64,6 +65,7 @@ export function TabBar(): React.JSX.Element {
       >
         <Plus className="h-4 w-4" />
       </button>
+      <ProfileMenu />
     </div>
   )
 }

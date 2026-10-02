@@ -275,7 +275,13 @@
     "empty": "열린 탭이 없습니다",
     "untitled": "제목 없음",
     "popup": "팝업",
-    "profileOf": "계정 프로필: {{profile}} (이 탭의 로그인 세션은 이 계정 전용)"
+    "profileOf": "계정 프로필: {{profile}} (이 탭의 로그인 세션은 이 계정 전용)",
+    "profiles": "프로필로 새 탭 열기",
+    "profileHint": "프로필마다 로그인·쿠키가 따로입니다",
+    "profileDefault": "기본 프로필",
+    "profileNamePlaceholder": "새 프로필 이름",
+    "profileCreate": "새 프로필로 열기",
+    "profileInvalid": "영문·숫자·한글과 . _ @ - 만, {{max}}자까지 쓸 수 있습니다"
   },
   "newtab": {
     "title": "새 탭",

@@ -275,7 +275,13 @@
     "empty": "No open tabs",
     "untitled": "Untitled",
     "popup": "Popup",
-    "profileOf": "Account profile: {{profile}} (this tab has its own login session)"
+    "profileOf": "Account profile: {{profile}} (this tab has its own login session)",
+    "profiles": "Open a tab in a profile",
+    "profileHint": "Each profile keeps its own logins and cookies",
+    "profileDefault": "Default profile",
+    "profileNamePlaceholder": "New profile name",
+    "profileCreate": "Open in new profile",
+    "profileInvalid": "Use letters, digits, Korean and . _ @ - only, up to {{max}} characters"
   },
   "newtab": {
     "title": "New Tab",
