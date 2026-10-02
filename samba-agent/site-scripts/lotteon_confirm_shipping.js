@@ -33,6 +33,13 @@ if(saved){
   if(done){await page.click(done.id);await sleep(3000);}else await sleep(1500);
 }
 const tx=await text();
+// 선물 주문서가 아닌 일반(직배) 주문서: 배송지 창이 열린 채면 화면 글자에 주소록(방금 저장한 항목 포함)이 섞여, 실제 배송지는
+// 기본 주소인데도 통과한다(실기 2026-09-30 쿠팡 737393619370002: 직배인데 사무실로 갔다). 창이 닫힌 주문서에서 이름과 도로명+번호를 함께 본다
+if(!/받는 분 주소로 보내기/.test(tx)){
+  if((await els(null,'[role=dialog]')).length)return{...R,note:'배송지 창이 닫히지 않음 — 주문서 배송지 확인 불가'};
+  const rd2=addr.match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/);
+  if(tx.includes(name)&&rd2&&!tx.replace(/\s+/g,'').includes(rd2[1]+rd2[2]))return{...R,note:'주문서에 받는 분 주소 없음(이름만 있음) — 배송지가 바뀌지 않았다'};
+}
 if(!tx.includes(name))return{...R,note:'주문서에 받는 분 이름 없음'+(saved?'(저장 창 거침)':'(저장 창 없음)')+(tx.includes(name.slice(0,2))?'(앞 두 글자는 있음)':'')+(/받는 분 주소로 보내기/.test(tx)?'(선물 주문서)':'')+' 창'+dlg.length+' 저장버튼 '+(await els('저장')).filter(e=>e.role==='button').map(e=>e.text).slice(0,3).join('/')+' 배송지칸 '+(/새 ?배송지|배송지 ?(선택|변경)/.exec(tx)||[''])[0]};
 let cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');
 if(cb){
