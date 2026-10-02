@@ -23,6 +23,8 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from samba_agent.ops.source_audit import SourceAudit, SourceDetail, delivery_mismatch
+
 if TYPE_CHECKING:
     from samba_agent.wave.client import WaveClient, WaveOrder
 
@@ -249,6 +251,8 @@ class CrossChecker:
         days: int = DEFAULT_DAYS,
         source_status: Callable[[LedgerRow], str | None] | None = None,
         idle: Callable[[], bool] | None = None,
+        source_audit: SourceAudit | None = None,
+        source_detail: Callable[[LedgerRow], SourceDetail | None] | None = None,
     ) -> None:
         self._ledger = ledger
         self._wave = wave
@@ -258,6 +262,10 @@ class CrossChecker:
         # 소싱처 주문 상세의 상태 글자를 읽는 함수(브라우저를 쓴다) — 주문 작업이 없을 때만 부른다
         self._source_status = source_status
         self._idle = idle
+        # 소싱처 주문 내역 ↔ 삼바 기록 대조(삼바에 없는 소싱 주문 = 중복 구매 의심)
+        self._source_audit = source_audit
+        # 소싱처 주문 상세(상태·받는 곳)를 읽는 함수 — 있으면 source_status 대신 쓰고 받는 곳도 대조한다
+        self._source_detail = source_detail
         self._told: set[tuple[str, str, str]] = set()
         # 결제 시각이 날짜만 들어오는 주문(플레이오토)을 처음 본 시각 — 경과 시간을 여기서부터 잰다
         self._first_seen: dict[str, datetime] = {}
@@ -268,6 +276,7 @@ class CrossChecker:
         all_found: list[Finding] = []
         fixed: list[str] = []
         before_ship: list[LedgerRow] = []
+        kinds: dict[str, tuple[str, ...]] = {}
         for row in self._ledger.recent(self._days):
             try:
                 order = self._wave.get_order(row.order_no, sourcing_order_number=row.source_order_no)
@@ -279,6 +288,7 @@ class CrossChecker:
                 continue
             if (order.status or '').strip().lower() in _BEFORE_SHIP_STATES:
                 before_ship.append(row)
+                kinds[row.order_no] = order.flags
             found = compare(row, order)
             if not found:
                 continue
@@ -296,8 +306,13 @@ class CrossChecker:
                     self._alert(text)
                 except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
                     _log.exception('교차 검증 알림 실패')
-        self._check_sources(before_ship)
+        self._check_sources(before_ship, kinds)
         self._check_stale_pending()
+        if self._source_audit is not None and (self._idle is None or self._idle()):
+            try:
+                self._source_audit.run_once(self._idle)
+            except Exception:  # noqa: BLE001 — 대조 실패가 다른 점검을 멈추게 하지 않는다
+                _log.exception('교차 검증: 소싱처 주문 대조 실패')
         return all_found
 
     def _check_stale_pending(self) -> None:
@@ -341,12 +356,12 @@ class CrossChecker:
             except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
                 _log.exception('교차 검증 알림 실패')
 
-    def _check_sources(self, rows: list[LedgerRow]) -> None:
+    def _check_sources(self, rows: list[LedgerRow], kinds: dict[str, tuple[str, ...]] | None = None) -> None:
         """아직 발송 전인 이행 주문의 소싱처 주문이 취소됐는지 본다(한 주기에 몇 건씩, 주문 작업이 없을 때만).
 
         소싱처에서 취소됐는데 삼바웨이브에는 이행으로 남으면 고객 주문이 방치된다(실기 2026-10-01 비니·나이키).
         """
-        if self._source_status is None:
+        if self._source_status is None and self._source_detail is None:
             return
         since = (datetime.now(UTC) - timedelta(hours=SOURCE_RECHECK_HOURS)).isoformat(timespec='seconds')
         due = [r for r in rows if r.site in SOURCE_CHECK_SITES and (r.source_checked_at or '') < since]
@@ -354,13 +369,31 @@ class CrossChecker:
             if self._idle is not None and not self._idle():
                 return
             try:
-                status = self._source_status(row)
+                if self._source_detail is not None:
+                    detail = self._source_detail(row)
+                    status = detail.status if detail is not None else None
+                else:
+                    detail = None
+                    status = self._source_status(row) if self._source_status is not None else None
             except Exception:  # noqa: BLE001 — 한 건 실패로 점검을 멈추지 않는다
                 _log.exception('교차 검증: %s 소싱처 상태 확인 실패', row.order_no)
                 continue
             if status is None:
                 continue  # 못 읽었다 — 다음 주기에 다시 본다
             self._ledger.mark_source_checked(row)
+            # 받는 곳이 기록(직배·까대기)과 다른가 — 직배인데 사무실로 가면 고객이 못 받는다(실기 2026-09-30 롯데온)
+            wrong = delivery_mismatch((kinds or {}).get(row.order_no, ()), detail.to_office) if detail else None
+            if wrong and '취소' not in status:
+                text = (
+                    f'⚠ [교차 검증] 받는 곳이 기록과 다르다 — {row.order_no} ({row.site} {row.source_order_no}): {wrong}. '
+                    '출고 전이면 소싱처에서 배송지를 고치거나 취소 후 다시 산다'
+                )
+                _log.warning(text)
+                if self._alert is not None:
+                    try:
+                        self._alert(text)
+                    except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
+                        _log.exception('교차 검증 알림 실패')
             if '취소' in status and '요청' not in status:
                 text = (
                     f'⚠ [교차 검증] 소싱처 주문이 취소됐는데 삼바웨이브는 이행 상태다 — {row.order_no} '

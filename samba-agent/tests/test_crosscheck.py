@@ -158,3 +158,28 @@ def test_결제_시각이_날짜만_있는_주문은_처음_본_때부터_잰다
     checker._first_seen['PA1'] = datetime.now(UTC) - timedelta(hours=7)
     checker.run_once()
     assert len(alerts) == 1 and 'PA1' in alerts[0] and '7시간째' in alerts[0]
+
+
+def test_직배인데_소싱처_주문이_사무실로_가면_알린다(tmp_path):
+    from samba_agent.ops.source_audit import SourceDetail
+
+    ledger = _ledger(tmp_path)
+    alerts: list[str] = []
+    wave = _Wave(_order(action_tag='direct'))
+    to_office = CrossChecker(
+        ledger, wave, alerts.append, source_detail=lambda r: SourceDetail('상품 준비 중', '상품', True), idle=lambda: True
+    )  # type: ignore[arg-type]
+    to_office.run_once()
+    assert len(alerts) == 1 and '받는 곳이 기록과 다르다' in alerts[0] and 'A1' in alerts[0]
+
+
+def test_직배가_고객_주소로_가면_조용하다(tmp_path):
+    from samba_agent.ops.source_audit import SourceDetail
+
+    alerts: list[str] = []
+    wave = _Wave(_order(action_tag='direct'))
+    ok = CrossChecker(
+        _ledger(tmp_path), wave, alerts.append, source_detail=lambda r: SourceDetail('상품 준비 중', '상품', False), idle=lambda: True
+    )  # type: ignore[arg-type]
+    ok.run_once()
+    assert alerts == []

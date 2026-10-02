@@ -317,6 +317,12 @@ class WaveClient:
         items = body.get('items') if isinstance(body, dict) else None
         return [WaveOrder.model_validate(i) for i in items or []]
 
+    def sourcing_numbers(self, days: int = 14) -> set[str]:
+        """최근 주문에 적힌 소싱주문번호 전부 — 교차 검증이 소싱처 주문 내역과 견준다(삼바에 없는 소싱 주문 찾기)."""
+        body = self._request('GET', '/sourcing-numbers', params={'days': str(days)})
+        numbers = body.get('numbers') if isinstance(body, dict) else None
+        return {str(n) for n in numbers} if isinstance(numbers, list) else set()
+
     def sourcing_account_id(self, source_site: str, username: str) -> str | None:
         """(소싱처, 로그인 아이디) → 삼바웨이브 소싱 계정 id. 못 찾으면 None.
 

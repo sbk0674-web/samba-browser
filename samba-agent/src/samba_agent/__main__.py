@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from langgraph.checkpoint.sqlite import SqliteSaver
 from slack_bolt import App
 
-from samba_agent.agents.buyer import _CLOSE_LANE_TABS_JS, BuyerAgent
+from samba_agent.agents.buyer import _CLOSE_LANE_TABS_JS, OFFICE_ADDRESS_HINT, BuyerAgent
 from samba_agent.agents.factory import build_agents
 from samba_agent.agents.payer import PayerAgent
 from samba_agent.agents.recorder import RecorderAgent
@@ -44,6 +44,14 @@ from samba_agent.ops.events import EventLog
 from samba_agent.ops.masking import mask_text
 from samba_agent.ops.releases import ReleaseStore
 from samba_agent.ops.site_scripts import install_missing
+from samba_agent.ops.source_audit import (
+    DETAIL_JS,
+    LIST_JS,
+    SourceAudit,
+    SourceDetail,
+    parse_detail,
+    run_js_json,
+)
 from samba_agent.ops.ssg_gift_accept import make_after_done
 from samba_agent.ops.tracing import configure_tracing
 from samba_agent.queue.db import Job, JobQueue
@@ -60,7 +68,7 @@ from samba_agent.repair import (
 from samba_agent.settings import Settings, load_settings
 from samba_agent.supervisor.graph import build_supervisor
 from samba_agent.version import harness_version
-from samba_agent.wave.client import WaveClient
+from samba_agent.wave.client import WaveClient, WaveError
 from samba_agent.wave.flags import FlagMarker
 
 log = logging.getLogger(__name__)
@@ -495,11 +503,48 @@ def main() -> None:
                 return None
             return str(out.get('status') or '') or None
 
+        # 소싱처 주문 대조 — 무신사 주문 내역·주문 상세를 읽어 삼바에 없는 소싱 주문(중복 구매)과
+        # 받는 곳 불일치(직배인데 사무실)를 찾는다(2026-10-02 중복 구매 2건·롯데온 직배 사무실 도착)
+        def _audit_js(code: str) -> dict[str, object]:
+            try:
+                return run_js_json(xbridge.call('run_js', code=code, safety='no_pay').result)
+            except BridgeError:
+                return {}
+
+        def _musinsa_orders(account: str) -> list[str] | None:
+            nos = _audit_js(LIST_JS % {'profile': json.dumps(account)}).get('nos')
+            return [str(n) for n in nos] if isinstance(nos, list) else None
+
+        def _musinsa_detail(account: str, no: str) -> SourceDetail | None:
+            if not no.isdigit():
+                return None
+            out = _audit_js(DETAIL_JS % {'profile': json.dumps(account), 'no': no})
+            return parse_detail(out, OFFICE_ADDRESS_HINT) if out else None
+
+        def _known_numbers() -> set[str] | None:
+            try:
+                return wave.sourcing_numbers(14) | {r.source_order_no for r in crosscheck_ledger.recent(14)}
+            except WaveError:
+                return None
+
+        source_audit = SourceAudit(
+            accounts=lambda: sorted(
+                {r.account for r in crosscheck_ledger.recent(14) if r.site == 'MUSINSA' and r.account}
+            ),
+            list_orders=_musinsa_orders,
+            detail=_musinsa_detail,
+            known_numbers=_known_numbers,
+            alert=lambda text: bot.post_new(text),
+        )
         checker = CrossChecker(
             crosscheck_ledger,
             wave,
             lambda text: bot.post_new(text),
             source_status=_source_status,
+            source_detail=lambda row: (
+                _musinsa_detail(row.account, row.source_order_no) if row.site == 'MUSINSA' and row.account else None
+            ),
+            source_audit=source_audit,
             # 주문 작업이 도는 동안에는 브라우저를 건드리지 않는다
             idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()),
         )
