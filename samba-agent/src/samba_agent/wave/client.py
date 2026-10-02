@@ -268,7 +268,9 @@ class WaveOrderDetail(WaveOrder):
     def to_order_ref(self) -> OrderRef:
         """등록 매칭으로 소싱처 옵션 이름이 정해지면 그 이름을 주문 옵션으로 쓴다(글자 짐작을 건너뛴다)."""
         ref = super().to_order_ref()
-        source_option = registered_source_option(ref.option, self.source_options, self.registered_option)
+        source_option = registered_source_option(
+            ref.option, self.source_options, self.registered_option
+        )
         if not source_option or source_option == ref.option:
             return ref
         return ref.model_copy(update={'option': source_option, 'market_option': ref.option})
@@ -466,9 +468,40 @@ class WaveClient:
     def write_overseas_tracking(self, order_no: str, company: str, number: str) -> bool:
         """중국 크림 주문의 해외 택배사·송장을 넣는다(배송중으로 바뀐다). 허브넷 전송은 삼바웨이브 CN 루프가 한다."""
         body = self._request(
-            'PUT', f'/orders/{order_no}/overseas-tracking', json={'company': company, 'number': number}
+            'PUT',
+            f'/orders/{order_no}/overseas-tracking',
+            json={'company': company, 'number': number},
         )
         return bool(body.get('rows')) if isinstance(body, dict) else False
+
+    def write_lotteon_gift_tracking(
+        self,
+        *,
+        company: str,
+        number: str,
+        sourcing_order_number: str = '',
+        customer_name: str = '',
+        product_text: str = '',
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        """롯데ON 선물 주문에 택배사·송장을 넣고 마켓으로 보낸다(카카오톡 알림에서 읽은 값).
+
+        주문은 삼바웨이브가 정한다 — 롯데ON 주문번호, 없으면 받는 사람 이름 + 품번. 정확히 1건일 때만 넣는다.
+        돌려주는 것: {ok, action(shipped·dry_run·skipped·rejected), reason, order_number, market_sent, message}.
+        """
+        body = self._request(
+            'PUT',
+            '/lotteon-gift-tracking',
+            json={
+                'company': company,
+                'number': number,
+                'sourcing_order_number': sourcing_order_number or None,
+                'customer_name': customer_name or None,
+                'product_text': product_text or None,
+                'dry_run': dry_run,
+            },
+        )
+        return body if isinstance(body, dict) else {}
 
     def add_memo(self, order_no: str, line: str) -> bool:
         """주문 메모에 한 줄을 덧붙인다(상태·소싱 값은 그대로). 새로 붙였으면 True, 이미 같은 줄이 있으면 False.

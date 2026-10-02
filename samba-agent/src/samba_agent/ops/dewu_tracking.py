@@ -13,7 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from samba_agent.ops.ssg_gift_accept import Node, Phone, find_text
+from samba_agent.ops.ssg_gift_accept import PHONE_BUSY, Node, Phone, find_text
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +134,8 @@ def start_dewu_tracking_loop(
                 serial = find_phone_serial(adb_path, want)
                 if serial is None:
                     continue
-                res = collect_dewu_tracking(wave, Phone(adb_path, serial))
+                with PHONE_BUSY:
+                    res = collect_dewu_tracking(wave, Phone(adb_path, serial))
                 log.info('[得物 송장] 조회 %d · 기입 %d', res['checked'], res['updated'])
             except Exception:
                 log.exception('[得物 송장] 수집 실패 — 다음 바퀴에 다시')

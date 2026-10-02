@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
@@ -24,6 +25,8 @@ DEFAULT_ADB = os.path.expanduser(r'~\Downloads\pt\platform-tools\adb.exe')
 # 결제 폰(임성희 폰 SM-A426N) — 무선 디버깅이면 기기 이름이 'adb-<시리얼>-…' 이나 IP:포트라 시리얼을 품은 줄을 찾는다
 DEFAULT_PHONE = 'R5CR30LFATY'
 KAKAO = 'com.kakao.talk'
+# 폰을 쓰는 주기 작업(得物 송장·롯데ON 선물 송장)이 서로 겹치지 않게 잡는 자물쇠
+PHONE_BUSY = threading.Lock()
 CHANNEL = 'SSG닷컴'
 GO_GIFT = '선물 받으러 가기'
 CHECK_BTN = '옵션/배송지 확인'

@@ -39,6 +39,7 @@ from samba_agent.ops.crosscheck import CrossChecker, LedgerRow
 from samba_agent.ops.crosscheck import configure as configure_crosscheck
 from samba_agent.ops.dewu_order import make_shihuo_handler
 from samba_agent.ops.dewu_tracking import start_dewu_tracking_loop
+from samba_agent.ops.lotteon_gift_tracking import start_lotteon_gift_tracking_loop
 from samba_agent.ops.diagnose import diagnose
 from samba_agent.ops.events import EventLog
 from samba_agent.ops.masking import mask_text
@@ -406,6 +407,12 @@ def main() -> None:
         # 중국 크림 得物 주문 송장 — 30분마다 큐가 비었을 때 폰 得物 앱에서 읽어 해외송장에 넣는다(사용자 2026-10-01)
         # 사람 대기(needs_human)는 폰을 쓰지 않으니 빼고, 대기·실행 중인 작업이 없을 때만 돈다
         start_dewu_tracking_loop(wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()))
+        # 롯데ON 선물 주문 송장 — 카카오톡 알림톡으로만 온다. 20분마다 폰에서 읽어 삼바에 넣고 마켓으로 보낸다(사용자 2026-10-02)
+        start_lotteon_gift_tracking_loop(
+            wave,
+            idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()),
+            state_dir=settings.db_path.parent,
+        )
     bot = SambaBot(slack_app, worker, queue, settings, _diagnose_text)
 
     # 자동 수집 — 삼바웨이브 클라이언트가 있고 켜져 있을 때만 돈다. 슬랙이 없으면 스레드 없이 큐에만 쌓인다
