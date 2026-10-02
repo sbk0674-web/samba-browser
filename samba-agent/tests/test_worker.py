@@ -796,3 +796,16 @@ def test_네이버페이_창_계정_불일치면_그_계정만_빼고_한_번_�
     # 두 번째도 같은 사유면 더 돌리지 않고 사람에게 남긴다
     w.tick()
     assert q.get('A1').state == 'needs_human'
+
+
+def test_결제창_로그인_화면으로_멈춘_계정을_알아낸다():
+    from samba_agent.queue.worker import _mismatch_profile
+
+    reason = (
+        '결제창이 로그인 화면이다(id.payco.com) — 프로필 rbf15 에서 결제 앱(네이버 등)에 '
+        '먼저 로그인해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)'
+    )
+    assert _mismatch_profile(reason) == 'rbf15'
+    # 계정을 모르면 뺄 계정도 없다
+    assert _mismatch_profile(reason.replace('rbf15', '-')) == ''
+    assert _mismatch_profile('옵션 불일치') == ''

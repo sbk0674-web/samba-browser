@@ -494,12 +494,17 @@ def _buy_payload(out: dict) -> dict[str, object] | None:
 # 네이버페이 창 계정 불일치(payer.NAVERPAY_MISMATCH_MARK) 사유에서 문제 계정(프로필) 이름을 뽑는다
 ACCOUNT_RETRY_KEY = '_account_retry'
 _MISMATCH_PROFILE_RE = re.compile(r'네이버페이 창 계정 불일치: 프로필 (\S+) 의')
+# 결제창이 결제 앱(페이코·네이버·카카오) 로그인 화면이고 앱 로그인으로도 못 넘어갔다 — 그 프로필은 결제 앱에 로그인돼
+# 있지 않다. 결제는 안 됐으니 그 계정만 빼고 다시 산다(실기 2026-10-03: 29CM 최저 계정의 페이코가 로그아웃이라 주문이
+# 하루 가까이 멈췄다 — 다른 세 계정은 페이코 로그인 상태였다)
+_LOGIN_POPUP_PROFILE_RE = re.compile(r'결제창이 로그인 화면이다\([^)]*\) — 프로필 (\S+) 에서')
 
 
 def _mismatch_profile(reason: str) -> str:
-    """네이버페이 창 계정 불일치로 멈춘 사유면 그 계정 이름, 아니면 빈 문자열."""
-    m = _MISMATCH_PROFILE_RE.search(reason)
-    return m.group(1) if m else ''
+    """결제 앱 계정 문제(네이버페이 창 계정 불일치·결제창 로그인 화면)로 멈춘 사유면 그 계정 이름, 아니면 빈 문자열."""
+    m = _MISMATCH_PROFILE_RE.search(reason) or _LOGIN_POPUP_PROFILE_RE.search(reason)
+    name = m.group(1) if m else ''
+    return '' if name == '-' else name
 
 
 def _failed_reason(out: dict) -> str:
