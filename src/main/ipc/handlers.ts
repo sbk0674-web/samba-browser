@@ -33,7 +33,7 @@ import type { TabManager } from '../browser/tab-manager'
 import { ClosedTabStack, newProfileName, runGesture, type GestureDeps } from '../browser/gestures'
 import { SettingsStore } from '../settings/store'
 import { setOcrEnabled } from '../agent/tools-ocr'
-import { AgentRunner } from '../agent/runner'
+import { AgentRunner, BRIDGE_BUSY_ERROR } from '../agent/runner'
 import { BridgeServer } from '../bridge/server'
 import { applyBridgeSettings, newBridgeToken } from '../bridge/wiring'
 import { createHarnessApi } from '../harness/wiring'
@@ -444,9 +444,12 @@ export function registerIpc(
       // 활동 기록도 같은 자리에서 지시를 받아 둔다(마스킹은 저장 직전에 한다)
       activity.notePrompt(prompt)
       const overrides = scheduler.claimOverrides(scheduleToken)
-      void agent
-        .run(prompt, chatId, overrides, images)
-        .catch((e: unknown) => console.error('작업 실행 실패', e))
+      void agent.run(prompt, chatId, overrides, images).catch((e: unknown) => {
+        console.error('작업 실행 실패', e)
+        // 시작도 못 한 지시는 상태 이벤트가 하나도 안 나간다 — 알리지 않으면 화면이 영영 '생각 중'이다
+        const message = e instanceof Error ? e.message : String(e)
+        agent.notifyNotStarted(message === BRIDGE_BUSY_ERROR ? tr('ipc.agentBridgeBusy') : message)
+      })
       return { started: true }
     }
   )
