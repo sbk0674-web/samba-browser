@@ -192,6 +192,8 @@ export class TabManager {
   private behindIds: string[] = []
   // 레인(lane-tabs)이 연 탭 — 전역 자동화 대상이 아니어도 뒤 층에 붙여 둔다
   private laneIds = new Set<string>()
+  // 사람이 직접 연 탭(새 탭 버튼·프로필 메뉴·그 탭에서 열린 링크). 바깥 자동화(브릿지)는 이 탭을 닫지 못한다
+  private userIds = new Set<string>()
   // 팝업이 새로 열렸을 때 알리는 구독자(AI 도구가 "팝업이 열렸다"를 결과에 붙인다)
   private popupOpenedListeners: Array<(target: AgentTarget) => void> = []
   // 로그인 게이트: 계정 로그인 전에는 탭 뷰(네이티브)를 화면에서 치운다 — 렌더러가 가리는 것만으로는 안 보인다
@@ -424,6 +426,7 @@ export class TabManager {
     this.automationTabId = null
     this.behindIds = []
     this.laneIds.clear()
+    this.userIds.clear()
     this.focusedPopupId = null
     // 부모 창이 사라졌는데 결제창만 남아 떠 있지 않게 팝업도 함께 파괴한다
     this.popups.destroyAll()
@@ -673,6 +676,8 @@ export class TabManager {
        * 레인 탭 생성이 레인 없는 세션의 대상 탭을 바꾸면 안 된다
        */
       keepAgentTarget?: boolean
+      /** 사람이 직접 연 탭인가(탭 바·단축키·프로필 메뉴). 자동화가 연 탭에는 주지 않는다 */
+      user?: boolean
     } = {}
   ): TabInfo {
     if (this.disposed) throw new Error('window closed')
@@ -809,7 +814,9 @@ export class TabManager {
             profile,
             mobile: tab.mobile,
             openerId: tab.id,
-            background
+            background,
+            // 사람이 쓰던 탭에서 열린 링크 탭도 사람의 탭이다
+            user: this.userIds.has(tab.id)
           })
           // 자동화 대상 탭이 연 탭이면 자동화 대상도 새 탭으로 옮긴다(보이는 탭이 연 새 탭을 따라가던 예전 동작과 같다)
           if (background && this.automationTabId === tab.id) this.automationTabId = opened.id
@@ -846,6 +853,7 @@ export class TabManager {
     if (tab.mobile) void applyMobileEmulation(wc)
     void wc.loadURL(url)
     if (opts.keepAgentTarget === true) this.laneIds.add(tab.id)
+    if (opts.user === true) this.userIds.add(tab.id)
     if (opts.background === true) {
       this.sizeHidden(tab)
     } else if (opts.keepAgentTarget === true) {
@@ -1113,6 +1121,11 @@ export class TabManager {
     this.emit()
   }
 
+  /** 사람이 직접 연 탭인가 — 바깥 자동화(브릿지)의 탭 정리에서 빼는 데 쓴다 */
+  isUserTab(id: string): boolean {
+    return this.userIds.has(id)
+  }
+
   /** 탭 바에서 끌어 옮긴 탭의 자리를 바꾼다(toIndex 는 탭만 센 자리 — 팝업은 목록 뒤에 따로 붙는다) */
   move(id: string, toIndex: number): void {
     const from = this.tabs.findIndex((t) => t.id === id)
@@ -1129,6 +1142,7 @@ export class TabManager {
     if (this.automationTabId === id) this.automationTabId = null
     this.behindIds = this.behindIds.filter((b) => b !== id)
     this.laneIds.delete(id)
+    this.userIds.delete(id)
     // 닫히기 전에 주소를 챙겨 둔다(제스처 '닫은 탭 다시 열기')
     if (isTabAlive(tab)) {
       const record: ClosedTabRecord = {

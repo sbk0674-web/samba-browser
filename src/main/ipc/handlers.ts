@@ -393,7 +393,8 @@ export function registerIpc(
   // 팝업(결제창·주소 검색창)까지 함께 돌려준다 — 사이드바가 "팝업" 배지로 보여 준다
   handleFromRenderer(IPC.tabList, () => tabs.listAll())
   handleFromRenderer(IPC.tabCreate, (o: { url?: string; profile?: string; mobile?: boolean }) =>
-    tabs.create(o)
+    // 화면에서 사람이 연 탭 — 바깥 자동화가 닫지 못하게 표시한다
+    tabs.create({ ...o, user: true })
   )
   // 팝업 id 로도 닫기·전환이 되게 대상(탭+팝업) 경로로 보낸다
   handleFromRenderer(IPC.tabClose, (id: string) => tabs.closeTarget(id))
@@ -829,20 +830,21 @@ export function registerIpc(
     scrollTo: (id, to) => tabs.scrollTo(id, to),
     homeUrl: () => settings.get().homeUrl,
     newTab: () => {
-      tabs.create({})
+      tabs.create({ user: true })
     },
     // 이 앱은 단일 창이라 '새 창 열기' 는 새 탭으로 대체한다(설정 라벨에도 그렇게 적혀 있다)
     newWindow: () => {
-      tabs.create({})
+      tabs.create({ user: true })
     },
     // 시크릿창 대체 — 세션이 분리된 새 프로필 탭
     newProfileTab: () => {
-      tabs.create({ profile: newProfileName(Date.now()) })
+      tabs.create({ profile: newProfileName(Date.now()), user: true })
     },
     closeTab: (id) => tabs.close(id),
     reopenTab: () => {
       const last = closedTabs.pop()
-      if (last) tabs.create({ url: last.url, profile: last.profile, mobile: last.mobile })
+      if (last)
+        tabs.create({ url: last.url, profile: last.profile, mobile: last.mobile, user: true })
     },
     toggleFullScreen: () => {
       if (!win.isDestroyed()) win.setFullScreen(!win.isFullScreen())
