@@ -235,17 +235,22 @@ def buy_on_dewu(
         nodes = phone.nodes()
         if find_text(nodes, '确认订单') is None and find_text(nodes, '立即支付') is None:
             raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
+        # 결제수단 고르기 — 주문 확인 화면('支付方式 云闪付 / 切换更多支付方式')이거나 결제수단 선택 화면
+        # ('微信支付 / 支付宝 / 抖音支付 … 立即支付')이다. 어느 쪽이든 '支付宝' 글자를 눌러 고른다
+        picked_ali = False
         if '支付宝' not in pay_method_of(nodes):
             more = find_text(nodes, '切换更多支付方式')
             if more is not None:
                 phone.tap(more.x, more.y)
                 sleep(2.5)
-                ali = next((n for n in phone.nodes() if '支付宝' in n.text), None)
-                if ali is not None:
-                    phone.tap(ali.x, ali.y)
-                    sleep(2.5)
-                    nodes = phone.nodes()
-            if '支付宝' not in pay_method_of(nodes):
+                nodes = phone.nodes()
+            ali = next((n for n in nodes if '支付宝' in n.text and len(n.text.strip()) <= 8), None)
+            if ali is not None:
+                phone.tap(ali.x, ali.y)
+                sleep(2.5)
+                nodes = phone.nodes()
+                picked_ali = True
+            if not picked_ali and '支付宝' not in pay_method_of(nodes):
                 seen = ' | '.join(n.text.strip()[:12] for n in nodes if n.text.strip())[:160]
                 raise DewuOrderError(
                     f'得物 결제수단을 알리페이로 못 바꿨다(지금 {pay_method_of(nodes) or "모름"}; 화면: {seen}) — 결제하지 않음'
