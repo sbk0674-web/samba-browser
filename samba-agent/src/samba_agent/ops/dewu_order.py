@@ -24,6 +24,7 @@ DEWU = 'com.shizhuang.duapp'
 ALIPAY = 'com.eg.android.AlipayGphone'
 CN_SHIPPING_FEE = 8500
 FX_URL = 'https://api.frankfurter.dev/v1/latest?base=CNY&symbols=KRW'
+FX_FALLBACK_URL = 'https://open.er-api.com/v6/latest/CNY'
 _PRICE = re.compile(r'^¥\s*(\d+(?:\.\d+)?)$')
 _ORDER_NO = re.compile(r'^\d{15,22}$')
 
@@ -49,12 +50,18 @@ class DewuResult:
 
 
 def cny_krw_rate() -> float:
-    """CNY → KRW 환율(frankfurter). 못 받으면 0."""
-    try:
-        with urllib.request.urlopen(FX_URL, timeout=15) as r:
-            return float(json.loads(r.read().decode('utf-8'))['rates']['KRW'])
-    except Exception:  # noqa: BLE001 — 환율을 못 받으면 사지 않는다(호출부)
-        return 0.0
+    """CNY → KRW 환율(frankfurter, 안 되면 er-api). 못 받으면 0."""
+    # 파이썬 기본 User-Agent 는 frankfurter 가 403 으로 막는다(실기 2026-10-03 — 得物 주문이 환율 0 으로 멈췄다)
+    for url, pick in ((FX_URL, 'rates'), (FX_FALLBACK_URL, 'rates')):
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (samba-agent)'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                rate = float(json.loads(r.read().decode('utf-8'))[pick]['KRW'])
+            if rate > 0:
+                return rate
+        except Exception:  # noqa: BLE001 — 다음 출처로 넘어간다. 다 안 되면 사지 않는다(호출부)
+            log.warning('위안 환율 조회 실패: %s', url.split('/')[2])
+    return 0.0
 
 
 def header_price(nodes: list[Node]) -> float | None:
