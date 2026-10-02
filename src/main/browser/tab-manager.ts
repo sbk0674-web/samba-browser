@@ -21,6 +21,7 @@ import {
   NEW_TAB_URL
 } from '../../shared/url'
 import { normalizeHost } from '../../shared/host'
+import { moveItem } from '../../shared/reorder'
 import { attachInternalProtocol } from './internal-protocol'
 import type { PermissionMode, SearchEngine } from '../../shared/settings'
 import { applyMobileEmulation, clearMobileEmulation, MOBILE_WIDTH } from './emulation'
@@ -1109,6 +1110,14 @@ export class TabManager {
     if (this.disposed || popup.handle.isDestroyed()) return
     const target = this.listTargets().find((t) => t.id === popup.id)
     if (target) for (const cb of this.popupOpenedListeners) cb(target)
+    this.emit()
+  }
+
+  /** 탭 바에서 끌어 옮긴 탭의 자리를 바꾼다(toIndex 는 탭만 센 자리 — 팝업은 목록 뒤에 따로 붙는다) */
+  move(id: string, toIndex: number): void {
+    const from = this.tabs.findIndex((t) => t.id === id)
+    if (from < 0) return
+    this.tabs = moveItem(this.tabs, from, toIndex)
     this.emit()
   }
 

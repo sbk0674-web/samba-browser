@@ -403,6 +403,7 @@ export function registerIpc(
   handleFromRenderer(IPC.tabForward, (id: string) => tabs.forward(id))
   handleFromRenderer(IPC.tabReload, (id: string) => tabs.reload(id))
   handleFromRenderer(IPC.tabSetMobile, (id: string, mobile: boolean) => tabs.setMobile(id, mobile))
+  handleFromRenderer(IPC.tabMove, (id: string, toIndex: number) => tabs.move(id, toIndex))
   // 프로필 메뉴용 목록 — 이 작업공간에서 한 번이라도 쓴 프로필(세션 폴더)과 지금 열린 탭의 프로필
   handleFromRenderer(IPC.profileList, () => {
     const dirPrefix = workspace.partitionPrefix().replace(/^persist:/, '')

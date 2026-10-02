@@ -151,6 +151,9 @@ const api = {
     reload: (id: string): Promise<IpcResult<void>> => invoke(IPC.tabReload, id),
     setMobile: (id: string, mobile: boolean): Promise<IpcResult<void>> =>
       invoke(IPC.tabSetMobile, id, mobile),
+    /** 탭을 toIndex 자리로 옮긴다(탭 바 끌어 옮기기) */
+    move: (id: string, toIndex: number): Promise<IpcResult<void>> =>
+      invoke(IPC.tabMove, id, toIndex),
     /** 이 작업공간에서 쓴 프로필(계정별 세션) 이름 목록 — 기본 프로필은 빠져 있다 */
     profiles: (): Promise<IpcResult<string[]>> => invoke(IPC.profileList),
     onUpdated: (cb: (tabs: TabInfo[]) => void): (() => void) => {

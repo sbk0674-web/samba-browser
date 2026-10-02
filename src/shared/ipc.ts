@@ -11,6 +11,7 @@ export const IPC = {
   tabForward: 'tab:forward',
   tabReload: 'tab:reload',
   tabSetMobile: 'tab:setMobile',
+  tabMove: 'tab:move',
   profileList: 'profile:list',
   tabUpdated: 'tab:updated', // main → renderer 이벤트
   layoutSet: 'layout:set',
