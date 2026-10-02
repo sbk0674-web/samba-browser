@@ -2489,7 +2489,12 @@ class BuyerAgent(AgentBase):
             )
             if again.get('ok') and 0 < _as_float(again.get('total')) < _as_float(out.get('total')):
                 out = again
-        my_price = getattr(self, '_quick_my_prices', {}).get(account)
+        # 나의 할인가는 1개 값이다 — 여러 개 주문은 주문서 총액과 견주기 전에 수량을 곱한다
+        # (실기 2026-10-03: 2개 주문 50,000원을 1개 값 25,000원과 견줘 '쿠폰 미적용 의심'으로 멈췄다)
+        unit_price = getattr(self, '_quick_my_prices', {}).get(account)
+        my_price = (
+            unit_price * max(1, int(_as_float(snap.get('qty')) or 1)) if unit_price else unit_price
+        )
         if (
             out.get('ok')
             and my_price
@@ -2570,7 +2575,7 @@ class BuyerAgent(AgentBase):
             f'상품 쿠폰 {_as_float(out.get("coupon")):,.0f}원 · 장바구니 쿠폰 {_as_float(out.get("cart_coupon")):,.0f}원 → 총 {total:,.0f}원',
         )
         # 나의 할인가는 적립금 사용까지 반영한 값이다 — 결제액(total)과 비교한다(적립금을 더하면 정상 주문을 막았다)
-        coupon_gap_failure(getattr(self, '_quick_my_prices', {}).get(account), total, account)
+        coupon_gap_failure(my_price, total, account)
         self.note(
             '주문서 정돈',
             f'보유 적립금 {_as_float(out.get("points_balance")):,.0f}원 → 사용 {used:,.0f}원, 선할인 {out.get("prepay")}',
