@@ -32,6 +32,19 @@ ACCEPT = '선물 받기'
 DONE = '선물 받기 완료'
 LATER = '다음에 할게요!'
 CLOSE_ID = 'com.kakao.talk:id/webview_navi_close_button'
+# 알림톡 버튼 글자는 주문 방식에 따라 다르다 — 배송지를 대신 넣은 주문은 '선물 확인하기'로 온다(실기 2026-10-02)
+GO_LABELS = (GO_GIFT, '선물 확인하기')
+# 비회원 양식(카카오톡 인앱 브라우저)에는 이 동의 칸을 켜야 '선물 받기'가 된다(실기 2026-10-02)
+AGREE = '배송에 필요한 개인정보수집에 모두 동의'
+# '선물 확인하기'는 SSG 앱으로 열린다 — 아래 메뉴 막대가 버튼을 가린다
+SSG_APP = 'kr.co.ssg'
+# 화면에 실제로 보이는 세로 범위(720×1600) — 화면 밖 요소는 좌표가 0 이거나 막대 밑이라 눌러도 안 먹는다
+SCREEN_TOP = 150
+SCREEN_BOTTOM = 1500
+# 맨 아래 알림이 다른 주문의 선물이면 그 위 알림을 이만큼까지 본다(앞 주문 수락이 밀려 있을 때)
+MAX_NOTICES = 3
+# 상품명 낱말로 같은 상품인지 볼 때 세지 않는 말
+_GENERIC_WORDS = frozenset({'매장정품', '정품', '남성', '여성', '공용', '아동', '키즈', '신발', '의류'})
 
 
 @dataclass(frozen=True)
@@ -158,16 +171,50 @@ class GiftAcceptError(Exception):
     """선물 수락 실패 — 사유는 사람에게 넘길 한 줄(개인정보 없음)."""
 
 
+def _visible(nodes: list[Node], text: str) -> Node | None:
+    """글자가 정확히 같고 화면 안에 보이는 요소. 화면 밖 요소는 덤프에 좌표 0 으로 섞여 나온다."""
+    return next((n for n in nodes if n.text == text and SCREEN_TOP < n.y < SCREEN_BOTTOM), None)
+
+
+def _starts(nodes: list[Node], prefix: str) -> Node | None:
+    """글자가 그 말로 시작하는(뒤에 기한 안내가 붙은) 보이는 요소."""
+    return next((n for n in nodes if n.text.startswith(prefix) and n.y > 0), None)
+
+
+def _go_buttons(nodes: list[Node]) -> list[Node]:
+    """알림톡의 선물 버튼들 — 아래(최근) 것부터."""
+    return sorted((n for n in nodes if n.text in GO_LABELS and n.y > 0), key=lambda n: -n.y)
+
+
+def same_product(model_code: str, sku: str, texts: list[str]) -> bool:
+    """수락 화면의 상품이 이 주문 상품인가. 품번(끝 색상 글자 두 자까지는 없어도 된다) 또는 상품명 낱말 셋 이상.
+
+    실기 2026-10-02: 품번 YMM23342CT 인데 화면은 'YMM23342[다이나핏]…' — 전체 일치만 보면 제 선물도 못 받는다.
+    """
+    code = model_code.strip().upper()
+    words = [w for w in re.split(r'[^0-9A-Za-z가-힣]+', sku) if len(w) >= 2 and not w.isdigit() and w not in _GENERIC_WORDS]
+    if not code and not words:
+        return True  # 견줄 값이 없다 — 예전처럼 맨 아래 알림을 받는다
+    joined = ' '.join(texts).upper()
+    if code:
+        stem = code[: max(6, len(code) - 2)]
+        if code in joined or (len(stem) >= 6 and stem in joined):
+            return True
+    return sum(1 for w in set(words) if w.upper() in joined) >= 3
+
+
 def accept_ssg_gift(
     phone: Phone,
     model_code: str,
     *,
+    sku: str = '',
     sleep: Callable[[float], None] = time.sleep,
     wait_message_s: float = 180,
 ) -> str:
     """카카오톡 SSG닷컴 알림톡의 선물을 받는다. 성공하면 결과 한 줄, 실패하면 GiftAcceptError.
 
-    model_code 가 있으면 수락 화면의 상품명에 그 코드가 보여야 받는다(다른 주문의 선물을 받지 않게).
+    model_code·sku 가 있으면 수락 화면의 상품이 그 주문 상품일 때만 받는다(다른 주문의 선물을 받지 않게).
+    맨 아래 알림이 다른 상품이면 그 위 알림을 차례로 본다.
     """
 
     def wait_for(check: Callable[[list[Node]], bool], seconds: float, step: float = 2) -> list[Node]:
@@ -183,55 +230,80 @@ def accept_ssg_gift(
     sleep(3)
     nodes = phone.nodes()
     for _ in range(4):
-        if find_text(nodes, GO_GIFT) or find_text(nodes, CHANNEL):
+        if _go_buttons(nodes) or find_text(nodes, CHANNEL):
             break
         phone.key('4')  # BACK
         sleep(1.5)
         nodes = phone.nodes()
-    if not find_text(nodes, GO_GIFT):
+    if not _go_buttons(nodes):
         room = find_text(nodes, CHANNEL)
         if room is None:
             raise GiftAcceptError('카카오톡 채팅 목록에서 SSG닷컴 방을 못 찾았다')
         phone.tap(room.x, room.y)
         sleep(3)
-    # 2) 결제 직후엔 알림톡이 늦게 온다 — 맨 아래 '선물 받으러 가기'가 생길 때까지 기다린다
-    nodes = wait_for(lambda ns: find_text(ns, GO_GIFT) is not None, wait_message_s, step=10)
-    go = find_text(nodes, GO_GIFT, last=True)
-    if go is None:
+    # 2) 결제 직후엔 알림톡이 늦게 온다 — 맨 아래 선물 버튼이 생길 때까지 기다린다
+    nodes = wait_for(lambda ns: bool(_go_buttons(ns)), wait_message_s, step=10)
+    if not _go_buttons(nodes):
         raise GiftAcceptError(f'SSG닷컴 알림톡에 "{GO_GIFT}" 버튼이 {int(wait_message_s)}초 안에 안 왔다')
-    phone.tap(go.x, go.y)
-    # 3) 선물받기 화면 → 옵션/배송지 확인
-    nodes = wait_for(lambda ns: find_text(ns, CHECK_BTN) is not None or has_text(ns, DONE), 30)
-    if has_text(nodes, DONE):
+    wanted = model_code or '이 주문'
+    for k in range(MAX_NOTICES):
+        gos = _go_buttons(nodes)
+        if k >= len(gos):
+            break
+        phone.tap(gos[k].x, gos[k].y)
+        # 3) 선물받기 화면 → 옵션/배송지 확인(글자 뒤에 '10/9(금) 23:59까지 …' 기한이 붙는다)
+        nodes = wait_for(lambda ns: _starts(ns, CHECK_BTN) is not None or has_text(ns, DONE), 40)
+        if has_text(nodes, DONE):
+            _close_browser(phone, sleep)
+            return '이미 받은 선물(완료 화면) — 브라우저 닫음'
+        check_btn = _starts(nodes, CHECK_BTN)
+        if check_btn is None:
+            raise GiftAcceptError('선물받기 화면에서 "옵션/배송지 확인"이 안 보인다(인앱 브라우저 로딩 멈춤일 수 있다)')
+        if check_btn.y > SCREEN_BOTTOM - 100 and phone.top_package() == SSG_APP:
+            # SSG 앱은 아래 메뉴 막대가 버튼을 가린다 — 조금 올려서 누른다
+            phone.swipe_up()
+            sleep(1.5)
+            check_btn = _starts(phone.nodes(), CHECK_BTN) or check_btn
+        phone.tap(check_btn.x, check_btn.y)
+        nodes = wait_for(lambda ns: has_text(ns, '배송지'), 20)
+        if same_product(model_code, sku, [n.text for n in nodes]):
+            break
+        # 다른 주문의 선물이다 — 받지 않고 닫은 뒤 방으로 돌아가 그 위 알림을 본다
+        _close_browser(phone, sleep, home=False)
+        phone.launch(KAKAO)
+        sleep(2)
+        nodes = phone.nodes()
+    else:
         _close_browser(phone, sleep)
-        return '이미 받은 선물(완료 화면) — 브라우저 닫음'
-    check_btn = find_text(nodes, CHECK_BTN)
-    if check_btn is None:
-        raise GiftAcceptError('선물받기 화면에서 "옵션/배송지 확인"이 안 보인다(인앱 브라우저 로딩 멈춤일 수 있다)')
-    phone.tap(check_btn.x, check_btn.y)
-    nodes = wait_for(lambda ns: has_text(ns, '배송지'), 20)
-    if model_code and not any(model_code.upper() in n.text.upper() for n in nodes):
+        raise GiftAcceptError(f'수락 화면 상품이 이 주문({wanted})이 아니다 — 받지 않고 닫음')
+    if not same_product(model_code, sku, [n.text for n in nodes]):
         _close_browser(phone, sleep)
-        raise GiftAcceptError(f'수락 화면 상품이 이 주문({model_code})이 아니다 — 받지 않고 닫음')
-    # 4) 배송 요청사항 '부재 시 문앞에 놓아주세요' — 기본값은 경비실이라 반드시 바꾼다(사용자 2026-09-29)
-    for _ in range(4):
-        if find_text(nodes, DOOR) and find_text(nodes, ACCEPT):
+        raise GiftAcceptError(f'수락 화면 상품이 이 주문({wanted})이 아니다 — 받지 않고 닫음')
+    # 4) 배송 요청사항 '부재 시 문앞에 놓아주세요' — 기본값은 경비실이라 반드시 바꾼다(사용자 2026-09-29).
+    # 화면에 실제로 보일 때만 누른다 — 화면 밖 요소는 좌표가 0 이라 눌러도 안 먹는다(실기 2026-10-02)
+    for _ in range(6):
+        if _visible(nodes, DOOR) and _visible(nodes, ACCEPT):
             break
         phone.swipe_up()
         sleep(1.5)
         nodes = phone.nodes()
-    door = find_text(nodes, DOOR)
-    accept = find_text(nodes, ACCEPT)
+    door = _visible(nodes, DOOR)
+    accept = _visible(nodes, ACCEPT)
     if door is None or accept is None:
         raise GiftAcceptError('배송 요청사항(문앞)·"선물 받기" 버튼을 못 찾았다')
     phone.tap(door.x, door.y)  # 글자 줄 전체가 라디오 버튼 영역이다
     sleep(1)
+    agree = _visible(nodes, AGREE)
+    if agree is not None:
+        # 비회원 양식 — 배송 개인정보수집 동의를 켜야 받아진다
+        phone.tap(agree.x, agree.y)
+        sleep(1)
     phone.tap(accept.x, accept.y)
-    nodes = wait_for(lambda ns: has_text(ns, DONE), 20)
+    nodes = wait_for(lambda ns: has_text(ns, DONE), 25)
     if not has_text(nodes, DONE):
         raise GiftAcceptError('"선물 받기"를 눌렀지만 완료 화면이 안 떴다 — 사람이 확인')
     # 5) 리뷰 팝업 닫고 인앱 브라우저 X — 다음 결제가 이 화면에 막히지 않게
-    later = find_text(nodes, LATER)
+    later = next((n for n in nodes if n.text == LATER and n.y > 0), None)
     if later is not None:
         phone.tap(later.x, later.y)
         sleep(1.5)
@@ -239,15 +311,16 @@ def accept_ssg_gift(
     return '선물 받기 완료(부재 시 문앞) — 브라우저 닫음'
 
 
-def _close_browser(phone: Phone, sleep: Callable[[float], None]) -> None:
-    """카카오톡 인앱 브라우저를 X 로 닫고 홈으로 나간다."""
+def _close_browser(phone: Phone, sleep: Callable[[float], None], *, home: bool = True) -> None:
+    """카카오톡 인앱 브라우저를 X 로 닫고 홈으로 나간다(home=False 면 채팅방에 남는다)."""
     for _ in range(3):
         close = next((n for n in phone.nodes() if n.rid == CLOSE_ID), None)
         if close is None:
             break
         phone.tap(close.x, close.y)
         sleep(1.5)
-    phone.key('3')  # HOME
+    if home:
+        phone.key('3')  # HOME
 
 
 def gift_order_of(out: dict) -> bool:
@@ -274,6 +347,13 @@ def make_after_done(
     want = phone_serial or os.environ.get('SAMBA_PAY_PHONE') or DEFAULT_PHONE
 
     def after(job: object, out: dict) -> str | None:
+        line = _after(job, out)
+        if line:
+            # 결과가 슬랙에만 가서 수락 실패가 로그에 안 보였다(실기 2026-10-02: 2건이 주문접수로 남음)
+            log.warning('선물 수락: %s', line) if '실패' in line or '못 함' in line else log.info('선물 수락: %s', line)
+        return line
+
+    def _after(job: object, out: dict) -> str | None:
         source, sku = source_of_job(job)
         if source.upper() != 'SSG' or not gift_order_of(out):
             return None
@@ -281,7 +361,7 @@ def make_after_done(
         if serial is None:
             return 'SSG 선물 수락 못 함 — 결제 폰이 연결돼 있지 않다(카카오톡에서 직접 수락 필요, 기한 1주일)'
         try:
-            return 'SSG ' + accept_ssg_gift(Phone(adb_path, serial), model_code_of(sku))
+            return 'SSG ' + accept_ssg_gift(Phone(adb_path, serial), model_code_of(sku) or '', sku=sku)
         except GiftAcceptError as e:
             return f'SSG 선물 수락 실패 — {e}(카카오톡에서 직접 수락 필요)'
         except (OSError, subprocess.TimeoutExpired) as e:
