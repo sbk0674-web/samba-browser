@@ -73,15 +73,28 @@ def header_price(nodes: list[Node]) -> float | None:
     return None
 
 
+_PAY_METHODS = ('支付宝', '云闪付', '微信', '花呗', '银行卡', '度小满', '抖音')
+
+
 def pay_method_of(nodes: list[Node]) -> str:
-    """구매 확인 화면의 '支付方式' 줄에 고른 결제수단 글자(云闪付·支付宝…). 못 찾으면 빈 글."""
-    ordered = sorted((n for n in nodes if n.text), key=lambda n: (n.y, n.x))
-    for i, n in enumerate(ordered):
-        if n.text.strip() == '支付方式':
-            for m in ordered[i + 1 : i + 4]:
-                if m.text.strip() and m.text.strip() != '切换更多支付方式':
-                    return m.text.strip()
-    return ''
+    """구매 확인 화면에 고른 결제수단 글자(云闪付·支付宝…). 못 찾으면 빈 글.
+
+    '支付方式' 라벨과 같은 줄(세로 40px 안) 오른쪽 글자를 먼저 보고, 라벨이 없으면 알려진 결제수단 이름이 있는지 본다.
+    """
+    label = next((n for n in nodes if n.text.strip() == '支付方式'), None)
+    if label is not None:
+        row = [
+            n
+            for n in nodes
+            if n is not label and n.text.strip() and abs(n.y - label.y) <= 40 and n.x > label.x
+        ]
+        if row:
+            return min(row, key=lambda n: n.x).text.strip()
+    hit = next(
+        (n for n in nodes if any(m in n.text for m in _PAY_METHODS) and len(n.text.strip()) <= 12),
+        None,
+    )
+    return hit.text.strip() if hit is not None else ''
 
 
 def order_no_after_label(nodes: list[Node]) -> str | None:
@@ -211,8 +224,9 @@ def buy_on_dewu(
                 sleep(2.5)
                 nodes = phone.nodes()
         if '支付宝' not in pay_method_of(nodes):
+            seen = ' | '.join(n.text.strip()[:12] for n in nodes if n.text.strip())[:160]
             raise DewuOrderError(
-                f'得物 결제수단을 알리페이로 못 바꿨다(지금 {pay_method_of(nodes) or "모름"}) — 결제하지 않음'
+                f'得物 결제수단을 알리페이로 못 바꿨다(지금 {pay_method_of(nodes) or "모름"}; 화면: {seen}) — 결제하지 않음'
             )
     # 6) 하단 결제 버튼 → 알리페이 결제창
     pay = next(
