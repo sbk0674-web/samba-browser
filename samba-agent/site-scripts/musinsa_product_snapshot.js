@@ -100,10 +100,10 @@ await page.click(c.id)
 await sleep(400)
 }
 if (!n) notes.push('no option box')
-// 수량(+는2씩 −는1씩)
+// 수량(진짜 클릭)
 const WQ=Math.max(1,+args.qty||1),QR=/\[(\d+)\] button\n(?:\[\d+\] clickable.*\n)*\[\d+\] textbox value="(\d+)"(?:\n\[\d+\] clickable.*)*\n\[(\d+)\] button/
 for(let k=0,lv=0;k<24&&WQ>1;k++){const q=(await itree()).match(QR)
-if(!q){await sleep(500);continue}const v=+q[2];if(v===WQ)break;if(v===lv){await sleep(300);continue}lv=v;await page.click(+(v<WQ?q[3]:q[1]));await sleep(300)}
+if(!q){await sleep(500);continue}const v=+q[2];if(v===WQ)break;if(v===lv){await sleep(300);continue}lv=v;await page.clickNative(+(v<WQ?q[3]:q[1]));await sleep(300)}
 
 const bi = buyId(await itree())
 if (!bi) { await closeP(); return done('buy button gone') }
