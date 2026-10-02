@@ -16,7 +16,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from samba_agent.ops.ssg_gift_accept import Node, Phone, find_text, has_text
+from samba_agent.ops.ssg_gift_accept import PHONE_BUSY, Node, Phone, find_text, has_text
 
 log = logging.getLogger(__name__)
 
@@ -367,9 +367,11 @@ def make_shihuo_handler(
         if serial is None:
             return 'needs_human', 'unknown', '결제 폰(임성희폰)이 연결돼 있지 않다'
         try:
-            res = buy_on_dewu(
-                Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate
-            )
+            # 폰을 쓰는 주기 작업(롯데ON 선물 송장·得物 송장)과 겹치지 않게 — 겹치면 카카오톡이 앞으로 와 화면을 못 읽는다
+            with PHONE_BUSY:
+                res = buy_on_dewu(
+                    Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate
+                )
         except DewuOrderError as e:
             fail = 'margin' if '마진' in str(e) else ('pay_interrupted' if e.paid else 'unknown')
             return 'needs_human', fail, str(e)
