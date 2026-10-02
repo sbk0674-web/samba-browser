@@ -19,7 +19,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -227,6 +227,15 @@ def compare(row: LedgerRow, order: WaveOrder) -> list[Finding]:
     return found
 
 
+_KST = timezone(timedelta(hours=9))
+
+
+def _date_only(when: datetime) -> bool:
+    """결제 시각이 날짜만 들어온 값인가 — 한국 시각 0시 0분 0초로 찍혀 있다(플레이오토 주문)."""
+    kst = when.astimezone(_KST)
+    return (kst.hour, kst.minute, kst.second, kst.microsecond) == (0, 0, 0, 0)
+
+
 class CrossChecker:
     """장부의 최근 기입을 삼바웨이브와 대조하고, 다른 값을 알리고 한 번 되돌린다."""
 
@@ -250,6 +259,8 @@ class CrossChecker:
         self._source_status = source_status
         self._idle = idle
         self._told: set[tuple[str, str, str]] = set()
+        # 결제 시각이 날짜만 들어오는 주문(플레이오토)을 처음 본 시각 — 경과 시간을 여기서부터 잰다
+        self._first_seen: dict[str, datetime] = {}
 
     def run_once(self) -> list[Finding]:
         from samba_agent.wave.client import WaveError
@@ -308,6 +319,9 @@ class CrossChecker:
             if (order.status or 'pending').strip().lower() != 'pending' or order.paid_at is None:
                 continue
             paid = order.paid_at if order.paid_at.tzinfo else order.paid_at.replace(tzinfo=UTC)
+            if _date_only(paid):
+                # 날짜만 있는 결제 시각(그날 0시)으로 재면 방금 들어온 주문도 '13시간째'가 된다(실기 2026-10-02 GS이숍)
+                paid = max(paid, self._first_seen.setdefault(order.order_number, now))
             hours = (now - paid).total_seconds() / 3600
             if hours < STALE_PENDING_HOURS or (order.order_number, 'stale', today) in self._told:
                 continue

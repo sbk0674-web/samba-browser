@@ -140,3 +140,21 @@ def test_주문접수로_오래_남은_주문을_하루에_한_번_알린다(tmp
     checker.run_once()
     checker.run_once()
     assert len(alerts) == 1 and 'OLD1' in alerts[0] and 'NEW1' not in alerts[0] and '소싱처 미등록' in alerts[0]
+
+
+def test_결제_시각이_날짜만_있는_주문은_처음_본_때부터_잰다(tmp_path):
+    from datetime import UTC, datetime, timedelta, timezone
+
+    kst = timezone(timedelta(hours=9))
+    midnight = datetime.now(kst).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    wave = _Wave(_order())
+    # 플레이오토 주문은 결제 시각이 그날 0시로 들어온다 — 방금 수집된 주문이 '수십 시간째'로 잡히면 안 된다
+    wave.pending = [WaveOrder.model_validate({'order_number': 'PA1', 'status': 'pending', 'paid_at': midnight})]
+    alerts: list[str] = []
+    checker = CrossChecker(Ledger(tmp_path / 'ledger.sqlite'), wave, alerts.append)  # type: ignore[arg-type]
+    checker.run_once()
+    assert alerts == []
+    # 처음 본 뒤로 6시간이 지나면 알린다
+    checker._first_seen['PA1'] = datetime.now(UTC) - timedelta(hours=7)
+    checker.run_once()
+    assert len(alerts) == 1 and 'PA1' in alerts[0] and '7시간째' in alerts[0]
