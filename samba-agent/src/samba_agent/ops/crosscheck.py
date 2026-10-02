@@ -233,9 +233,12 @@ _KST = timezone(timedelta(hours=9))
 
 
 def _date_only(when: datetime) -> bool:
-    """결제 시각이 날짜만 들어온 값인가 — 한국 시각 0시 0분 0초로 찍혀 있다(플레이오토 주문)."""
+    """결제 시각이 날짜만 들어온 값인가 — 한국 시각 0시 0분으로 찍혀 있다(플레이오토 주문).
+
+    초는 보지 않는다 — KT알파 주문은 0시 0분 1초로 들어온다(실기 2026-10-02: 방금 수집된 주문이 '17시간째').
+    """
     kst = when.astimezone(_KST)
-    return (kst.hour, kst.minute, kst.second, kst.microsecond) == (0, 0, 0, 0)
+    return (kst.hour, kst.minute) == (0, 0)
 
 
 class CrossChecker:
