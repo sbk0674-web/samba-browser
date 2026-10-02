@@ -318,14 +318,19 @@ def _latest_order_no(phone: Phone, sleep: Callable[[float], None]) -> str | None
     for _ in range(6):
         nodes = phone.nodes()
         tab = find_text(nodes, '我')
-        if tab is not None and tab.y > 1400:
-            phone.tap(tab.x, tab.y)
+        if tab is not None:
+            # 아래 탭 막대 요소는 좌표가 0 으로 읽힐 때가 있다(실기 2026-10-03) — 그때는 실측 위치를 누른다
+            if tab.y > 1400:
+                phone.tap(tab.x, tab.y)
+            else:
+                phone.tap(630, 1490)
             sleep(3)
             break
         phone.key('4')
         sleep(1.5)
     nodes = phone.nodes()
-    pending = find_text(nodes, '待发货')
+    # 건수가 붙는다('待发货 1')
+    pending = next((n for n in nodes if n.text.strip().startswith('待发货')), None)
     if pending is None:
         return None
     phone.tap(pending.x, pending.y)
