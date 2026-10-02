@@ -163,12 +163,12 @@ describe('기록기', () => {
   })
 })
 
-describe('설정 키는 기기 전용이다', () => {
-  it('동기화 대상에 들어 있지 않다', () => {
+describe('설정 키는 계정에 따라온다', () => {
+  it('동기화 대상에 들어 있다', () => {
     const keys = SYNCED_SETTING_KEYS as readonly string[]
-    // 기록 켬/끔은 취향이라 따라오고, 숨긴 추천 목록은 이 PC 의 기록에 묶인다
+    // 사용자 2026-10-02 "모든 설정 다 동일하게" — 기록 켬/끔도, 숨긴 추천 목록도 PC 마다 같아야 한다
     expect(keys).toContain('activityRecording')
-    expect(keys).not.toContain('dismissedRecommendations')
+    expect(keys).toContain('dismissedRecommendations')
   })
 
   it('기본값은 기록 켬·숨김 없음이고, 깨진 값은 기본값으로 돌아간다', () => {

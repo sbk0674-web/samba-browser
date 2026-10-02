@@ -134,14 +134,19 @@ describe('폰 설정', () => {
 
   it('실행 파일 경로만 기기별 값이고, 나머지 폰 설정은 계정에 따라온다', () => {
     const synced: readonly string[] = SYNCED_SETTING_KEYS
-    for (const key of ['adbPath', 'scrcpyPath', 'phoneIgnoredSerials']) {
+    for (const key of ['adbPath', 'scrcpyPath']) {
       expect(synced).not.toContain(key)
     }
+    // 폰 목록·기본 폰·담당 계정·지운 폰도 따라온다(사용자 2026-10-02 "폰연동을 해놓으면 다른 PC 에서도 보여야")
     for (const key of [
       'phoneScreenMaxSize',
       'phoneScreenFps',
       'phoneAutoReconnect',
-      'phoneKeypadVisual'
+      'phoneKeypadVisual',
+      'phoneIgnoredSerials',
+      'defaultPhoneSerial',
+      'phoneRegistry',
+      'phoneAccountLinks'
     ]) {
       expect(synced).toContain(key)
     }

@@ -195,7 +195,25 @@ export const SYNCED_SETTING_KEYS = [
   'notifyTelegramChatId',
   'notifyOnDone',
   'notifyOnFailed',
-  'notifyOnAttention'
+  'notifyOnAttention',
+  // === 사용자 2026-10-02: "로그인한 PC 마다 설정이 다른 브라우저가 말이 되냐 — 모든 설정 다 동일하게" ===
+  // 화면 배치·확장 표시·추천 숨김도 따라간다. 남는 제외 대상은 그 PC 에만 맞는 값뿐이다:
+  // 실행 파일·폴더 경로(adbPath·scrcpyPath·captureDir·extensionPaths·extensionSources),
+  // 이 PC 의 CLI 로그인(aiConnections), 이 PC 의 하네스 연결(bridge*·harnessApiUrl), 동기화 접속 정보,
+  // 기기 키 기억(vaultRememberDevice), 마지막 주소·작업공간 번호·마이그레이션 표식
+  'panelWidth',
+  'sidebarWidth',
+  'sidebarCollapsed',
+  'panelCollapsed',
+  'extensionsPinned',
+  'disabledExtensionIds',
+  'extensionProfiles',
+  'dismissedRecommendations',
+  // 폰 연동 — 폰 목록·기본 폰·담당 계정·지운 폰(phone-registry.ts)
+  'defaultPhoneSerial',
+  'phoneIgnoredSerials',
+  'phoneRegistry',
+  'phoneAccountLinks'
 ] as const
 
 /**

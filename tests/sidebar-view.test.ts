@@ -144,10 +144,10 @@ describe('설정 라운드트립', () => {
     expect(s.agentEffort).toBe('medium')
   })
 
-  it('추론 강도는 동기화하고 사이드바 접힘은 기기 로컬로 둔다', () => {
+  it('추론 강도도 사이드바 접힘도 동기화한다(모든 설정은 PC 마다 같다)', () => {
     const synced: readonly string[] = SYNCED_SETTING_KEYS
     expect(synced).toContain('agentEffort')
-    expect(synced).not.toContain('sidebarCollapsed')
+    expect(synced).toContain('sidebarCollapsed')
     expect(synced).toContain('sidebarSections')
   })
 })

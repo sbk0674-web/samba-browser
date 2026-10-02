@@ -1,3 +1,4 @@
+import type { PhoneAccountLink, PhoneRegistryEntry } from './phone-registry'
 import { z } from 'zod'
 import {
   AI_PROVIDERS,
@@ -204,6 +205,9 @@ export const DEFAULT_SETTINGS = {
   // 사용자가 목록에서 지운 폰의 시리얼. 같은 와이파이에 있으면 5초 검색이 다시 찾아오므로 여기 적어 건너뛴다.
   // 주소 연결·페어링을 직접 하면 비운다. 이 PC 의 사정이라 SYNCED_SETTING_KEYS 에 넣지 않는다
   phoneIgnoredSerials: [] as string[],
+  // 폰 연동 동기화(phone-registry.ts) — 폰 목록과 계정↔담당 폰. 폰 표(로컬)의 사본이라 화면에서 직접 고치지 않는다
+  phoneRegistry: [] as PhoneRegistryEntry[],
+  phoneAccountLinks: [] as PhoneAccountLink[],
   // 결제 비밀번호 키패드 배치를 외부 AI(Visual)에게 물어볼지.
   // 켜면 키패드 화면 원본이 AI 제공자로 전송되므로 기본은 꺼짐이고,
   // 꺼져 있으면 UI 트리로 못 읽은 키패드는 사람에게 넘긴다
@@ -408,6 +412,24 @@ export const settingsSchema = z.object({
     .catch(DEFAULT_SETTINGS.phoneScreenFps),
   phoneAutoReconnect: z.boolean().catch(DEFAULT_SETTINGS.phoneAutoReconnect),
   phoneIgnoredSerials: z.array(z.string().max(120)).max(50).catch([]),
+  phoneRegistry: z
+    .array(
+      z.object({
+        serial: z.string().min(1).max(120),
+        label: z.string().max(80),
+        country: z.enum(['KR', 'CN', 'JP']).catch('KR'),
+        transport: z.enum(['usb', 'wifi']).catch('usb'),
+        wifiAddress: z.string().max(120).nullable().catch(null),
+        model: z.string().max(80).catch(''),
+        isDefault: z.boolean().catch(false)
+      })
+    )
+    .max(50)
+    .catch([]),
+  phoneAccountLinks: z
+    .array(z.object({ account: z.string().min(1).max(80), serial: z.string().min(1).max(120) }))
+    .max(2000)
+    .catch([]),
   phoneKeypadVisual: z.boolean().catch(DEFAULT_SETTINGS.phoneKeypadVisual),
   // === 폰 연동 끝 =============================================================
   // === 마우스 제스처 ==========================================================
