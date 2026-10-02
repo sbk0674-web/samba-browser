@@ -118,8 +118,34 @@ class Phone:
         return done.stdout.decode('utf-8', 'replace')
 
     def nodes(self) -> list[Node]:
-        self._run('shell', 'uiautomator', 'dump', '/sdcard/samba_ui.xml')
-        return parse_nodes(self._run('shell', 'cat', '/sdcard/samba_ui.xml'))
+        """지금 화면의 요소들. 덤프가 실패하면(화면 전환 중·보안 창) 지난 파일을 읽지 않고 몇 번 다시 뜬다.
+
+        실기 2026-10-03: 得物이 앞인데 덤프가 실패해 지난 카카오톡 화면 xml 을 읽었고 '검색창을 못 찾았다'로 멈췄다.
+        """
+        for _ in range(4):
+            self._run('shell', 'rm', '-f', '/sdcard/samba_ui.xml')
+            out = self._run('shell', 'uiautomator', 'dump', '/sdcard/samba_ui.xml')
+            xml = self._run('shell', 'cat', '/sdcard/samba_ui.xml')
+            if '<?xml' in xml or '<hierarchy' in xml:
+                # 뒤로 간 카카오톡이 덤프를 가로채는 일이 있다(실기 2026-10-03: 홈 화면인데 카카오톡 친구 목록이 읽힘,
+                # 다른 앱이 앞에 있어도 계속). 그 패키지를 끝내고 다시 뜬다 — 한 번만
+                pkg = re.search(r'package="([\w.]+)"', xml)
+                top = self.top_package()
+                if (
+                    pkg
+                    and top
+                    and pkg.group(1) == KAKAO != top
+                    and not getattr(self, '_kakao_killed', False)
+                ):
+                    self._kakao_killed = True
+                    self._run('shell', 'am', 'force-stop', KAKAO)
+                    time.sleep(1.5)
+                    continue
+                return parse_nodes(xml)
+            if 'ERROR' not in out and 'No such file' not in xml:
+                break
+            time.sleep(1.0)
+        return []
 
     def top_package(self) -> str:
         out = self._run('shell', 'dumpsys', 'activity', 'activities')

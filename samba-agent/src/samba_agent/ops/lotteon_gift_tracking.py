@@ -233,6 +233,8 @@ def collect_lotteon_gift_tracking(
     )
     phone.key('4')
     phone.key('3')  # HOME
+    # 뒤에 남은 카카오톡이 다른 앱의 화면 덤프를 가로챈다(실기 2026-10-03) — 다 읽었으면 끝낸다
+    phone._run('shell', 'am', 'force-stop', KAKAO)
     if notices is None:
         return None
     out = {'read': 0, 'sent': 0, 'skipped': 0}
