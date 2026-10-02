@@ -33,8 +33,14 @@ export interface BaselineDeps {
 }
 
 const CHUNK = 200
+/** 서버 전체 읽기의 쪽 수 상한(쪽당 500행) — 끝없이 돌지 않게 */
+const MAX_FETCH_PAGES = 400
 
-/** 서버의 그 표를 이 작업공간 범위로 전부 읽는다(삭제 표식 포함) */
+/**
+ * 서버의 그 표를 이 작업공간 범위로 전부 읽는다(삭제 표식 포함).
+ * 백엔드는 커서와 같은 시각의 행을 받은 뒤에 걸러 내므로, 돌려준 행 수가 한 쪽 크기보다 적어도
+ * 뒤에 더 있을 수 있다(같은 시각의 행이 수천 개일 때). 빈 쪽이 올 때까지 읽는다
+ */
 async function fetchAll(
   backend: SyncBackend,
   table: string,
@@ -42,13 +48,12 @@ async function fetchAll(
 ): Promise<RemoteRow[]> {
   const out: RemoteRow[] = []
   let cursor: { ts: number; id: string | null } = { ts: 0, id: null }
-  for (;;) {
+  for (let page = 0; page < MAX_FETCH_PAGES; page += 1) {
     const rows = await backend.select(table, cursor, workspaceId, PULL_PAGE_SIZE)
     if (rows.length === 0) break
     out.push(...rows)
     const last = rows[rows.length - 1]
     cursor = { ts: fromIso(last.updated_at), id: last.id }
-    if (rows.length < PULL_PAGE_SIZE) break
   }
   return out
 }
