@@ -43,6 +43,8 @@ _BEFORE_SHIP_STATES = {'wait_ship', 'preparing'}
 SOURCE_CHECK_SITES = {'MUSINSA'}
 SOURCE_CHECKS_PER_CYCLE = 3
 SOURCE_RECHECK_HOURS = 6
+# 주문접수로 이만큼 넘게 남으면 방치로 보고 알린다
+STALE_PENDING_HOURS = 6
 # 로그에서 되살린 줄의 restored_at 표시 — 자동으로 되돌리지 않는다
 BACKFILLED = 'backfill'
 DEFAULT_INTERVAL_S = 600.0
@@ -284,7 +286,46 @@ class CrossChecker:
                 except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
                     _log.exception('교차 검증 알림 실패')
         self._check_sources(before_ship)
+        self._check_stale_pending()
         return all_found
+
+    def _check_stale_pending(self) -> None:
+        """주문접수로 오래 남은 주문을 알린다 — 소싱처를 못 찾아 수집에도 안 잡힌 채 방치되는 주문이 있었다.
+
+        실기 2026-10-02: KT알파 10/1 주문이 소싱처 미등록으로 하루 넘게 주문접수에 남아 취소 판단이 빠졌다.
+        이행하거나 근거를 남겨 취소중으로 넘겨야 한다(마켓별 절차는 사람이 잇는다). 주문마다 하루에 한 번만 알린다.
+        """
+        from samba_agent.wave.client import WaveError
+
+        try:
+            pending = self._wave.pending_orders(days=7)
+        except WaveError:
+            return
+        now = datetime.now(UTC)
+        today = now.date().isoformat()
+        old: list[str] = []
+        for order in pending:
+            if (order.status or 'pending').strip().lower() != 'pending' or order.paid_at is None:
+                continue
+            paid = order.paid_at if order.paid_at.tzinfo else order.paid_at.replace(tzinfo=UTC)
+            hours = (now - paid).total_seconds() / 3600
+            if hours < STALE_PENDING_HOURS or (order.order_number, 'stale', today) in self._told:
+                continue
+            self._told.add((order.order_number, 'stale', today))
+            source = (order.source_site or '').strip() or '소싱처 미등록'
+            old.append(f'{order.order_number} ({order.seller or "-"} · {source} · {hours:.0f}시간째)')
+        if not old:
+            return
+        text = (
+            f'⚠ [교차 검증] 주문접수로 {STALE_PENDING_HOURS}시간 넘게 남은 주문 {len(old)}건 — 이행하거나 근거를 남겨 취소중으로 넘겨야 한다\n'
+            + '\n'.join(old[:30])
+        )
+        _log.warning(text)
+        if self._alert is not None:
+            try:
+                self._alert(text)
+            except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
+                _log.exception('교차 검증 알림 실패')
 
     def _check_sources(self, rows: list[LedgerRow]) -> None:
         """아직 발송 전인 이행 주문의 소싱처 주문이 취소됐는지 본다(한 주기에 몇 건씩, 주문 작업이 없을 때만).

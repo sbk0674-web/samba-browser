@@ -54,6 +54,9 @@ class _Wave:
     def record_sourcing(self, order_no, **kw):
         self.written.append({'order_no': order_no, **kw})
 
+    def pending_orders(self, days=7, limit=100):
+        return getattr(self, 'pending', [])
+
 
 def test_덮어쓴_값은_한_번만_되돌리고_알린다(tmp_path):
     ledger = _ledger(tmp_path)
@@ -122,3 +125,18 @@ def test_주문_작업이_돌면_소싱처를_열지_않고_취소_요청은_알
     asked = CrossChecker(ledger, _Wave(_order()), alerts.append, source_status=lambda r: '취소 요청', idle=lambda: True)  # type: ignore[arg-type]
     asked.run_once()
     assert alerts == []
+
+
+def test_주문접수로_오래_남은_주문을_하루에_한_번_알린다(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    wave = _Wave(_order())
+    wave.pending = [
+        WaveOrder.model_validate({'order_number': 'OLD1', 'status': 'pending', 'seller': 'KT알파', 'paid_at': datetime.now(UTC) - timedelta(hours=30)}),
+        WaveOrder.model_validate({'order_number': 'NEW1', 'status': 'pending', 'paid_at': datetime.now(UTC) - timedelta(hours=1)}),
+    ]  # fmt: skip
+    alerts: list[str] = []
+    checker = CrossChecker(Ledger(tmp_path / 'ledger.sqlite'), wave, alerts.append)  # type: ignore[arg-type]
+    checker.run_once()
+    checker.run_once()
+    assert len(alerts) == 1 and 'OLD1' in alerts[0] and 'NEW1' not in alerts[0] and '소싱처 미등록' in alerts[0]
