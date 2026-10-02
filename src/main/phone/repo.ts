@@ -5,9 +5,9 @@
 // (senderTail)와 지표에 필요한 값만 남긴다. 인증번호는 화면에 채우는 그 순간에만
 // 메모리에 있고, 저장할 때는 자리수만 남기고 버린다(I20)
 
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { accountPhones, authEvents, phones } from '../db/schema'
+import { accountPhones, accounts, authEvents, phones } from '../db/schema'
 import type {
   AuthEventDto,
   AuthEventKind,
@@ -132,6 +132,59 @@ export class PhoneRepo {
       .run()
     this.d.delete(phones).where(eq(phones.id, alias.id)).run()
     this.db.scheduleSave()
+  }
+
+  /**
+   * 다른 PC 에서 연동한 폰을 이 PC 의 목록에 올린다(동기화). 아직 이 PC 에서 본 적이 없으므로
+   * 마지막으로 본 시각은 0 — 연결 안 됨으로 보이고, 와이파이 주소가 있으면 자동 재연결이 붙는다
+   */
+  insertKnown(input: {
+    serial: string
+    label: string
+    country: PhoneCountry
+    transport: PhoneTransport
+    wifiAddress: string | null
+    model: string
+  }): void {
+    const existing = this.d.select().from(phones).where(eq(phones.serial, input.serial)).get()
+    if (existing) return
+    this.d
+      .insert(phones)
+      .values({
+        serial: input.serial,
+        label: input.label,
+        country: input.country,
+        transport: input.transport,
+        wifiAddress: input.wifiAddress,
+        model: input.model,
+        lastSeenAt: 0
+      })
+      .run()
+    this.db.scheduleSave()
+  }
+
+  /** 담당 폰이 걸린 계정 목록 — 계정은 원격 id 로(로컬 번호는 PC 마다 다르다). 아직 안 올라간 계정은 뺀다 */
+  accountLinks(): Array<{ account: string; serial: string }> {
+    const rows = this.d
+      .select({ account: accounts.remoteId, serial: phones.serial })
+      .from(accountPhones)
+      .innerJoin(accounts, eq(accounts.id, accountPhones.accountId))
+      .innerJoin(phones, eq(phones.id, accountPhones.phoneId))
+      .where(isNull(accounts.deletedAt))
+      .all()
+    return rows
+      .filter((r): r is { account: string; serial: string } => typeof r.account === 'string')
+      .sort((a, b) => a.account.localeCompare(b.account))
+  }
+
+  /** 원격 id 로 살아 있는 계정의 로컬 번호를 찾는다(없으면 null) */
+  accountIdByRemote(remoteId: string): number | null {
+    const row = this.d
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(and(eq(accounts.remoteId, remoteId), isNull(accounts.deletedAt)))
+      .get()
+    return row ? row.id : null
   }
 
   /** 폰 줄과 그 폰에 걸린 담당 계정 매핑을 지운다(인증 기록은 남긴다) */

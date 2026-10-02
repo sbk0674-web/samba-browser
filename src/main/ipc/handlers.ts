@@ -24,6 +24,7 @@ import {
 import { join } from 'node:path'
 import { readdirSync } from 'node:fs'
 import { profileNames } from '../../shared/profiles'
+import { PHONE_SYNC_KEYS, PhoneRegistrySync } from '../phone/registry-sync'
 import * as os from 'node:os'
 import { IPC, type IpcResult, type Layout, type Settings } from '../../shared/ipc'
 import { defaultTabUrl } from '../../shared/settings'
@@ -1429,17 +1430,46 @@ export function registerIpc(
   // 비밀번호 화면 표식(결제 실행기가 갱신 → 화면 전송이 참조)과 ARS 진행 로그 중계
   const phoneSecretGate = new SecretScreenGate()
   const phoneProgress = new AgentProgressRelay()
+  // 폰 연동 동기화 — 폰 목록·담당 계정을 계정 설정에 실어 다른 PC 에서도 보이게 한다(registry-sync.ts)
+  const phoneRegistry = new PhoneRegistrySync({ repo: phoneRepo, settings })
+  let phonePublishTimer: NodeJS.Timeout | null = null
+  const publishPhonesSoon = (): void => {
+    if (phonePublishTimer) clearTimeout(phonePublishTimer)
+    phonePublishTimer = setTimeout(() => {
+      try {
+        phoneRegistry.publish()
+      } catch (e: unknown) {
+        console.warn('폰 목록 동기화 실패', e instanceof Error ? e.message : String(e))
+      }
+    }, 2000)
+  }
   const phones = new PhoneService({
     adb: phoneAdb,
     repo: phoneRepo,
     settings,
     toolsRoot: phoneToolsRoot,
-    emit: (list, warning) => send(IPC.phoneUpdated, { list, warning }),
+    emit: (list, warning) => {
+      send(IPC.phoneUpdated, { list, warning })
+      publishPhonesSoon()
+    },
     emitAuthWaiting: (dto) => send(IPC.phoneAuthWaiting, dto),
     onProgress: (t) => phoneProgress.emit(t)
   })
   phones.start()
-  win.once('closed', () => phones.dispose())
+  win.once('closed', () => {
+    if (phonePublishTimer) clearTimeout(phonePublishTimer)
+    phones.dispose()
+  })
+  // 켤 때 한 번 맞추고, 다른 PC 의 변경이 내려오면 다시 맞춘다
+  publishPhonesSoon()
+  settings.onSynced((keys) => {
+    if (!keys.some((k) => PHONE_SYNC_KEYS.includes(k))) return
+    try {
+      if (phoneRegistry.applyRemote()) void phones.refresh()
+    } catch (e: unknown) {
+      console.warn('받은 폰 목록 반영 실패', e instanceof Error ? e.message : String(e))
+    }
+  })
 
   handleFromRenderer(IPC.phoneList, () => phones.list())
   handleFromRenderer(IPC.phoneRefresh, () => phones.refresh())
@@ -1454,9 +1484,11 @@ export function registerIpc(
   handleFromRenderer(IPC.phoneSetLabel, (id: number, label: string, country: string) =>
     phones.setLabel(id, label, country)
   )
-  handleFromRenderer(IPC.phoneAssign, (accountId: number, phoneId: number | null) =>
+  handleFromRenderer(IPC.phoneAssign, (accountId: number, phoneId: number | null) => {
     phones.assign(accountId, phoneId)
-  )
+    // 담당 폰도 다른 PC 로 따라간다
+    publishPhonesSoon()
+  })
   handleFromRenderer(IPC.phoneAssigned, (accountId: number) => phones.assignedPhoneId(accountId))
   handleFromRenderer(IPC.phoneAuthEvents, (limit?: number) => phones.authEvents(limit))
   // 폰 연동 프로그램 원클릭 설치 — 내려받기·해제·설정 저장까지 메인에서만 한다
