@@ -40,6 +40,8 @@ log = logging.getLogger(__name__)
 ROOM = '롯데ON'
 PREFIX = '[롯데ON]'
 INTERVAL_S = 60 * 60  # 사용자 2026-10-03 "루프 1시간으로"
+RETRY_S = 10 * 60  # 방을 못 열었을 때 다시 보기까지
+PHONE_HOLD_FILE = 'PHONE_HOLD'  # 상태 폴더에 이 파일이 있으면 폰에 손대지 않는다
 # 방을 위로 올려 보는 쪽 수 — 한 쪽에 알림 두세 개가 보인다
 MAX_PAGES = 14
 # 새 알림이 없는 쪽이 이만큼 이어지면 그만 올린다
@@ -322,6 +324,8 @@ def start_lotteon_gift_tracking_loop(
     adb_path = adb or os.environ.get('SAMBA_ADB') or DEFAULT_ADB
     want = phone_serial or os.environ.get('SAMBA_PAY_PHONE') or DEFAULT_PHONE
     seen = SeenStore(state_dir / SEEN_FILE)
+    # 사람이(또는 다른 세션이) 폰을 직접 만지는 동안 만들어 두는 파일 — 있으면 폰에 손대지 않는다
+    hold = state_dir / PHONE_HOLD_FILE
 
     def loop() -> None:
         # 켜자마자 한 번 돈다 — 재시작이 잦은 날에도 밀리지 않게
@@ -330,7 +334,7 @@ def start_lotteon_gift_tracking_loop(
             time.sleep(wait)
             wait = INTERVAL_S
             try:
-                if not idle():
+                if not idle() or hold.exists():
                     wait = 120.0  # 작업이 끝나는 대로 다시 본다
                     continue
                 serial = find_phone_serial(adb_path, want)
@@ -341,9 +345,10 @@ def start_lotteon_gift_tracking_loop(
                         wave, Phone(adb_path, serial), seen, idle=idle
                     )
                 if res is None:
-                    wait = 120.0
+                    # 2분마다 다시 열면 폰을 쓰는 다른 작업(앱 결제 등)과 계속 부딪친다(2026-10-03)
+                    wait = RETRY_S
                     log.info(
-                        '[롯데ON 선물 송장] 방을 못 열었거나 주문 작업이 시작돼 멈춤 — 곧 다시'
+                        '[롯데ON 선물 송장] 방을 못 열었거나 주문 작업이 시작돼 멈춤 — 10분 뒤 다시'
                     )
                 else:
                     log.info(
