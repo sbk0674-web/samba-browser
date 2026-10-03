@@ -477,6 +477,26 @@ export class VaultRepo {
    *   2개 이상이면 어느 결제창인지 알 수 없으므로 'ambiguous' 다 —
    *   잘못 누르면 계정이 잠기므로 절대 임의로 고르지 않는다
    */
+  /** 계정의 카드 항목(type 'card'). 하나면 그것, 없으면 not-found, 둘 이상이면 ambiguous — 임의로 고르지 않는다 */
+  findCardItemRow(accountId: number): PaymentItemLookup {
+    const rows = this.d
+      .select()
+      .from(vaultItems)
+      .where(
+        and(
+          eq(vaultItems.accountId, accountId),
+          eq(vaultItems.type, 'card'),
+          isNull(vaultItems.deletedAt)
+        )
+      )
+      .orderBy(vaultItems.id)
+      .all()
+      .map(toItemRow)
+    if (rows.length === 1) return { row: rows[0] }
+    if (rows.length === 0) return { row: null, reason: 'not-found' }
+    return { row: null, reason: 'ambiguous' }
+  }
+
   findPaymentItemRow(accountId: number, provider?: PaymentProvider): PaymentItemLookup {
     const rows = this.listPaymentItemRows(accountId)
     if (provider) {

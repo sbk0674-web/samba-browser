@@ -59,6 +59,17 @@ export interface PayProviderSpec {
   keepIfForeground?: boolean
   /** 웹 결제창 없이 앱 안에서 끝나는 결제(식화·得物 → 알리페이) — 웹 성공 확인을 하지 않는다 */
   appOnly?: boolean
+  /**
+   * 비밀번호 뒤에 단계가 더 있는 결제(알리페이 국제카드: CVV → 결제 비밀번호 → 카드사 인증 → PIN).
+   * 비밀번호를 넣은 뒤 완료만 기다리지 않고 앱 단계(버튼·다음 비밀 화면)를 계속 따라간다
+   */
+  multiStep?: boolean
+  /** 카드 CVV 를 묻는 화면의 문구 — 계정 카드 항목의 card.cvc 를 누른다 */
+  cvvHint?: RegExp
+  /** 카드사 PIN(결제 비밀번호와 같은 값, 사용자 2026-10-03) 화면의 문구 — 결제 비밀번호를 한 번 더 누른다 */
+  pinHint?: RegExp
+  /** 진행이 막히는 화면(백신 설치 요구 등) — 보이면 누르지 않고 멈춘다 */
+  blockerHint?: RegExp
 }
 
 export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
@@ -108,12 +119,19 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     id: 'alipay',
     packageName: 'com.eg.android.AlipayGphone',
     deepLink: 'alipays://',
-    confirmText: /^(?:결제|확인|确认付款|立即付款|付款)$/,
-    passwordHint: /CVV를 입력|결제 ?비밀번호|支付密码|请输入/,
+    // 'PIN번호 결제' = 카드사(현대카드) 인증 화면에서 앱카드 대신 PIN 으로 간다(실기 2026-10-03 唯品会)
+    confirmText: /^(?:결제|확인|确认付款|立即付款|付款|PIN번호 결제)$/,
+    // 한국어 알리페이 결제창(唯品会 국제카드)은 '支付密码' 글자 없이 금액·수수료·숫자 키패드만 보인다(실기 2026-10-03)
+    passwordHint: /CVV를 입력|결제 ?비밀번호|支付密码|请输入|주문금액|국제카드 수수료/,
     successHint: /결제 ?(?:완료|성공)|支付成功|付款成功|完成/,
     openBy: 'app',
     keepIfForeground: true,
-    appOnly: true
+    appOnly: true,
+    multiStep: true,
+    // 'CVV를 입력하세요' 제목의 첫 화면은 실제로는 6자리 결제 비밀번호 키패드다(실기 2026-10-01 得物·10-03 唯品会)
+    // — 그래서 cvvHint 는 두지 않는다. 카드사(현대카드) PIN 화면은 3D 인증 페이지(Cruise API) 안의 보안 키패드다
+    pinHint: /Cruise API|PIN ?번호 ?입력|비밀번호를 입력/,
+    blockerHint: /백신 (?:앱을 )?설치|V3 백신|系统正忙/
   }
 }
 
@@ -335,7 +353,15 @@ export function nextPayState(
     case 'password':
       return hasText(screen, spec.successHint) ? { state: 'verify' } : { state: 'password' }
     case 'verify':
-      return hasText(screen, spec.successHint) ? { state: 'done' } : { state: 'verify' }
+      if (hasText(screen, spec.successHint)) return { state: 'done' }
+      // 비밀번호 뒤에 카드사 인증이 더 있는 결제는 다음 화면(버튼·비밀 화면)을 계속 따라간다
+      if (
+        spec.multiStep &&
+        (isSecretScreen(screen, spec) || findConfirm(screen, spec.confirmText) !== undefined)
+      ) {
+        return stepInApp(screen, spec)
+      }
+      return { state: 'verify' }
     default:
       return { state }
   }
@@ -352,6 +378,10 @@ export type PayFailReason =
   | 'stuck'
   // 지정한 카드가 결제 앱의 카드 목록에 없다(다른 카드로 결제하지 않고 멈춘다)
   | 'card-not-found'
+  // CVV 를 물었는데 계정에 카드 항목(card.cvc)이 없거나 둘 이상이다
+  | 'card-not-saved'
+  // 카드사 인증이 백신 앱 설치 등 사람만 할 수 있는 것을 요구한다
+  | 'blocked-by-app'
   // 배선부가 실행기에 닿기도 전에 막는 두 가지(계정 특정 실패·연결된 폰 없음)
   | 'no-account'
   | 'no-phone'
@@ -598,13 +628,20 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
     if (!(await openPayNotification(deps, req.serial, spec))) {
       await deps.launchApp(req.serial, spec.deepLink)
     }
-  } else if (!(spec.keepIfForeground && (await deps.phones.screen(req.serial)).app === spec.packageName)) {
+  } else if (!(
+    spec.keepIfForeground && (await deps.phones.screen(req.serial)).app === spec.packageName
+  )) {
     await deps.launchApp(req.serial, spec.deepLink)
   }
 
   let state: PayState = 'await_app'
   let lastTapped: number | null = null
   let passwordTried = false
+  // CVV·카드사 PIN 을 넣은 적이 있는가(알리페이 국제카드) — 결제 비밀번호와 따로 센다
+  let cvvTried = false
+  let pinTried = false
+  // 마지막으로 비밀(결제 비밀번호·CVV·PIN)을 넣은 차례 — 넣은 직후 같은 화면이 남아 있는 동안은 기다린다
+  let secretAt = -1
   // 앱 잠금 화면에 넣은 적이 있는가 — 결제 비밀번호 입력과 따로 센다
   let unlockTried = false
   let unlockedAt = -1
@@ -625,8 +662,55 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
     screen = await deps.phones.screen(req.serial)
     const next = nextPayState(state, screen, spec)
     state = next.state
+    // 비밀 화면을 벗어났으면 입력 직후 유예도 끝난다 — 다음 비밀 화면(카드사 PIN)은 새로 센다
+    if (state !== 'password') secretAt = -1
+
+    if (spec.blockerHint && hasText(screen, spec.blockerHint)) return fail('blocked-by-app', screen)
 
     if (state === 'password') {
+      // 알리페이 국제카드: CVV → 결제 비밀번호 → 카드사 PIN(=결제 비밀번호) 순서로 비밀 화면이 셋 온다. 각각 한 번씩만
+      const cvv = spec.cvvHint !== undefined && hasText(screen, spec.cvvHint)
+      // PIN 은 보안 입력칸이 있는 화면에서만 — 'PIN번호 결제' 를 고르는 안내 화면은 버튼을 눌러야 한다
+      const pin =
+        !cvv &&
+        spec.pinHint !== undefined &&
+        hasText(screen, spec.pinHint) &&
+        screen.elements.some((e) => e.isSecret)
+      // 비밀을 넣은 직후에는 화면이 넘어가는 동안 같은 화면이 잠깐 더 보인다 — 그동안은 기다리기만 한다
+      if (secretAt >= 0 && i - secretAt <= UNLOCK_GRACE_POLLS) {
+        await sleep(PAY_POLL_MS)
+        continue
+      }
+      if (cvv || pin) {
+        if (cvv ? cvvTried : pinTried) return fail('verify-failed', screen)
+        secretAt = i
+        if (cvv) cvvTried = true
+        else pinTried = true
+        const layout = await resolveKeypad(deps, screen, req.serial, (v) => (usedVisual = v))
+        if (!layout) return handOff(screen)
+        const r = await tapPassword({
+          vault: deps.vault,
+          accountId: req.accountId,
+          provider: PAY_APP_TO_PAYMENT_PROVIDER[req.provider],
+          ...(req.jobId === undefined ? {} : { jobId: req.jobId }),
+          serial: req.serial,
+          layout,
+          tap: deps.phones.tap,
+          onStep: deps.onStep,
+          secret: cvv ? 'card-cvc' : 'payment'
+        })
+        if (r !== 'ok') {
+          return fail(
+            cvv && (r === 'not-found' || r === 'ambiguous') ? 'card-not-saved' : SECRET_FAIL[r],
+            screen
+          )
+        }
+        deps.onStep(tr(cvv ? 'phone.payCvvTyped' : 'phone.payPinTyped'), true)
+        state = cvv ? 'app_steps' : 'verify'
+        lastTapped = null
+        await sleep(PAY_POLL_MS)
+        continue
+      }
       // 앱 잠금 화면인가(앱을 켤 때 먼저 묻는 비밀번호). 잠금 1회 + 결제 1회, 어느 쪽도 재시도하지 않는다 —
       // 같은 화면이 두 번째로 보이면 잘못 눌린 것으로 본다(오답이 쌓이면 잠긴다)
       const unlocking = spec.unlockHint !== undefined && hasText(screen, spec.unlockHint)
@@ -636,6 +720,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
         continue
       }
       if (unlocking ? unlockTried : passwordTried) return fail('verify-failed', screen)
+      if (!unlocking) secretAt = i
       if (unlocking) unlockedAt = i
       if (unlocking) unlockTried = true
       else passwordTried = true
@@ -665,8 +750,9 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
       if (r !== 'ok') return fail(SECRET_FAIL[r], screen)
       // 시험 입력이면 여기서 끝난다 — 이어서 누르지도, 완료를 기다리지도 않는다
       if (dryRun) return cancelDryRun(typedDigits)
-      // 잠금을 풀었으면 결제 화면을 마저 따라간다. 결제 비밀번호였으면 완료를 기다린다
-      state = unlocking ? 'app_steps' : 'verify'
+      // 잠금을 풀었으면 결제 화면을 마저 따라간다. 결제 비밀번호였으면 완료를 기다린다 —
+      // 단계가 더 있는 결제(알리페이 국제카드)는 카드사 인증 버튼·PIN 화면을 계속 따라간다
+      state = unlocking || spec.multiStep ? 'app_steps' : 'verify'
       lastTapped = null
       await sleep(PAY_POLL_MS)
       continue

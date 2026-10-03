@@ -23,6 +23,12 @@ export interface PaySecretVault {
     fieldKey?: string
     jobId?: string
   }) => PaymentSecretResult
+  /** 카드 항목의 비밀 필드(card.cvc). 알리페이 국제카드 결제의 CVV 화면에 쓴다 */
+  getCardSecretForFill?: (args: {
+    accountId: number
+    fieldKey: string
+    jobId?: string
+  }) => PaymentSecretResult
 }
 
 /** 키패드 배치를 구하는 두 경로. UI 트리를 먼저 보고, 실패하면 Visual 에게 묻는다 */
@@ -57,16 +63,27 @@ export async function tapPaymentPassword(deps: {
   maxDigits?: number
   /** 실제로 누른 자리수. 값이 아니라 개수만 알린다(호출부는 비밀번호 길이를 모른다) */
   onTyped?: (typed: number) => void
+  /** 'card-cvc' 면 결제 비밀번호 대신 계정 카드 항목의 CVC 를 누른다(알리페이 국제카드) */
+  secret?: 'payment' | 'card-cvc'
 }): Promise<PaySecretResult> {
   if (deps.vault.state() !== 'unlocked') return 'locked'
   // 금고 항목 종류 'password' = 결제 비밀번호(2단계 LEGACY_TYPE_MAP: payment_password → password).
   // 계정에 결제 수단이 여럿이므로 provider 로 어느 것인지 좁힌다
-  const found = deps.vault.getPaymentSecretForFill({
-    accountId: deps.accountId,
-    provider: deps.provider,
-    fieldKey: DEFAULT_FIELD_KEY,
-    ...(deps.jobId === undefined ? {} : { jobId: deps.jobId })
-  })
+  const found =
+    deps.secret === 'card-cvc'
+      ? deps.vault.getCardSecretForFill
+        ? deps.vault.getCardSecretForFill({
+            accountId: deps.accountId,
+            fieldKey: 'card.cvc',
+            ...(deps.jobId === undefined ? {} : { jobId: deps.jobId })
+          })
+        : { value: null, reason: 'not-found' as const }
+      : deps.vault.getPaymentSecretForFill({
+          accountId: deps.accountId,
+          provider: deps.provider,
+          fieldKey: DEFAULT_FIELD_KEY,
+          ...(deps.jobId === undefined ? {} : { jobId: deps.jobId })
+        })
   if (found.value === null) return found.reason === 'locked' ? 'locked' : found.reason
   if (found.value === '') return 'not-found'
   const digits = found.value.split('')

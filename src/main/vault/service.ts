@@ -1512,6 +1512,24 @@ export class VaultService {
     return { value: plain }
   }
 
+  /**
+   * 카드 항목의 비밀 필드(CVC 등) 조회 — **메인 프로세스 내부에서만** 호출한다.
+   * 알리페이 국제카드 결제가 CVV 를 먼저 묻는다(실기 2026-10-03 唯品会) — 계정에 카드 항목이 하나일 때만 읽는다
+   */
+  getCardSecretForFill(args: {
+    accountId: number
+    fieldKey: string
+    jobId?: string
+    source?: 'ai' | 'user'
+  }): PaymentSecretResult {
+    if (!this.key) return { value: null, reason: 'locked' }
+    const found = this.repo.findCardItemRow(args.accountId)
+    if (!found.row) return { value: null, reason: found.reason }
+    const plain = this.decryptForFill(found.row, args.fieldKey, args.jobId, args.source ?? 'ai')
+    if (plain === null) return { value: null, reason: 'not-found' }
+    return { value: plain }
+  }
+
   // 행 하나에서 secret 필드를 복호화하고 'fill' 감사 로그를 남긴다(평문은 반환값으로만 나간다)
   private decryptForFill(
     row: VaultItemRow,

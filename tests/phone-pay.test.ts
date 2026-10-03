@@ -910,3 +910,48 @@ describe('결제 화면이 아닌 곳에서는 아무것도 누르지 않는다(
     expect(cardPatternOf('KB국민카드').test('KB국민 톡톡')).toBe(true)
   })
 })
+
+describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', () => {
+  const ali = 'com.eg.android.AlipayGphone'
+  // 실기 2026-10-03: 결제 비밀번호 → 현대카드 인증 안내(앱카드/PIN 고르기) → PIN 보안 키패드 → 결제 완료
+  const pw = screen(ali, [el(2, '주문금액: ¥ 427.00', { clickable: false })])
+  const stepUp = screen(ali, [
+    el(3, 'Cruise API - Step Up', { clickable: false }),
+    el(4, '앱카드 결제'),
+    el(5, 'PIN번호 결제')
+  ])
+  const pinPad = screen(ali, [
+    el(6, 'Cruise API - Step Up', { clickable: false }),
+    el(7, '', { isSecret: true, clickable: false })
+  ])
+  const done = screen(ali, [el(8, '결제 완료', { clickable: false })])
+
+  it('비밀번호 뒤 카드사 인증 안내에서 PIN번호 결제를 누르고, PIN 키패드에 결제 비밀번호를 한 번 더 넣는다', async () => {
+    const h = harness({
+      screens: [pw, pw, stepUp, stepUp, pinPad, pinPad, done, done],
+      webSuccess: false
+    })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+
+    expect(r).toEqual({ ok: true })
+    expect(h.tapPassword).toHaveBeenCalledTimes(2)
+    expect(h.tapPassword.mock.calls[1][0]).toMatchObject({ provider: 'alipay', secret: 'payment' })
+    // 'PIN번호 결제' 버튼(5) 을 눌렀다
+    expect(h.taps.some(([, x, y]) => x === 100 && y === 530)).toBe(true)
+  })
+
+  it('안내 화면(PIN번호 결제 고르기)은 비밀번호 화면이 아니다 — 버튼을 누른다', () => {
+    const next = nextPayState('verify', stepUp, PAY_PROVIDERS.alipay)
+    expect(next).toEqual({ state: 'app_steps', tapElementId: 5 })
+  })
+
+  it('카드사 인증이 백신 설치를 요구하면 누르지 않고 blocked-by-app 으로 멈춘다', async () => {
+    const blocked = screen(ali, [
+      el(9, '결제를 진행하려면 백신 V3 백신 설치하기', { clickable: false })
+    ])
+    const h = harness({ screens: [pw, pw, blocked, blocked], webSuccess: false })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+    expect(r).toMatchObject({ ok: false, reason: 'blocked-by-app' })
+    expect(h.tapPassword).toHaveBeenCalledTimes(1)
+  })
+})
