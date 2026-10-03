@@ -27,6 +27,14 @@ DEFAULT_PHONE = 'R5CR30LFATY'
 KAKAO = 'com.kakao.talk'
 # 폰을 쓰는 주기 작업(得物 송장·롯데ON 선물 송장)이 서로 겹치지 않게 잡는 자물쇠
 PHONE_BUSY = threading.Lock()
+# 사람이(또는 다른 세션이) 폰을 직접 만지는 동안 samba-agent 폴더에 만들어 두는 파일 — 있으면 주기 작업이 폰에 손대지 않는다
+PHONE_HOLD_FILE = 'PHONE_HOLD'
+_AGENT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def phone_on_hold() -> bool:
+    """PHONE_HOLD 파일이 있으면 True(2026-10-03: 得物 송장 루프가 앱 결제 중인 폰을 가로채 결제가 끊겼다)."""
+    return os.path.exists(os.path.join(_AGENT_ROOT, PHONE_HOLD_FILE))
 CHANNEL = 'SSG닷컴'
 GO_GIFT = '선물 받으러 가기'
 CHECK_BTN = '옵션/배송지 확인'

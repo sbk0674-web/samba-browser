@@ -13,7 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from samba_agent.ops.ssg_gift_accept import PHONE_BUSY, Node, Phone, find_text
+from samba_agent.ops.ssg_gift_accept import PHONE_BUSY, Node, Phone, find_text, phone_on_hold
 
 log = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ def start_dewu_tracking_loop(
         while True:
             time.sleep(INTERVAL_S)
             try:
-                if not idle():
+                if not idle() or phone_on_hold():
                     continue
                 if not wave.dewu_tracking_targets():  # type: ignore[attr-defined]
                     continue
