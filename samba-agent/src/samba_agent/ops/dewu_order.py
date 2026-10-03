@@ -167,17 +167,23 @@ def buy_on_dewu(
     if go is None:
         raise DewuOrderError('得物 검색 버튼(搜索)을 못 찾았다')
     phone.tap(go.x, go.y)
+
     # 2) 결과의 '商品' 카드 → 상품 화면
-    nodes = wait_for(lambda ns: find_text(ns, '商品') is not None, 15)
-    title = find_text(nodes, '商品')
-    card = next(
-        (
-            n
-            for n in sorted(nodes, key=lambda n: n.y)
-            if title and n.y > title.y and _PRICE.match(n.text.replace(' ', ''))
-        ),
-        None,
-    )
+    # '商品' 탭·머리글은 결과보다 먼저 그려진다 — 가격 카드가 보일 때까지 기다린다(실기 2026-10-03: 머리글만 보고
+    # '상품이 없다'로 끝났다)
+    def _first_card(ns: list[Node]) -> Node | None:
+        title = find_text(ns, '商品')
+        return next(
+            (
+                n
+                for n in sorted(ns, key=lambda n: (n.y, n.x))
+                if title and n.y > title.y and _PRICE.match(n.text.replace(' ', ''))
+            ),
+            None,
+        )
+
+    nodes = wait_for(lambda ns: _first_card(ns) is not None, 20)
+    card = _first_card(nodes)
     if card is None:
         raise DewuOrderError(f'得物 검색 결과에 {model} 상품이 없다')
     phone.tap(card.x, card.y)
