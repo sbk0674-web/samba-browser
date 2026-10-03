@@ -1830,3 +1830,34 @@ def test_목록에_없는_배송지는_스크립트_고장이_아니다():
     # 창을 못 열었거나 다른 사유는 고장일 수 있다 — 수리로 넘긴다
     assert not shipping_not_listed({'ok': False, 'note': '배송지 변경 버튼 없음'})
     assert not shipping_not_listed({'ok': True, 'note': None})
+
+
+def test_같은_값이면_보유_적립금_많은_계정으로_바꾼다(reg, monkeypatch):
+    """사용자 2026-10-03: 동일 조건이면 무신사 적립금 많은 계정 — 같은 값 계정들을 마저 견적해 잔액이 가장 큰 쪽."""
+    mus = agent(reg, lambda _p, _m: '{}')
+    mus.evidence = []
+    mus._quick_scores = {'buyer01': 50000.0, 'buyer02': 50000.0, 'buyer03': 50000.0, 'buyer04': 52000.0}
+    batches: list[list[str]] = []
+
+    def fake_batch(self, a, accounts):
+        batches.append(list(accounts))
+        return [
+            ('buyer02', {'cost': 50000, 'points_balance': 120000, 'points_used': 20000}),
+            ('buyer03', {'cost': 50000, 'points_balance': 300000, 'points_used': 20000}),
+        ]
+
+    monkeypatch.setattr(BuyerAgent, '_quote_batch', fake_batch)
+    monkeypatch.setattr(BuyerAgent, '_audit_quotes', lambda self, a, q: q)
+    monkeypatch.setattr(BuyerAgent, '_payable_only', lambda self, q: q)
+    a = assignment(reg)
+    quotes = [('buyer01', {'cost': 50000, 'points_balance': 80000, 'points_used': 20000})]
+    out = mus._prefer_points_user(a, quotes, ['buyer01', 'buyer02', 'buyer03', 'buyer04'], ['buyer01'])
+    assert batches == [['buyer02', 'buyer03']]  # buyer04 는 값이 달라 안 본다
+    assert out == [('buyer03', {'cost': 50000, 'points_balance': 300000, 'points_used': 20000})]
+
+    # 이긴 계정 잔액이 가장 많으면 그대로
+    mus.evidence = []
+    quotes = [('buyer01', {'cost': 50000, 'points_balance': 500000, 'points_used': 20000})]
+    out = mus._prefer_points_user(a, quotes, ['buyer01', 'buyer02', 'buyer03'], ['buyer01'])
+    assert out == quotes
+

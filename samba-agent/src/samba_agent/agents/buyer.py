@@ -3369,38 +3369,41 @@ class BuyerAgent(AgentBase):
             return (
                 quotes  # 보유 적립금을 못 읽었으면 판단하지 않는다(모르는 값을 0 으로 보지 않는다)
             )
-        used = _as_float(snap.get('points_used'))
         balance = _as_float(snap.get('points_balance'))
-        if used > 0 or balance >= POINTS_USE_MIN or acc not in scores:
+        if acc not in scores:
             return quotes
         tied = [b for b in ranked if b != acc and b not in tried and scores.get(b) == scores[acc]]
         if not tied:
             return quotes
-        other = tied[0]
+        # 같은 값인 계정들을 마저 견적해 보유 적립금이 가장 많은 쪽을 고른다
+        # (사용자 2026-10-03 "동일 조건이면 무신사 적립금 많은 계정"). 견적이 계정 수만큼 더 든다
         self.note(
             '계정 전환',
-            f'{acc}: 적립금 {balance:,.0f}원(5만 미만)이라 못 쓴다 — 같은 값 {other} 의 적립금 사용을 본다',
+            f'{acc}: 적립금 {balance:,.0f}원 — 같은 값 {", ".join(tied)} 의 적립금을 견줘 본다',
         )
-        tried.append(other)
+        tried.extend(tied)
         try:
-            got = self._payable_only(self._audit_quotes(a, self._quote_batch(a, [other])))
+            got = self._payable_only(self._audit_quotes(a, self._quote_batch(a, tied)))
         except AgentFailure as e:
             self.note(
-                '계정 전환', mask_text(f'{other}: 견적 불가({e.reason[:60]}) — {acc} 로 산다')
+                '계정 전환', mask_text(f'{", ".join(tied)}: 견적 불가({e.reason[:60]}) — {acc} 로 산다')
             )
             return quotes
-        if not got:
+        cost = _as_float(snap.get('cost'))
+        # 원가가 더 비싸지 않은 것만 — 적립금은 원가에 더하므로 원가 자체가 같아야 바꾸는 뜻이 있다
+        same = [(b, s) for b, s in got if _as_float(s.get('cost')) <= cost]
+        if not same:
+            self.note('계정 전환', f'같은 값 계정이 더 비싸거나 견적 없음 — {acc} 로 산다')
             return quotes
-        acc2, snap2 = got[0]
-        if _as_float(snap2.get('points_used')) > 0 and _as_float(snap2.get('cost')) <= _as_float(
-            snap.get('cost')
-        ):
+        acc2, snap2 = max(same, key=lambda q: _as_float(q[1].get('points_balance')))
+        if _as_float(snap2.get('points_balance')) > balance:
             self.note(
                 '계정 선택',
-                f'{acc2} — 원가 같고 적립금 {_as_float(snap2.get("points_used")):,.0f}원 사용',
+                f'{acc2} — 원가 같고 보유 적립금 {_as_float(snap2.get("points_balance")):,.0f}원'
+                f'(사용 {_as_float(snap2.get("points_used")):,.0f}원)으로 가장 많다',
             )
-            return got
-        self.note('계정 전환', f'{acc2}: 적립금 사용 없음 또는 더 비쌈 — {acc} 로 산다')
+            return [(acc2, snap2)]
+        self.note('계정 전환', f'{acc} 적립금 {balance:,.0f}원이 가장 많다 — 그대로 산다')
         return quotes
 
     def _pick_cheapest(self, a: Assignment, accounts: list[str]) -> tuple[str, dict[str, object]]:
@@ -3490,8 +3493,12 @@ class BuyerAgent(AgentBase):
                 ),
                 FailReason.UNKNOWN,
             )
-        # min 은 같은 값이면 앞 것을 준다 — 동률이면 먼저 비교한 계정
-        winner, snap = min(quotes, key=lambda q: _as_float(q[1].get('cost')))
+        # 원가가 같으면 보유 적립금이 많은 계정(사용자 2026-10-03 "동일 조건이면 무신사 적립금 많은 계정"),
+        # 그것도 같으면 먼저 비교한 계정(min 은 같은 값이면 앞 것을 준다)
+        winner, snap = min(
+            quotes,
+            key=lambda q: (_as_float(q[1].get('cost')), -_as_float(q[1].get('points_balance'))),
+        )
         cost = _as_float(snap.get('cost'))
         self.note('계정 선택', f'{winner} — 원가 최저 {cost:,.0f}원 (비교 {len(accounts)}계정)')
         if parallel or winner != accounts[-1]:
