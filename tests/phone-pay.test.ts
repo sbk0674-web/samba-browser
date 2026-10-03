@@ -945,8 +945,8 @@ describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', ()
     expect(next).toEqual({ state: 'app_steps', tapElementId: 5 })
   })
 
-  it('카드사 인증이 백신 설치를 요구하면 누르지 않고 blocked-by-app 으로 멈춘다', async () => {
-    const blocked = screen(ali, [
+  it('알리페이가 시스템 바쁨 오류를 띄우면 누르지 않고 blocked-by-app 으로 멈춘다', async () => {
+    const blocked = screen(ali, [el(9, '身份验证 系统正忙，稍后再试', { clickable: false })])
       el(9, '결제를 진행하려면 백신 V3 백신 설치하기', { clickable: false })
     ])
     const h = harness({ screens: [pw, pw, blocked, blocked], webSuccess: false })
