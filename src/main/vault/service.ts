@@ -1542,6 +1542,8 @@ export class VaultService {
       found = this.repo.findCardItemRow(id)
       if (found.row || found.reason === 'ambiguous') break
     }
+    // 계정에 매인 카드 항목은 화면에서 고칠 수 없다 — 전역 카드 항목(하나뿐일 때)을 마지막으로 본다
+    if (!found.row && found.reason === 'not-found') found = this.repo.findGlobalCardItemRow()
     if (!found.row) return { value: null, reason: found.reason }
     const plain = this.decryptForFill(found.row, args.fieldKey, args.jobId, args.source ?? 'ai')
     if (plain === null) return { value: null, reason: 'not-found' }
