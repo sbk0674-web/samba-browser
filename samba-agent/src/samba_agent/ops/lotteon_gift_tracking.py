@@ -32,6 +32,7 @@ from samba_agent.ops.ssg_gift_accept import (
     Node,
     Phone,
     find_phone_serial,
+    find_text,
 )
 
 log = logging.getLogger(__name__)
@@ -124,6 +125,27 @@ def open_room(phone: Phone, *, sleep: Callable[[float], None] = time.sleep) -> b
             phone.tap(room.x, room.y)
             sleep(3)
             return _in_room(phone.nodes())
+        # 새로 연 카카오톡은 '친구' 탭에서 시작한다 — 채팅 탭으로 간 뒤 목록에서 방을 찾는다(실기 2026-10-03:
+        # 읽기가 끝나면 카카오톡을 끝내게 한 뒤부터 매번 친구 탭이라 방을 못 찾아 3분마다 실패했다)
+        chat_tab = next((n for n in nodes if n.text == '채팅' and n.y > 1300), None) or find_text(
+            nodes, '채팅'
+        )
+        if chat_tab is not None and not _in_room(nodes):
+            phone.tap(chat_tab.x, chat_tab.y) if chat_tab.y > 1300 else phone.tap(180, 1490)
+            sleep(2)
+            nodes = phone.nodes()
+            room = _room_row(nodes)
+            for _swipe in range(4):
+                if room is not None:
+                    break
+                phone.swipe_up()
+                sleep(1.2)
+                nodes = phone.nodes()
+                room = _room_row(nodes)
+            if room is not None:
+                phone.tap(room.x, room.y)
+                sleep(3)
+                return _in_room(phone.nodes())
         # 다른 방·다른 화면이면 채팅 목록까지 뒤로 나온다(이미 그 방 안이어도 나갔다 들어와 맨 아래로 간다)
         phone.key('4')
         sleep(1.5)
