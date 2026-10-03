@@ -914,6 +914,10 @@ describe('결제 화면이 아닌 곳에서는 아무것도 누르지 않는다(
 describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', () => {
   const ali = 'com.eg.android.AlipayGphone'
   // 실기 2026-10-03: 결제 비밀번호 → 현대카드 인증 안내(앱카드/PIN 고르기) → PIN 보안 키패드 → 결제 완료
+  const cvv = screen(ali, [
+    el(1, 'CVV를 입력하세요', { clickable: false }),
+    el(2, '주문금액: ¥ 427.00', { clickable: false })
+  ])
   const pw = screen(ali, [el(2, '주문금액: ¥ 427.00', { clickable: false })])
   const stepUp = screen(ali, [
     el(3, 'Cruise API - Step Up', { clickable: false }),
@@ -928,14 +932,16 @@ describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', ()
 
   it('비밀번호 뒤 카드사 인증 안내에서 PIN번호 결제를 누르고, PIN 키패드에 결제 비밀번호를 한 번 더 넣는다', async () => {
     const h = harness({
-      screens: [pw, pw, stepUp, stepUp, pinPad, pinPad, done, done],
+      screens: [cvv, cvv, pw, pw, pw, pw, pw, pw, stepUp, stepUp, pinPad, pinPad, done, done],
       webSuccess: false
     })
     const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
 
     expect(r).toEqual({ ok: true })
-    expect(h.tapPassword).toHaveBeenCalledTimes(2)
-    expect(h.tapPassword.mock.calls[1][0]).toMatchObject({ provider: 'alipay', secret: 'payment' })
+    // CVC → 결제 비밀번호 → 카드사 PIN(결제 비밀번호)
+    expect(h.tapPassword).toHaveBeenCalledTimes(3)
+    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ secret: 'card-cvc' })
+    expect(h.tapPassword.mock.calls[2][0]).toMatchObject({ provider: 'alipay', secret: 'payment' })
     // 'PIN번호 결제' 버튼(5) 을 눌렀다
     expect(h.taps.some(([, x, y]) => x === 100 && y === 530)).toBe(true)
   })
@@ -951,5 +957,19 @@ describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', ()
     const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
     expect(r).toMatchObject({ ok: false, reason: 'blocked-by-app' })
     expect(h.tapPassword).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('runPayApproval — 알리페이 CVV 는 금고 카드 항목에서', () => {
+  it('계정에 카드 항목이 없으면 CVV 를 누르지 않고 card-not-saved 로 멈춘다', async () => {
+    const ali = 'com.eg.android.AlipayGphone'
+    const cvv = screen(ali, [
+      el(1, 'CVV를 입력하세요', { clickable: false }),
+      el(2, '주문금액: ¥ 427.00', { clickable: false })
+    ])
+    const h = harness({ screens: [cvv, cvv, cvv], password: 'not-found', webSuccess: false })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+    expect(r).toMatchObject({ ok: false, reason: 'card-not-saved' })
+    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ secret: 'card-cvc' })
   })
 })
