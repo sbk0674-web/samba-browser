@@ -1519,11 +1519,29 @@ export class VaultService {
   getCardSecretForFill(args: {
     accountId: number
     fieldKey: string
+    provider?: PaymentProvider
     jobId?: string
     source?: 'ai' | 'user'
   }): PaymentSecretResult {
     if (!this.key) return { value: null, reason: 'locked' }
-    const found = this.repo.findCardItemRow(args.accountId)
+    // 카드는 결제 앱(알리페이) 계정에 둔다 — 唯品会·타오바오·得物이 같은 알리페이로 결제하므로 한 곳만 관리한다
+    // (사용자 2026-10-03). 결제 수단 항목이 알리페이 계정에 연결돼 있으면 그 계정의 카드 항목을, 없으면
+    // 결제 앱 호스트(alipay.com) 계정들의 카드 항목을, 그래도 없으면 구매 계정 자체의 카드 항목을 본다
+    const candidates: number[] = []
+    if (args.provider) {
+      const pay = this.findPaymentRowFor(args.accountId, args.provider)
+      const linked = pay.row ? this.linkedPaymentRow(pay.row) : null
+      if (linked && linked !== 'missing' && linked.accountId !== null)
+        candidates.push(linked.accountId)
+      const appHost = PAYMENT_PROVIDER_ACCOUNT_HOST[args.provider]
+      if (appHost) for (const a of this.matchAccountRows(appHost)) candidates.push(a.id)
+    }
+    candidates.push(args.accountId)
+    let found: PaymentItemLookup = { row: null, reason: 'not-found' }
+    for (const id of [...new Set(candidates)]) {
+      found = this.repo.findCardItemRow(id)
+      if (found.row || found.reason === 'ambiguous') break
+    }
     if (!found.row) return { value: null, reason: found.reason }
     const plain = this.decryptForFill(found.row, args.fieldKey, args.jobId, args.source ?? 'ai')
     if (plain === null) return { value: null, reason: 'not-found' }

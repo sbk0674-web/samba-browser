@@ -27,6 +27,7 @@ export interface PaySecretVault {
   getCardSecretForFill?: (args: {
     accountId: number
     fieldKey: string
+    provider?: PaymentProvider
     jobId?: string
   }) => PaymentSecretResult
 }
@@ -75,6 +76,7 @@ export async function tapPaymentPassword(deps: {
         ? deps.vault.getCardSecretForFill({
             accountId: deps.accountId,
             fieldKey: 'card.cvc',
+            provider: deps.provider,
             ...(deps.jobId === undefined ? {} : { jobId: deps.jobId })
           })
         : { value: null, reason: 'not-found' as const }
