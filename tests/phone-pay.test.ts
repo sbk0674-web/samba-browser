@@ -932,16 +932,16 @@ describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', ()
 
   it('비밀번호 뒤 카드사 인증 안내에서 PIN번호 결제를 누르고, PIN 키패드에 결제 비밀번호를 한 번 더 넣는다', async () => {
     const h = harness({
-      screens: [cvv, cvv, pw, pw, pw, pw, pw, pw, stepUp, stepUp, pinPad, pinPad, done, done],
+      screens: [cvv, cvv, stepUp, stepUp, pinPad, pinPad, done, done],
       webSuccess: false
     })
     const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
 
     expect(r).toEqual({ ok: true })
-    // CVC → 결제 비밀번호 → 카드사 PIN(결제 비밀번호)
-    expect(h.tapPassword).toHaveBeenCalledTimes(3)
-    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ secret: 'card-cvc' })
-    expect(h.tapPassword.mock.calls[2][0]).toMatchObject({ provider: 'alipay', secret: 'payment' })
+    // 'CVV를 입력하세요' 화면 = 결제 비밀번호 → 카드사 PIN(결제 비밀번호). CVC 는 넣지 않는다
+    expect(h.tapPassword).toHaveBeenCalledTimes(2)
+    expect(h.tapPassword.mock.calls[0][0].secret).not.toBe('card-cvc')
+    expect(h.tapPassword.mock.calls[1][0]).toMatchObject({ provider: 'alipay', secret: 'payment' })
     // 'PIN번호 결제' 버튼(5) 을 눌렀다
     expect(h.taps.some(([, x, y]) => x === 100 && y === 530)).toBe(true)
   })
@@ -961,7 +961,7 @@ describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', ()
 })
 
 describe('runPayApproval — 알리페이 CVV 는 금고 카드 항목에서', () => {
-  it('계정에 카드 항목이 없으면 CVV 를 누르지 않고 card-not-saved 로 멈춘다', async () => {
+  it("'CVV를 입력하세요' 제목이어도 알리페이는 결제 비밀번호를 넣는다(카드 CVC 가 아니다)", async () => {
     const ali = 'com.eg.android.AlipayGphone'
     const cvv = screen(ali, [
       el(1, 'CVV를 입력하세요', { clickable: false }),
@@ -969,7 +969,7 @@ describe('runPayApproval — 알리페이 CVV 는 금고 카드 항목에서', (
     ])
     const h = harness({ screens: [cvv, cvv, cvv], password: 'not-found', webSuccess: false })
     const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
-    expect(r).toMatchObject({ ok: false, reason: 'card-not-saved' })
-    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ secret: 'card-cvc' })
+    expect(r).toMatchObject({ ok: false, reason: 'password-failed' })
+    expect(h.tapPassword.mock.calls[0][0].secret).not.toBe('card-cvc')
   })
 })

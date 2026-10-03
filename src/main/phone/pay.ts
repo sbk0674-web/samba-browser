@@ -129,9 +129,9 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     keepIfForeground: true,
     appOnly: true,
     multiStep: true,
-    // 국제카드(唯品会): 'CVV를 입력하세요' 화면에 카드 CVC 3자리 → 결제 비밀번호 → 카드사 인증(사용자 2026-10-03
-    // "CVV 3자리, 비밀번호 입력"). CVC 는 계정의 카드 항목(card.cvc)에서 읽는다 — 없으면 card-not-saved 로 멈춘다
-    cvvHint: /CVV를 입력/,
+    // 'CVV를 입력하세요' 제목 화면은 실제로는 6자리 결제 비밀번호 키패드다 — 실기 2026-10-03 唯品会: 결제 비밀번호 6자리를
+    // 넣으면 카드사 인증으로 넘어갔고, 카드 CVC 3자리를 넣으면 그 화면에 그대로 머물렀다. 그래서 cvvHint 는 두지 않는다
+    // (card-cvc 경로는 CVV 만 따로 묻는 화면이 확인될 때 쓴다)
     // 카드사(현대카드) PIN 화면은 3D 인증 페이지(Cruise API) 안의 보안 키패드다
     pinHint: /Cruise API|PIN ?번호 ?입력|비밀번호를 입력/,
     blockerHint: /系统正忙/
