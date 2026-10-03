@@ -120,7 +120,8 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     packageName: 'com.eg.android.AlipayGphone',
     deepLink: 'alipays://',
     // 'PIN번호 결제' = 카드사(현대카드) 인증 화면에서 앱카드 대신 PIN 으로 간다(실기 2026-10-03 唯品会)
-    confirmText: /^(?:결제|확인|确认付款|立即付款|付款|PIN번호 결제)$/,
+    // '다음' = 카드사 인증의 백신(V3) 확인 페이지에서 설치돼 있으니 넘어가는 버튼(실기 2026-10-03)
+    confirmText: /^(?:결제|확인|确认付款|立即付款|付款|PIN번호 결제|다음)$/,
     // 한국어 알리페이 결제창(唯品会 국제카드)은 '支付密码' 글자 없이 금액·수수료·숫자 키패드만 보인다(실기 2026-10-03)
     passwordHint: /CVV를 입력|결제 ?비밀번호|支付密码|请输入|주문금액|국제카드 수수료/,
     successHint: /결제 ?(?:완료|성공)|支付成功|付款成功|完成/,
@@ -131,7 +132,7 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     // 'CVV를 입력하세요' 제목의 첫 화면은 실제로는 6자리 결제 비밀번호 키패드다(실기 2026-10-01 得物·10-03 唯品会)
     // — 그래서 cvvHint 는 두지 않는다. 카드사(현대카드) PIN 화면은 3D 인증 페이지(Cruise API) 안의 보안 키패드다
     pinHint: /Cruise API|PIN ?번호 ?입력|비밀번호를 입력/,
-    blockerHint: /백신 (?:앱을 )?설치|V3 백신|系统正忙/
+    blockerHint: /系统正忙/
   }
 }
 
