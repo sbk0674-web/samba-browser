@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 
 ROOM = '롯데ON'
 PREFIX = '[롯데ON]'
-INTERVAL_S = 20 * 60
+INTERVAL_S = 60 * 60  # 사용자 2026-10-03 "루프 1시간으로"
 # 방을 위로 올려 보는 쪽 수 — 한 쪽에 알림 두세 개가 보인다
 MAX_PAGES = 14
 # 새 알림이 없는 쪽이 이만큼 이어지면 그만 올린다
@@ -318,7 +318,7 @@ def start_lotteon_gift_tracking_loop(
     adb: str | None = None,
     phone_serial: str | None = None,
 ) -> threading.Thread:
-    """20분마다(주문 작업이 없을 때만) 롯데ON 선물 송장을 모은다. 폰이 없으면 그 바퀴는 건너뛴다."""
+    """1시간마다(주문 작업이 없을 때만) 롯데ON 선물 송장을 모은다. 폰이 없으면 그 바퀴는 건너뛴다."""
     adb_path = adb or os.environ.get('SAMBA_ADB') or DEFAULT_ADB
     want = phone_serial or os.environ.get('SAMBA_PAY_PHONE') or DEFAULT_PHONE
     seen = SeenStore(state_dir / SEEN_FILE)
