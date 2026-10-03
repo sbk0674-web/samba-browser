@@ -135,7 +135,9 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     // (card-cvc 경로는 CVV 만 따로 묻는 화면이 확인될 때 쓴다)
     // 카드사(현대카드) PIN 화면은 3D 인증 페이지(Cruise API) 안의 보안 키패드다
     pinHint: /Cruise API|PIN ?번호 ?입력|비밀번호를 입력/,
-    blockerHint: /系统正忙/
+    // '백신 설치' 페이지 = 카드사 3D 인증(Cruise API)이 V3 확인을 못 받은 상태 — 이 폰에선 설치·권한·재설치로도 안 풀렸고
+    // (2026-10-03, 알리페이 12.12.16 웹뷰가 V3 스킴을 안 보냄) '다음'을 반복해 두드릴수록 카드사 위험점수만 오른다. 바로 멈춘다
+    blockerHint: /系统正忙|백신 설치|백신 앱을 설치/
   }
 }
 
