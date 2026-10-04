@@ -83,10 +83,16 @@ def size_cell(nodes: list[Node], size: str) -> Node | None:
 
 
 def header_price(nodes: list[Node]) -> float | None:
-    """구매창 위쪽(y<330)의 '¥564' 가격."""
+    """구매창 위쪽(y<330)의 '¥564' 가격. 위쪽이 안 읽히면(의류 구매창은 사이즈 표가 길어 머리글이 트리에 없다,
+    실기 2026-10-05) 아래 결제 단추 줄(y≥1300)의 '¥473' 을 쓴다 — 고른 사이즈의 값이다."""
     for n in sorted(nodes, key=lambda n: n.y):
         m = _PRICE.match(n.text.replace(' ', ''))
         if m and n.y < 330:
+            return float(m.group(1))
+    # 아래 줄에 배송 선택지가 둘이면(¥378 顺丰 / ¥348 일반) 왼쪽이 기본 선택이다
+    for n in sorted(nodes, key=lambda n: (-n.y, n.x)):
+        m = _PRICE.match(n.text.replace(' ', ''))
+        if m and n.y >= 1300:
             return float(m.group(1))
     return None
 
