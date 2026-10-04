@@ -289,6 +289,17 @@ def main() -> None:
                 agent.repairer = repairer
                 agent.script_source = script_source
                 agent.script_history = script_history
+    if wave is not None:
+        # 중복 구매 판정에 쓸 "이미 기입된 소싱 주문번호" — 다른 삼바 주문으로 산 기록은 중복이 아니다
+        def _known_sourcing() -> set[str] | None:
+            try:
+                return wave.sourcing_numbers(14)
+            except WaveError:
+                return None
+
+        for agent in agents.values():
+            if isinstance(agent, BuyerAgent):
+                agent.known_sourcing_numbers = _known_sourcing
     if bridge.supports_lanes():
         # 앱이 레인을 알면 계정 비교를 동시에 돌린다(모르면 예전처럼 순서대로 — 한 탭을 서로 건드린다)
         for agent in agents.values():

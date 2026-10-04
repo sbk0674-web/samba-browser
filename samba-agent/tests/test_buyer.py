@@ -207,6 +207,29 @@ def test_이미_구매한_흔적이_있으면_중복으로_거절한다(reg):
     assert (out.status, out.fail_reason) == ('fail', FailReason.DUPLICATE)
 
 
+@respx.mock
+def test_중복_흔적의_소싱번호가_이미_다른_삼바_주문에_기입돼_있으면_중복이_아니다(reg):
+    """실기 2026-10-04 ABC 반스 265: 아침에 다른 고객 주문으로 산 기록을 보고 새 주문을 중복으로 멈췄다."""
+    dup = {**SNAPSHOT_OK, 'already_ordered': True, 'existing_order_no': '2026100483623'}
+    respx.post(f'{URL}/tool/run_script').mock(
+        side_effect=route_run_script({'musinsa_product_snapshot': dup, 'musinsa_set_shipping': SHIPPING_ECHO})
+    )
+    respx.post(f'{URL}/tool/get_page').mock(return_value=page('결제수단 선택'))
+    respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    mock_accounts()
+    mock_fill_secret()
+    mus = agent(reg, lambda p, m: m(choice='260', reason='x'))
+    mus.known_sourcing_numbers = lambda: {'2026100483623'}
+    out = mus(assignment(reg))
+    assert out.status == 'ok', out.reason
+    assert any(e.label == '중복 확인' for e in out.evidence)
+    # 모르는 번호면 전처럼 중복으로 거절한다
+    mus2 = agent(reg, lambda p, m: m(choice='260', reason='x'))
+    mus2.known_sourcing_numbers = lambda: {'다른번호'}
+    out2 = mus2(assignment(reg))
+    assert (out2.status, out2.fail_reason) == ('fail', FailReason.DUPLICATE)
+
+
 @pytest.mark.parametrize('locked', [True, False])
 @respx.mock
 def test_금고가_잠겼거나_계정이_없으면_사람에게_넘긴다(generic_musinsa, reg, locked):

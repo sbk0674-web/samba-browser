@@ -2061,7 +2061,18 @@ class BuyerAgent(AgentBase):
                 FailReason.UNKNOWN,
             )
         if snap.get('already_ordered') or snap.get('existing_order_no'):
-            return snap  # 중복 구매 흔적 — 정돈·견적 없이 호출부가 바로 거절한다
+            # 그 소싱 주문이 이미 다른 삼바 주문에 기입돼 있으면 중복이 아니라 "같은 상품을 또 산 다른 고객"이다
+            # (실기 2026-10-04 ABC 반스 265: 아침에 다른 주문으로 산 기록을 보고 새 주문을 멈췄다)
+            known = self._known_sourcing_numbers()
+            existing = str(snap.get('existing_order_no') or '')
+            if existing and known is not None and existing in known:
+                self.note(
+                    '중복 확인',
+                    f'소싱 주문 {existing} 은 이미 다른 삼바 주문에 기입된 것 — 이 주문은 새로 산다',
+                )
+                snap = {**snap, 'already_ordered': False, 'existing_order_no': None}
+            else:
+                return snap  # 중복 구매 흔적 — 정돈·견적 없이 호출부가 바로 거절한다
         limit = snapshot_purchase_limit(snap)
         if limit:
             raise AgentFailure('fail', f'{account}: {limit}', FailReason.OUT_OF_STOCK)
@@ -3860,6 +3871,19 @@ class BuyerAgent(AgentBase):
             f'판매가 {sale:,.0f} - 원가 {cost:,.0f} → {margin}% (정산금 미확인 근사)',
         )
         return margin
+
+    # 삼바에 이미 기입된 소싱 주문번호(최근 14일) — 하네스가 켜질 때 넣어 준다. 없으면(None) 중복 흔적은 전부 중복으로 본다
+    known_sourcing_numbers: Callable[[], set[str] | None] | None = None
+
+    def _known_sourcing_numbers(self) -> set[str] | None:
+        """기입된 소싱 주문번호 집합. 못 읽으면 None(모르는 것을 '없음'으로 보지 않는다)."""
+        fn = self.known_sourcing_numbers
+        if fn is None:
+            return None
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001 — 삼바 조회 실패는 중복 판단을 보수적으로 둔다
+            return None
 
     def set_shipping_provider(self, provider: ShippingFn | None) -> None:
         """배송지 공급자(삼바웨이브 상세)를 꽂는다. 배선은 factory 가 한다.
