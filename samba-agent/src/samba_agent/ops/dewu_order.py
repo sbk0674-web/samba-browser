@@ -142,11 +142,23 @@ def buy_on_dewu(
     for _ in range(6):
         # 지난 시도가 남긴 상품·구매 화면에서 시작할 수 있다 — 검색창이 보일 때까지 뒤로 간다
         # (실기 2026-10-03: 상품 화면의 '立即购买' 를 보고 멈춰 '검색창을 못 찾았다')
-        box = next(
-            (n for n in nodes if n.y < 140 and n.x < 520 and n.text and n.text != '搜索'), None
-        )
+        # 검색 화면의 입력칸은 id 가 etSearch 다(글자가 비어 있어도) — 글자 위치 추정보다 먼저 본다(실기 2026-10-05)
+        box = next((n for n in nodes if (n.rid or '').endswith('id/etSearch')), None)
+        if box is None:
+            box = next(
+                (n for n in nodes if n.y < 140 and n.x < 520 and n.text and n.text != '搜索'),
+                None,
+            )
         if box is not None and find_text(nodes, '搜索') is not None:
             break
+        if box is None and phone.top_package() == DEWU:
+            # 홈 화면이면 위쪽 검색 막대를 눌러 검색 화면으로 들어간다
+            home = next((n for n in nodes if n.y < 160 and '搜索' in (n.text or '')), None)
+            if home is not None:
+                phone.tap(home.x, home.y)
+                sleep(2)
+                nodes = phone.nodes()
+                continue
         box = None
         phone.key('4')
         sleep(1.5)
