@@ -64,6 +64,24 @@ def cny_krw_rate() -> float:
     return 0.0
 
 
+_PRICE_ANY = re.compile(r'^¥\s*(?:\d+(?:\.\d+)?|--)$')
+# 의류 사이즈 표기 차이: 삼바 '2XL' ↔ 得物 'XXL', 셀 글자 'L(身高178-182cm)'
+_SIZE_ALIASES = {'2XL': ('XXL', '2XL'), '3XL': ('XXXL', '3XL'), 'XXL': ('XXL', '2XL'), 'XXXL': ('XXXL', '3XL')}
+
+
+def size_cell(nodes: list[Node], size: str) -> Node | None:
+    """사이즈 칸 — 글자가 그 값이거나 '값(' 로 시작하는 칸(의류는 '(身高…)' 설명이 붙는다). 2XL↔XXL 도 같이 본다."""
+    want = _SIZE_ALIASES.get(size.upper(), (size,))
+    for n in nodes:
+        t = n.text.strip()
+        if not t:
+            continue
+        for w in want:
+            if t == w or t.upper().startswith(w.upper() + '('):
+                return n
+    return None
+
+
 def header_price(nodes: list[Node]) -> float | None:
     """구매창 위쪽(y<330)의 '¥564' 가격."""
     for n in sorted(nodes, key=lambda n: n.y):
@@ -205,11 +223,20 @@ def buy_on_dewu(
         raise DewuOrderError('상품 화면에서 立即购买 를 못 찾았다')
     phone.tap(buy.x, buy.y)
     # 3) 사이즈 칸 — 글자가 EU 값과 똑같은 칸, 가격이 '¥--' 면 판매 없음
-    nodes = wait_for(lambda ns: find_text(ns, eu_size) is not None, 10)
-    cell = find_text(nodes, eu_size)
+    nodes = wait_for(lambda ns: size_cell(ns, eu_size) is not None, 10)
+    cell = size_cell(nodes, eu_size)
     if cell is None:
         raise DewuOrderError(f'得物 사이즈 목록에 EU {eu_size} 가 없다')
-    below = next((n for n in nodes if abs(n.x - cell.x) < 60 and 0 < n.y - cell.y < 70), None)
+    # 신발은 값이 칸 아래, 의류는 같은 줄 오른쪽에 붙는다(실기 2026-10-05 'L(身高178-182cm) ¥385')
+    below = next(
+        (
+            n
+            for n in nodes
+            if (abs(n.x - cell.x) < 60 and 0 < n.y - cell.y < 70)
+            or (abs(n.y - cell.y) < 25 and 0 < n.x - cell.x < 200 and _PRICE_ANY.match(n.text))
+        ),
+        None,
+    )
     if below is not None and '--' in below.text:
         raise DewuOrderError(f'得物 EU {eu_size} 판매 없음(¥--)')
     phone.tap(cell.x, cell.y)

@@ -178,3 +178,19 @@ def test_구매_확인_화면의_결제수단을_읽는다():
         == '支付宝'
     )
     assert pay_method_of([]) == ''
+
+
+def test_size_cell_의류는_설명이_붙고_2XL은_XXL로_표기된다():
+    """실기 2026-10-05 나이키 자켓: 'L(身高178-182cm)' · 'XXL(身高185-188cm)'."""
+    from samba_agent.ops.dewu_order import size_cell
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    def node(t, x=100, y=100):
+        return Node(text=t, desc='', rid='', x=x, y=y)
+
+    nodes = [node('XL(身高182-185cm)'), node('L(身高178-182cm)', 447, 1170), node('XXL(身高185-188cm)', 466, 1263), node('42.5')]
+    assert size_cell(nodes, 'L').x == 447
+    assert size_cell(nodes, '2XL').x == 466
+    assert size_cell(nodes, 'XXL').x == 466
+    assert size_cell(nodes, 'S') is None
+    assert size_cell(nodes, '42.5') is not None
