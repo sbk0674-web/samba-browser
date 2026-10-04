@@ -203,10 +203,12 @@ def buy_on_dewu(
     # '상품이 없다'로 끝났다)
     def _first_card(ns: list[Node]) -> Node | None:
         title = find_text(ns, '商品')
+        # 한 줄의 두 카드는 y 가 몇 px 다르다(실기 2026-10-05: 613 / 610) — y 로만 세우면 오른쪽 카드(다른 상품)를
+        # 먼저 연다. 60px 단위 줄로 묶어 왼쪽 카드부터
         return next(
             (
                 n
-                for n in sorted(ns, key=lambda n: (n.y, n.x))
+                for n in sorted(ns, key=lambda n: (n.y // 60, n.x))
                 if title and n.y > title.y and _PRICE.match(n.text.replace(' ', ''))
             ),
             None,
