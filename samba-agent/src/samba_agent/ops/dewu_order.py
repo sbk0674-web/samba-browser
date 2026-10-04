@@ -202,7 +202,8 @@ def buy_on_dewu(
     # '商品' 탭·머리글은 결과보다 먼저 그려진다 — 가격 카드가 보일 때까지 기다린다(실기 2026-10-03: 머리글만 보고
     # '상품이 없다'로 끝났다)
     def _first_card(ns: list[Node]) -> Node | None:
-        title = find_text(ns, '商品')
+        # 결과가 '全部' 탭이면 '商品' 머리글 아래, 바로 상품 목록이면 정렬 줄('综合 … 筛选') 아래가 카드다(실기 2026-10-05)
+        title = find_text(ns, '商品') or (find_text(ns, '综合') if find_text(ns, '筛选') else None)
         # 한 줄의 두 카드는 y 가 몇 px 다르다(실기 2026-10-05: 613 / 610) — y 로만 세우면 오른쪽 카드(다른 상품)를
         # 먼저 연다. 60px 단위 줄로 묶어 왼쪽 카드부터
         return next(
