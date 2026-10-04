@@ -1861,3 +1861,35 @@ def test_같은_값이면_보유_적립금_많은_계정으로_바꾼다(reg, mo
     out = mus._prefer_points_user(a, quotes, ['buyer01', 'buyer02', 'buyer03'], ['buyer01'])
     assert out == quotes
 
+
+
+@respx.mock
+def test_주문서까지_못_간_스냅샷은_고른_선택지로_다시_연다(reg):
+    """실기 2026-10-04 롯데온 선물 주문: 주문 옵션 글자로는 스크립트가 못 골라 options 만 돌아왔고(selected·methods 없음),
+    모델이 고른 뒤 그대로 진행해 결제수단이 없다며 card_missing 으로 끝났다 — 고른 글자(size)로 다시 열어야 한다."""
+    calls: list[dict[str, object]] = []
+
+    def snapshot(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        name = body.get('args', {}).get('name')
+        if name == 'musinsa_product_snapshot':
+            args = json.loads(body['args'].get('args') or '{}')
+            calls.append(args)
+            if args.get('size') == '260 ONE':
+                return page(json.dumps({**SNAPSHOT_OK, 'options': ['260 ONE', '265 ONE'], 'selected': '260 ONE'}))
+            # 주문 옵션 글자로는 못 골랐다 — 선택지만, 주문서 없음
+            return page(json.dumps({'options': ['260 ONE', '265 ONE'], 'methods': [], 'cost': None, 'note': 'option not matched'}))
+        return route_run_script({'musinsa_set_shipping': SHIPPING_ECHO})(request)
+
+    respx.post(f'{URL}/tool/run_script').mock(side_effect=snapshot)
+    respx.post(f'{URL}/tool/get_page').mock(return_value=page('결제수단 선택'))
+    respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    mock_accounts()
+    mock_fill_secret()
+    a = assignment(reg).model_copy(update={'order': ORDER.model_copy(update={'option': '260 FREE'})})
+    out = agent(reg, lambda p, m: m(choice='260 ONE', reason='주문 사이즈 260 과 일치'))(a)
+    assert out.status == 'ok', out.reason
+    assert out.payload['cost'] == 89000
+    # 첫 스냅샷은 주문 옵션 글자, 두 번째는 고른 선택지 글자로 열었다
+    assert [c.get('size') for c in calls][-1] == '260 ONE'
+    assert any('옵션 재선택' == e.label for e in out.evidence)

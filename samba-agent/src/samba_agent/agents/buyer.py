@@ -1941,6 +1941,11 @@ class BuyerAgent(AgentBase):
         args: dict[str, object] = json.loads(
             snapshot_args(self.spec.name, a.order, account=account)
         )
+        # 모델이 후보 중에서 고른 선택지(옵션 재선택)가 있으면 그 글자로 고르게 한다 — 주문 옵션 글자 그대로는
+        # 스크립트가 못 골라 주문서까지 못 갔던 상품(실기 2026-10-04 롯데온 'SLT(SLATE) FREE NM2DR50B' → 'SLT(SLATE) ONE')
+        picked_size = getattr(self, '_reselected', {}).get(str(a.order.option or ''))
+        if picked_size:
+            args['size'] = picked_size
         if source.allow_department:
             args['allow_department'] = (
                 True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
@@ -1996,17 +2001,32 @@ class BuyerAgent(AgentBase):
             # (실기 2026-09-28: AI 가 White-SM 으로 맞췄는데 스크립트에는 계속 '화이트 S' 를 줬다)
             options = [str(o) for o in (snap.get('options') or [])]  # type: ignore[union-attr]
             live = [m for m in self._match_options(options, a.order.option) if '품절' not in m]
-            if len(live) == 1 and live[0] != a.order.option:
+            chosen: str | None = None
+            if len(live) == 1:
+                chosen = live[0]
+            elif len(live) > 1:
+                # 후보가 여럿이면 여기서 모델이 고른다 — 뒤에서 골라 봐야 주문서(결제수단·원가)가 없어 card_missing 으로
+                # 끝났다(실기 2026-10-04 롯데온 'SLT(SLATE) FREE NM2DR50B' → 후보 'SLT(SLATE) ONE'·'SLT(SLATE)'·'ONE')
+                picked = self.decide_once(
+                    f'{a.rules}\n\n주문 {a.order.order_no} 의 SKU {a.order.sku} 에 맞는 옵션을 고르라.\n'
+                    f'후보(주문 옵션과 맞는 것만): {live}',
+                    Decision,
+                )
+                resolved = resolve_choice(picked.choice, live)
+                if resolved is not None:
+                    chosen = resolved
+                    self.note('옵션 선택', f'{resolved} — {picked.reason}')
+            if chosen and chosen != a.order.option:
                 self.note(
-                    '옵션 재선택', mask_text(f'[{a.order.option}] → [{live[0]}] 로 다시 연다')
+                    '옵션 재선택', mask_text(f'[{a.order.option}] → [{chosen}] 로 다시 연다')
                 )
                 reselected: dict[str, str] = getattr(self, '_reselected', {})
-                reselected[str(a.order.option)] = live[0]
+                reselected[str(a.order.option)] = chosen
                 self._reselected = reselected
                 if snap.get('product_tab'):
                     self._close_product_tabs(account, str(snap.get('product_url') or ''))
                 snap = self.script_json(
-                    source.snapshot_script, {**args, 'size': live[0]}, goal=goal, check=base_check
+                    source.snapshot_script, {**args, 'size': chosen}, goal=goal, check=base_check
                 )
         if snapshot_login_required(snap) and self._login_product_host(
             account, str(snap.get('product_url') or '')
@@ -3679,7 +3699,6 @@ class BuyerAgent(AgentBase):
                 'needs_human', f'고른 옵션이 후보에 없다: {picked.choice}', FailReason.UNKNOWN
             )
         self.note('옵션 선택', f'{picked.choice} — {picked.reason}')
-
         # 배송지 — 개인정보(이름·주소)라 Assignment/state/payload 에는 절대 담지 않는다.
         # 실행 시점에만 받아 입력 도구 호출에 바로 쓰고 로컬 변수 밖으로 내보내지 않는다.
         self._set_shipping(a, snap, account)
