@@ -391,6 +391,13 @@ def make_shihuo_handler(
                 'unknown',
                 f'EU 사이즈({eu or "-"})·품번({model or "-"})이 없어 살 수 없다',
             )
+        if model.upper().startswith('SH-'):
+            # 식화 자체 코드(SH-상품-스타일)는 得物 검색어가 못 된다 — 엉뚱한 첫 상품을 열고 사이즈를 고를 뻔했다(2026-10-04)
+            return (
+                'needs_human',
+                'unknown',
+                f'품번이 식화 코드({model})라 得物 검색 불가 — 삼바 상품관리에 진짜 품번(스타일 코드)을 넣어야 한다',
+            )
         rate = rate_of()
         if rate <= 0:
             return 'needs_human', 'unknown', '위안 환율을 못 받아 원가를 낼 수 없다 — 결제하지 않음'
