@@ -4031,7 +4031,11 @@ class BuyerAgent(AgentBase):
                 'needs_human', '선물 받는 분 배송지를 받지 못했다', FailReason.UNKNOWN
             )
         url = str(snap.get('product_url') or a.order.product_url or '')
-        option = str(snap.get('selected') or a.order.option or '')
+        selected = re.sub(r'\s*쇼핑백 신청\s*$', '', str(snap.get('selected') or '')).strip()
+        want = str(a.order.option or '')
+        # 2단 옵션(색/사이즈)은 주문서 되읽기가 뒷단('S 쇼핑백 신청')만 잡는다 — 선물 진입 스크립트는 '색/사이즈' 를
+        # 칸 순서대로 고르므로 주문 옵션 그대로 준다(실기 2026-10-05 SSG 지오다노 '03 블루/S')
+        option = want if ('/' in want and '/' not in selected) else (selected or want)
         self._close_order_tabs(account)
         enter_args = json.dumps(
             {'product_url': url, 'option': option, **({'profile': account} if account else {})},
