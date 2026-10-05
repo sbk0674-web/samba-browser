@@ -828,6 +828,30 @@ def numeric_overlap_options(options: list[str], wanted: str | None) -> list[str]
     return [o for o in live if size_numbers(o) & nums]
 
 
+_SINGLE_DIGIT_SIZE_RE = re.compile(r'(?<![\d./])([1-9])(?![\d./])\s*$')
+_CODE_OPTION_RE = re.compile(r'^0*(\d{1,3})\s*\(')
+
+
+def single_digit_code_options(options: list[str], wanted: str | None) -> list[str]:
+    """주문 옵션 끝의 한 자리 사이즈('SKB/초콜릿향 3')를 선택지의 세 자리 코드('003(95) …')와 맞춘다.
+
+    사용자 규칙(사이즈는 상품 사이즈표로): S·S-3 ↔ 003(95). 코드 숫자가 같은 품절 아닌 후보만 준다
+    (실기 2026-10-05 롯데온: AI 가 '3' ↔ '003(95)' 를 못 맞춰 '선택지에 없다'로 끝났다).
+    """
+    m = _SINGLE_DIGIT_SIZE_RE.search((wanted or '').strip())
+    if not m:
+        return []
+    digit = int(m.group(1))
+    out = []
+    for o in options:
+        if _sold_out(o):
+            continue
+        cm = _CODE_OPTION_RE.match(o.strip())
+        if cm and int(cm.group(1)) == digit:
+            out.append(o)
+    return out
+
+
 _CAP_FRACTION_RE = re.compile(r'(?<![\d/])([5-8])\s+([1357])\s*/\s*(2|4|8)(?![\d/])')
 _NO_MATCH_REASON_RE = re.compile(r'(일치|해당)하는 (후보|옵션|선택지)[이가은는도]? ?없')
 _CAP_OPTION_RE = re.compile(r'^(\d{3})(?=\(|\s|$)')
@@ -2929,6 +2953,13 @@ class BuyerAgent(AgentBase):
                 mask_text(f'[{wanted}] → {by_letter[0]} (사이즈 글자 일치, 선택지에 색 표기 없음)'),
             )
             return by_letter
+        by_code = single_digit_code_options(options, wanted)
+        if len(by_code) == 1:
+            self.note(
+                '옵션 선택',
+                mask_text(f'[{wanted}] → {by_code[0]} (한 자리 사이즈 ↔ 세 자리 코드, 상품 사이즈표 규칙)'),
+            )
+            return by_code
         pool = numeric_overlap_options(options, wanted)
         if not pool:
             return []

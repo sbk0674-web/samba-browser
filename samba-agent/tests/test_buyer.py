@@ -1916,3 +1916,16 @@ def test_주문서까지_못_간_스냅샷은_고른_선택지로_다시_연다(
     # 첫 스냅샷은 주문 옵션 글자, 두 번째는 고른 선택지 글자로 열었다
     assert [c.get('size') for c in calls][-1] == '260 ONE'
     assert any('옵션 재선택' == e.label for e in out.evidence)
+
+
+def test_한_자리_사이즈는_세_자리_코드_선택지와_맞춘다():
+    """실기 2026-10-05 롯데온: 주문 'SKB/초콜릿향 3' ↔ 선택지 '003(95) 137,400 1개 남음 (품절임박)'."""
+    from samba_agent.agents.buyer import single_digit_code_options
+
+    opts = ['003(95) 137,400 1개 남음 (품절임박)', '004(100) 137,400 4개 남음', '005(105) 137,400', '006(110) 137,400']
+    assert single_digit_code_options(opts, 'SKB/초콜릿향 3') == ['003(95) 137,400 1개 남음 (품절임박)']
+    assert single_digit_code_options(opts, 'SKB/초콜릿향 4') == ['004(100) 137,400 4개 남음']
+    assert single_digit_code_options(opts, 'SKB 7') == []
+    # 두 자리 이상 사이즈(95·260)나 소수(7.5)는 이 규칙 밖
+    assert single_digit_code_options(opts, '블랙 95') == []
+    assert single_digit_code_options(opts, '7.5') == []
