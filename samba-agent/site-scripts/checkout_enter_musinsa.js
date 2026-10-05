@@ -96,7 +96,10 @@ R.total = totalOf(tx)
 if (R.total == null) return fail('total-not-read', '총 결제 금액을 읽지 못함')
 if (pointsOnly && R.total > 0) return fail('not-points-only', `total ${R.total} > 0`)
 const amt = Number(args.amount)
-if (amt > 0 && R.total > amt) return fail('amount-exceeded', `total ${R.total} > expected ${amt}`)
+// 견적에 없던 배송비만큼 커진 건 넘어간다(결제 화면에만 배송비가 붙는 상품, 2026-10-05)
+const shipFee = num((tx.match(/배송비\s*\+?\s*([\d,]{3,})\s*원/) || [])[1]) || 0
+if (amt > 0 && R.total > amt + shipFee) return fail('amount-exceeded', `total ${R.total} > expected ${amt}+${shipFee}`)
+if (amt > 0 && R.total > amt) R.shipping_fee = shipFee
 const payLine = (t => t.split('\n').find(x => /^\[\d+\] button "[^"]*결제하기"/.test(x)))(await get({ interactive: 1 })) || String(await page.find('결제하기')).split('\n').find(x => /^\[\d+\] button "[^"]*결제하기"/.test(x))
 if (!payLine) return fail('pay-button-not-found')
 const payId = parseInt(payLine.slice(1))
