@@ -16,10 +16,11 @@ if (ls.some(l => / link "일시품절"/.test(l))) return { ...R, error: 'sold_ou
 const opt = nz(args.option).replace(/\s*\(남은수량[^)]*\)\s*$/, '')
 // 큰 페이지(신세계백화점)는 전체 목록이 잘린다 — 검색으로 찾고, '사이즈 선택하세요.'처럼 이름 붙은 칸을 먼저(맨 앞은 숨은 칸, 09-30)
 // 선택 칸이 둘(색·사이즈)이면 주문서 옵션 '색/사이즈'를 칸 순서대로 하나씩 고른다(2026-10-02 다이나핏 '라이트 블루(B1)/L')
-const selN = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l)).length
+// '쇼핑백 신청'·추가옵션 칸은 상품 옵션이 아니다 — 세면 '색/사이즈'를 둘로 쪼개 'Z1' 만 찾다 실패한다(2026-10-05 다이나핏 조끼)
+const selN = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l)).length
 const parts = selN > 1 && opt.includes('/') ? opt.split('/').map(nz).filter(Boolean) : [opt]
 for (const opt of parts) {
-  const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l))
+  const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l))
   const sel = selAll.find(l => !/ link "선택하세요\."/.test(l)) || selAll[0]
   if (!sel) break
   await page.click(idL(sel))
