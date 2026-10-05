@@ -4096,7 +4096,8 @@ class BuyerAgent(AgentBase):
         # 칸 순서대로 고르므로 주문 옵션 그대로 준다(실기 2026-10-05 SSG 지오다노 '03 블루/S')
         # 삼바 옵션은 '색/사이즈' 또는 '색,사이즈'('블랙(Z1),M') — 선물 진입 스크립트는 '/' 로 나누므로 맞춘다
         want = re.sub(r'\s*,\s*', '/', want)
-        option = want if ('/' in want and '/' not in selected) else (selected or want)
+        # 2단이면 주문 옵션 그대로(되읽은 'Z1/M' 은 색 이름이 빠져 선물 페이지의 '블랙(Z1)' 과 안 맞는다)
+        option = want if '/' in want else (selected or want)
         self._close_order_tabs(account)
         enter_args = json.dumps(
             {'product_url': url, 'option': option, **({'profile': account} if account else {})},
