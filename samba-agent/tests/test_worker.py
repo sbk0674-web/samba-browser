@@ -809,3 +809,72 @@ def test_결제창_로그인_화면으로_멈춘_계정을_알아낸다():
     # 계정을 모르면 뺄 계정도 없다
     assert _mismatch_profile(reason.replace('rbf15', '-')) == ''
     assert _mismatch_profile('옵션 불일치') == ''
+
+
+# ==================== 같은 상품주문번호 두 행 ====================
+
+
+def test_같은_주문번호_두_행을_각각_끝까지_돌린다(setup):
+    """실기 20261005DFA7D9 — 230·210 이 각각 작업이다. 승인 버튼 값은 행 id 라 서로 섞이지 않는다."""
+    q, log, _sent, make = setup
+    q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_A')
+    q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    w = make(gate=True)
+    asked: list[tuple[str, str]] = []
+    w.d.approval_report = lambda job, key, stage, summary: asked.append((key, stage))
+
+    first = w.tick()
+    assert first.wave_id == 'ord_A' and first.state == 'needs_human'
+    second = w.tick()
+    assert second.wave_id == 'ord_B' and second.state == 'needs_human'
+    assert asked == [('ord_A', 'pay'), ('ord_B', 'pay')]
+
+    # 둘째 행만 승인 — 첫 행은 그대로 대기
+    done = w.resume('ord_B', approved=True, by='U9', stage='pay')
+    assert done.wave_id == 'ord_B' and done.state == 'done'
+    assert q.get('ord_A').state == 'needs_human'
+    assert log == ['buy', 'buy', 'pay', 'record', 'verify']
+    done_a = w.resume('ord_A', approved=True, by='U9', stage='pay')
+    assert done_a.state == 'done'
+    assert all(j.state == 'done' for j in (q.get('ord_A'), q.get('ord_B')))
+
+
+def test_표시_취소와_메모는_행_id_로_부른다(tmp_path):
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    log: list[str] = []
+    sent: list[str] = []
+    marked: list[tuple[str, str]] = []
+    graph = build_supervisor(reg, agents(log, None), checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(
+            queue=q,
+            graph=graph,
+            version='vtest',
+            report=lambda job, line: sent.append(line),
+            parse_order=order_of,
+            dry_run=False,
+            flag_order=lambda key, err: marked.append((key, err)) or '표시함',
+        )
+    )
+    job, _ = q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_B')
+    w._apply(job, {'outcome': 'failed', 'fail_reason': 'bridge_down'})
+    assert marked == [('ord_B', 'bridge_down')]
+    assert any(s.startswith('X ') for s in sent)  # 보고는 사람이 아는 주문번호로
+
+
+def test_주문_조회가_행이_여럿이라_실패하면_사람에게_넘긴다(setup):
+    from samba_agent.queue.orders import AmbiguousOrder
+
+    q, _log, sent, make = setup
+    q.enqueue('X', 'U1', {}, 'ts1')  # 슬랙 수동 접수 — 행 id 없음
+    w = make(gate=False)
+
+    def ambiguous(_job):
+        raise AmbiguousOrder('행이 여럿인 주문 — 행 id 로 접수: ord_A(230), ord_B(210)')
+
+    w.d.parse_order = ambiguous
+    job = w.tick()
+    assert job.state == 'needs_human'
+    assert 'ord_A' in job.error and 'ord_B' in job.error
+    assert any('행 id 로 접수' in s for s in sent)

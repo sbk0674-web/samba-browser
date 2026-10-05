@@ -344,3 +344,61 @@ def test_범위_밖_소싱처의_미등록_주문은_연결만_하고_접수하�
     assert q.get('B1') is None
     intake.run_once()
     assert wave.linked == [('B1', '1010109335')]  # 같은 프로세스에서 되풀이하지 않는다
+
+
+# ==================== 같은 상품주문번호에 행이 여럿(삼바웨이브 행 id) ====================
+
+
+def test_같은_주문번호_두_행은_따로_접수한다(setup):
+    """실기 20261005DFA7D9 — 230 과 210 이 각각 행이다. 둘 다 사야 한다."""
+    q, slack, make = setup
+    a = wave_order('X', id='ord_A', product_option='230')
+    b = wave_order('X', id='ord_B', product_option='210')
+    intake, _w = make([a, b])
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (2, 0)
+    assert [j.wave_id for j in q.live()] == ['ord_A', 'ord_B']
+    assert all(j.order_no == 'X' for j in q.live())
+    assert len(slack.tops) == 2
+    # 다음 바퀴엔 둘 다 진행중 제외
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (0, 2)
+
+
+def test_옛_행이_done_이면_같은_주문번호의_다른_행을_접수한다(setup):
+    """230 을 산 옛 작업(행 id 없음, done)이 있어도 210 행은 들어가야 한다."""
+    q, _slack, make = setup
+    legacy, _ = q.enqueue('X', 'intake', {}, 'ts0')
+    q.claim()
+    q.finish(legacy.id, 'done')
+    intake, _w = make([wave_order('X', id='ord_B', product_option='210')])
+    report = intake.run_once()
+    assert report.enqueued == 1
+    assert q.get('ord_B').id != legacy.id
+
+
+def test_옛_행이_사람_대기면_같은_주문번호의_행은_접수하지_않는다(setup):
+    q, _slack, make = setup
+    legacy, _ = q.enqueue('X', 'U1', {}, 'ts0')
+    q.claim()
+    q.finish(legacy.id, 'needs_human', error='margin')
+    intake, _w = make([wave_order('X', id='ord_B', product_option='210')])
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (0, 1)
+
+
+def test_소싱처_미등록_주문_연결은_행_id_로_부른다(tmp_path):
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    slack = _Slack()
+    order = wave_order(
+        'G1',
+        id='ord_G1',
+        source='',
+        product_name='르무통 메이트 오렌지 3347853',
+        product_option='230mm',
+    )
+    wave = _LinkWave([order])
+    Intake(wave, q, reg, slack.post_new, slack.post_line, days=7).run_once()
+    assert wave.linked == [('ord_G1', '3347853')]
+    assert q.get('ord_G1').order_no == 'G1'

@@ -243,10 +243,12 @@ def test_소싱_계정_id_를_소싱처와_아이디로_찾는다():
     respx.get(f'{API}/sourcing-accounts').mock(
         return_value=httpx.Response(
             200,
-            json={'items': [
-                {'id': 'sa_1', 'source_site': 'MUSINSA', 'username': 'buyer02'},
-                {'id': 'sa_2', 'source_site': 'MUSINSA', 'username': 'buyer01'},
-            ]},
+            json={
+                'items': [
+                    {'id': 'sa_1', 'source_site': 'MUSINSA', 'username': 'buyer02'},
+                    {'id': 'sa_2', 'source_site': 'MUSINSA', 'username': 'buyer01'},
+                ]
+            },
         )
     )
     assert client().sourcing_account_id('MUSINSA', 'buyer01') == 'sa_2'
@@ -276,7 +278,12 @@ def test_옵션_머리말이_여럿이면_모두_뗀다():
 def test_주문_옵션은_등록_매칭된_소싱처_옵션_이름으로_바꾼다():
     from samba_agent.wave.client import WaveOrderDetail
 
-    base = {'order_number': 'N1', 'source_site': 'MUSINSA', 'seller': 'KT알파쇼핑', 'product_name': '티셔츠'}
+    base = {
+        'order_number': 'N1',
+        'source_site': 'MUSINSA',
+        'seller': 'KT알파쇼핑',
+        'product_name': '티셔츠',
+    }
     # 마켓 옵션 '01올리브/L' 은 등록 옵션 '01올리브 / L' 로 만든 것이다
     d = WaveOrderDetail(
         **base,
@@ -291,3 +298,45 @@ def test_주문_옵션은_등록_매칭된_소싱처_옵션_이름으로_바꾼�
     # 매칭이 없거나 둘 이상이면 원래 옵션 그대로
     n = WaveOrderDetail(**base, product_option='블랙 S', source_options=[{'name': '090'}])
     assert n.to_order_ref().option == '블랙 S' and n.to_order_ref().market_option is None
+
+
+def test_OrderRef_는_삼바웨이브_행_id_를_들고_다닌다():
+    ref = WaveOrder.model_validate(ORDER_JSON).to_order_ref()
+    assert ref.wave_id == 'uuid-1'
+    assert ref.wave_key == 'uuid-1'
+    blank = WaveOrder.model_validate({**ORDER_JSON, 'id': ''}).to_order_ref()
+    assert blank.wave_id is None and blank.wave_key == '2026092300001'
+
+
+@respx.mock
+def test_행_id_로_조회하고_기입한다():
+    """같은 상품주문번호의 다른 행(다른 사이즈)에 적히지 않게 행 id 경로를 쓴다."""
+    get = respx.get(f'{API}/orders/ord_B').mock(
+        return_value=httpx.Response(200, json={'id': 'ord_B', 'order_number': 'X'})
+    )
+    put = respx.put(f'{API}/orders/ord_B/sourcing').mock(
+        return_value=httpx.Response(
+            200, json={'ok': True, 'order': {'id': 'ord_B', 'order_number': 'X'}}
+        )
+    )
+    detail = client().get_order('ord_B')
+    assert (detail.id, detail.order_number) == ('ord_B', 'X')
+    saved = client().record_sourcing('ord_B', sourcing_order_number='S-1', cost=1000)
+    assert saved.id == 'ord_B'
+    assert get.called and put.called
+
+
+@respx.mock
+def test_행이_여럿인_번호_조회는_422_로_막힌다():
+    respx.get(f'{API}/orders/X').mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                'detail': '상품주문번호 X 에 행이 2개입니다 — 행 id 로 지정하세요: ord_A(230), ord_B(210)'
+            },
+        )
+    )
+    with pytest.raises(WaveError) as e:
+        client().get_order('X')
+    assert e.value.status == 422
+    assert 'ord_A' in str(e.value)
