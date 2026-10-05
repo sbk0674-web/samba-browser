@@ -66,7 +66,12 @@ def cny_krw_rate() -> float:
 
 _PRICE_ANY = re.compile(r'^¥\s*(?:\d+(?:\.\d+)?|--)$')
 # 의류 사이즈 표기 차이: 삼바 '2XL' ↔ 得物 'XXL', 셀 글자 'L(身高178-182cm)'
-_SIZE_ALIASES = {'2XL': ('XXL', '2XL'), '3XL': ('XXXL', '3XL'), 'XXL': ('XXL', '2XL'), 'XXXL': ('XXXL', '3XL')}
+_SIZE_ALIASES = {
+    '2XL': ('XXL', '2XL'),
+    '3XL': ('XXXL', '3XL'),
+    'XXL': ('XXL', '2XL'),
+    'XXXL': ('XXXL', '3XL'),
+}
 
 
 def size_cell(nodes: list[Node], size: str) -> Node | None:
@@ -158,9 +163,11 @@ def buy_on_dewu(
             nodes = phone.nodes()
         return nodes
 
-    # 1) 검색 — 홈·상품 화면 어디서 시작해도 뒤로 가며 검색창을 찾는다
+    # 1) 검색 — 지난 화면(주문 목록 검색칸 등)에 휘둘리지 않게 앱을 껐다 켜서 홈부터 시작한다(2026-10-05)
+    phone._run('shell', 'am', 'force-stop', DEWU)
+    sleep(1)
     phone.launch(DEWU)
-    sleep(4)
+    sleep(6)
     nodes = phone.nodes()
     box = None
     for _ in range(6):
@@ -179,8 +186,16 @@ def buy_on_dewu(
         if box is not None and find_text(nodes, '搜索') is not None:
             break
         if box is None and phone.top_package() == DEWU:
-            # 홈 화면이면 위쪽 검색 막대를 눌러 검색 화면으로 들어간다
-            home = next((n for n in nodes if n.y < 160 and '搜索' in (n.text or '')), None)
+            # 홈 화면이면 위쪽 검색 막대(flSearchB)를 눌러 검색 화면으로 들어간다 — 오른쪽 '搜索' 단추는 추천어로 바로
+            # 검색해 버린다(실기 2026-10-05)
+            home = next(
+                (
+                    n
+                    for n in nodes
+                    if n.y < 160 and (n.rid or '').endswith(('id/flSearchB', 'id/bgSearchView'))
+                ),
+                None,
+            ) or next((n for n in nodes if n.y < 160 and '搜索' in (n.text or '')), None)
             if home is not None:
                 phone.tap(home.x, home.y)
                 sleep(2)
