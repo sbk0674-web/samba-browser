@@ -181,3 +181,133 @@ def test_COMMIT_이_잠금에_막히면_되돌려_다음_트랜잭션이_열린�
     reader.execute('COMMIT')
     # 되돌렸으니 다음 집기가 된다
     assert q.claim() is not None
+
+
+# ==================== 같은 상품주문번호 두 행(삼바웨이브 행 id) ====================
+
+
+def test_같은_주문번호라도_행_id_가_다르면_따로_접수한다(q):
+    """실기 20261005DFA7D9 — 230(ord_A)·210(ord_B). 예전엔 order_no UNIQUE 라 둘째 행이 영영 안 들어갔다."""
+    a, created_a = q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_A')
+    b, created_b = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    assert created_a and created_b
+    assert a.id != b.id
+    assert (a.key, b.key) == ('ord_A', 'ord_B')
+    assert len(q.live()) == 2
+    # 행 id 로 각각 찾는다
+    assert q.get('ord_A').id == a.id
+    assert q.get('ord_B').id == b.id
+    assert q.get_by_id(b.id).wave_id == 'ord_B'
+    # 같은 행 재접수는 거절
+    again, created = q.enqueue('X', 'U2', {}, 'ts3', wave_id='ord_A')
+    assert created is False and again.id == a.id
+
+
+def test_행_id_없는_옛_행은_done_이_아니면_같은_주문번호를_막는다(q):
+    legacy, _ = q.enqueue('X', 'U1', {}, 'ts1')  # 슬랙 수동 접수 — wave_id 없음
+    q.claim()
+    q.finish(legacy.id, 'needs_human', error='margin')
+    assert q.find('X', 'ord_A').id == legacy.id  # 사람이 정리하기 전까지 막는다
+    q.finish(legacy.id, 'done')
+    assert q.find('X', 'ord_A') is None  # 기입이 끝난 옛 행은 다른 행(다른 사이즈)을 막지 않는다
+    assert q.find('X', 'ord_B') is None
+
+
+def test_옛_행_재접수에_행_id_가_오면_그_행에_채운다(q):
+    legacy, _ = q.enqueue('X', 'U1', {}, 'ts1')
+    q.claim()
+    q.finish(legacy.id, 'failed')
+    again, created = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_A')
+    assert created is True and again.id == legacy.id
+    assert again.wave_id == 'ord_A'
+    # 이제 그 행 id 로 찾힌다
+    assert q.find('X', 'ord_A').id == legacy.id
+
+
+def test_주문번호_키는_살아_있는_행을_먼저_준다(q):
+    a, _ = q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_A')
+    q.claim()
+    q.finish(a.id, 'done')
+    b, _ = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    assert q.get('X').id == b.id  # 살아 있는 쪽
+    q.finish(b.id, 'done')
+    assert q.get('X').id == b.id  # 둘 다 끝났으면 최근 것
+
+
+def test_행_id_모양의_키는_wave_id_로도_쓴다(q):
+    job, _ = q.enqueue('ord_A', 'U1', {}, 'ts1')  # 슬랙 `주문 처리 ord_A`
+    assert (job.order_no, job.wave_id, job.key) == ('ord_A', 'ord_A', 'ord_A')
+
+
+def test_주문번호로_취소하면_살아_있는_행_전부(q):
+    a, _ = q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_A')
+    b, _ = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    q.cancel('X')
+    assert q.get_by_id(a.id).state == 'cancelled'
+    assert q.get_by_id(b.id).state == 'cancelled'
+    c, _ = q.enqueue('X', 'intake', {}, 'ts3', wave_id='ord_C')
+    q.cancel('ord_C')
+    assert q.get_by_id(c.id).state == 'cancelled'
+
+
+def test_승인_재개는_행_id_로_그_행만(q):
+    a, _ = q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_A')
+    b, _ = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    for job in (a, b):
+        q.progress(job.id, agent='approval.pay', step='승인 대기: pay')
+        q.finish(job.id, 'needs_human')
+    resumed = q.try_start_resume('ord_B', stage='pay')
+    assert resumed is not None and resumed.id == b.id and resumed.state == 'running'
+    assert q.get_by_id(a.id).state == 'needs_human'
+    # 주문번호로 부르면 먼저 접수된 대기 행
+    resumed = q.try_start_resume('X', stage='pay')
+    assert resumed is not None and resumed.id == a.id
+
+
+def test_옛_표_order_no_UNIQUE_는_행_id_표로_옮기고_행과_id_를_지킨다(tmp_path):
+    """하네스 재시작 때 jobs.sqlite 가 옛 모양이면 새 표로 옮긴다 — id 가 바뀌면 체크포인트 스레드(job:<id>)가 끊긴다."""
+    import sqlite3
+
+    path = tmp_path / 'jobs.sqlite'
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          order_no TEXT NOT NULL UNIQUE,
+          requester TEXT NOT NULL,
+          options TEXT NOT NULL DEFAULT '{}',
+          state TEXT NOT NULL DEFAULT 'queued',
+          assignee_agent TEXT, step TEXT, thread_ts TEXT, harness_version TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0, error TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state);
+        INSERT INTO jobs(id, order_no, requester, options, state, step, thread_ts, attempts, created_at, updated_at)
+          VALUES (7, 'X', 'intake', '{"card":"현대"}', 'done', NULL, 'ts7', 1, 't', 't');
+        INSERT INTO jobs(id, order_no, requester, state, created_at, updated_at)
+          VALUES (9, 'Y', 'U1', 'needs_human', 't', 't');
+        """
+    )
+    db.commit()
+    db.close()
+
+    q = JobQueue(path)
+    old = q.get_by_id(7)
+    assert old is not None
+    assert (old.order_no, old.wave_id, old.options, old.state, old.thread_ts, old.attempts) == (
+        'X',
+        None,
+        {'card': '현대'},
+        'done',
+        'ts7',
+        1,
+    )
+    assert q.get_by_id(9).state == 'needs_human'
+    # 옮긴 뒤에는 같은 주문번호의 둘째 행이 들어간다(옛 행은 done)
+    b, created = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    assert created is True and b.id > 9
+    # 다시 열어도 또 옮기지 않는다(멱등)
+    q2 = JobQueue(path)
+    assert q2.get_by_id(b.id).wave_id == 'ord_B'
+    assert q2.find('X', 'ord_B').id == b.id
