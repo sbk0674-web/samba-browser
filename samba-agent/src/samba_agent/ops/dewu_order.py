@@ -168,7 +168,10 @@ def buy_on_dewu(
         # (실기 2026-10-03: 상품 화면의 '立即购买' 를 보고 멈춰 '검색창을 못 찾았다')
         # 검색 화면의 입력칸은 id 가 etSearch 다(글자가 비어 있어도) — 글자 위치 추정보다 먼저 본다(실기 2026-10-05)
         box = next((n for n in nodes if (n.rid or '').endswith('id/etSearch')), None)
-        if box is None:
+        # 주문 목록의 검색칸('品牌名/商品名/订单号')도 etSearch 다 — 거기선 상품이 안 나온다(실기 2026-10-05). 뒤로 간다
+        if box is not None and has_text(nodes, '订单号'):
+            box = None
+        elif box is None:
             box = next(
                 (n for n in nodes if n.y < 140 and n.x < 520 and n.text and n.text != '搜索'),
                 None,
@@ -195,7 +198,8 @@ def buy_on_dewu(
         raise DewuOrderError('得物 검색창을 못 찾았다')
     phone.tap(box.x, box.y)
     sleep(2)
-    # 지난 검색어가 칸에 남아 있으면 뒤에 붙는다 — 먼저 지운다
+    # 지난 검색어가 칸에 남아 있으면 뒤에 붙는다 — 커서를 끝으로 보내고 지운다(앞에 있으면 지워지지 않았다, 2026-10-05)
+    phone._run('shell', 'input', 'keyevent', '123')
     phone._run('shell', 'input', 'keyevent', *(['67'] * 30))
     phone._run('shell', 'input', 'text', re.sub(r'[^A-Za-z0-9-]', '', model))
     sleep(1)
