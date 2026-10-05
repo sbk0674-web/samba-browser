@@ -2017,9 +2017,7 @@ class BuyerAgent(AgentBase):
                     chosen = resolved
                     self.note('옵션 선택', f'{resolved} — {picked.reason}')
             if chosen and chosen != a.order.option:
-                self.note(
-                    '옵션 재선택', mask_text(f'[{a.order.option}] → [{chosen}] 로 다시 연다')
-                )
+                self.note('옵션 재선택', mask_text(f'[{a.order.option}] → [{chosen}] 로 다시 연다'))
                 reselected: dict[str, str] = getattr(self, '_reselected', {})
                 reselected[str(a.order.option)] = chosen
                 self._reselected = reselected
@@ -3417,7 +3415,8 @@ class BuyerAgent(AgentBase):
             got = self._payable_only(self._audit_quotes(a, self._quote_batch(a, tied)))
         except AgentFailure as e:
             self.note(
-                '계정 전환', mask_text(f'{", ".join(tied)}: 견적 불가({e.reason[:60]}) — {acc} 로 산다')
+                '계정 전환',
+                mask_text(f'{", ".join(tied)}: 견적 불가({e.reason[:60]}) — {acc} 로 산다'),
             )
             return quotes
         cost = _as_float(snap.get('cost'))
@@ -3710,6 +3709,35 @@ class BuyerAgent(AgentBase):
                 'needs_human', f'고른 옵션이 후보에 없다: {picked.choice}', FailReason.UNKNOWN
             )
         self.note('옵션 선택', f'{picked.choice} — {picked.reason}')
+        reached_sheet = snap.get('cost') is not None or bool(snap.get('methods'))
+        if (
+            not reached_sheet
+            and not snap.get('selected')
+            and picked.choice != str(a.order.option or '')
+        ):
+            # 스냅샷이 주문서까지 못 갔다(선택지만 읽음) — 고른 선택지 글자로 다시 열어야 배송지·결제수단이 생긴다
+            # (실기 2026-10-05 롯데온 스케쳐스: 선택지 '235 139,000' 과 주문 옵션 '화이트 / 235', 수리 시간 초과로 note 가 달라
+            # 앞의 재선택 분기를 못 탔다)
+            reselected: dict[str, str] = getattr(self, '_reselected', {})
+            reselected[str(a.order.option or '')] = picked.choice
+            self._reselected = reselected
+            self.note(
+                '옵션 재선택',
+                mask_text(f'[{a.order.option}] → [{picked.choice}] 로 주문서를 다시 연다'),
+            )
+            snap = self._snapshot(a, account)
+            if snap.get('cost') is None and not snap.get('methods'):
+                raise AgentFailure(
+                    'needs_human',
+                    f'고른 선택지 [{picked.choice}] 로도 주문서를 못 열었다: {snap.get("note") or snap.get("error") or ""}',
+                    FailReason.UNKNOWN,
+                )
+            if (
+                source_of(self.spec.name).payment_quotes
+                and not snap.get('_quoted')
+                and _as_float(snap.get('cost')) > 0
+            ):
+                self._apply_payment_quotes(a, account, snap)
         # 배송지 — 개인정보(이름·주소)라 Assignment/state/payload 에는 절대 담지 않는다.
         # 실행 시점에만 받아 입력 도구 호출에 바로 쓰고 로컬 변수 밖으로 내보내지 않는다.
         self._set_shipping(a, snap, account)
