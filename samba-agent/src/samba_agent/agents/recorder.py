@@ -263,7 +263,7 @@ class RecorderAgent(AgentBase):
             try:
                 status = str(
                     self._wave.get_order(
-                        a.order.order_no, sourcing_order_number=sourcing_no
+                        a.order.wave_key, sourcing_order_number=sourcing_no
                     ).status
                     or ''
                 )
@@ -393,7 +393,8 @@ class RecorderAgent(AgentBase):
         self.step('recorder: 삼바웨이브 기입')
         try:
             self._wave.record_sourcing(  # type: ignore[union-attr]
-                a.order.order_no,
+                # 행 id 로 기입한다 — 같은 상품주문번호의 다른 행(다른 사이즈)에 적히지 않게
+                a.order.wave_key,
                 sourcing_order_number=sourcing_no,
                 cost=float(values.get('real_price') or 0),
                 shipping_fee=float(values.get('shipping_fee') or 0),
@@ -408,9 +409,9 @@ class RecorderAgent(AgentBase):
                 replace=bool(str(a.options.get('rebuy_of') or '').strip()),
             )
             self.step('recorder: 기입 확인')
-            # 행이 여럿인 주문은 방금 적은 행을 되읽는다(삼바웨이브 기본은 아직 안 산 행)
+            # 되읽기도 행 id 로 — 행 id 가 없는 옛 접수는 소싱주문번호로 방금 적은 행을 고른다
             saved = self._wave.get_order(  # type: ignore[union-attr]
-                a.order.order_no, sourcing_order_number=sourcing_no
+                a.order.wave_key, sourcing_order_number=sourcing_no
             )
         except WaveError as e:
             status = 'needs_human' if e.reason is FailReason.DUPLICATE else 'fail'
@@ -444,6 +445,7 @@ class RecorderAgent(AgentBase):
             float(values.get('shipping_fee') or 0),
             str(a.handoff.get('account') or a.order.account or ''),
             _source_site(str(a.handoff.get('buy_source') or a.order.source)),
+            wave_id=a.order.wave_id or '',
         )
         if self.mark_status:
             self._mark_waiting_ship(a, sourcing_no)

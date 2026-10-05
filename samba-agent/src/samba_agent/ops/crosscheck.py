@@ -66,6 +66,12 @@ class LedgerRow:
     state: str = 'ok'
     restored_at: str | None = None
     source_checked_at: str | None = None
+    # 삼바웨이브 행 id(ord_…) — 같은 주문번호의 다른 행과 구분해 조회·되돌린다. 옛 줄은 빈 문자열
+    wave_id: str = ''
+
+    @property
+    def wave_key(self) -> str:
+        return self.wave_id or self.order_no
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,8 @@ class Ledger:
             cols = {r[1] for r in db.execute('PRAGMA table_info(ledger)')}
             if 'source_checked_at' not in cols:
                 db.execute('ALTER TABLE ledger ADD COLUMN source_checked_at TEXT')
+            if 'wave_id' not in cols:
+                db.execute('ALTER TABLE ledger ADD COLUMN wave_id TEXT NOT NULL DEFAULT ""')
 
     def _open(self) -> sqlite3.Connection:
         db = sqlite3.connect(self._path, timeout=20)
@@ -124,6 +132,7 @@ class Ledger:
         recorded_at: str | None = None,
         *,
         trusted: bool = True,
+        wave_id: str = '',
     ) -> None:
         """기입한 값을 남긴다. 같은 주문·소싱번호를 다시 적으면 새 값으로 바꾼다(재기입).
 
@@ -156,7 +165,8 @@ class Ledger:
             ).fetchall()
         latest: dict[str, LedgerRow] = {}
         for r in rows:
-            latest[r['order_no']] = LedgerRow(**dict(r))
+            row = LedgerRow(**dict(r))
+            latest[row.wave_key] = row
         return [r for r in latest.values() if r.state == 'ok']
 
     def mark(self, row: LedgerRow, state: str) -> None:
@@ -194,13 +204,20 @@ def configure(path: Path | str) -> Ledger:
 
 
 def note_recorded(
-    order_no: str, source_order_no: str, cost: float, shipping_fee: float, account: str, site: str
+    order_no: str,
+    source_order_no: str,
+    cost: float,
+    shipping_fee: float,
+    account: str,
+    site: str,
+    *,
+    wave_id: str = '',
 ) -> None:
     """기입이 끝난 값을 장부에 남긴다. 장부가 없거나 쓰기에 실패해도 주문 진행은 막지 않는다."""
     if _default is None or not order_no or not source_order_no:
         return
     try:
-        _default.put(order_no, source_order_no, cost, shipping_fee, account, site)
+        _default.put(order_no, source_order_no, cost, shipping_fee, account, site, wave_id=wave_id)
     except sqlite3.Error:
         _log.exception('교차 검증 장부 기록 실패: %s', order_no)
 
@@ -282,7 +299,7 @@ class CrossChecker:
         kinds: dict[str, tuple[str, ...]] = {}
         for row in self._ledger.recent(self._days):
             try:
-                order = self._wave.get_order(row.order_no, sourcing_order_number=row.source_order_no)
+                order = self._wave.get_order(row.wave_key, sourcing_order_number=row.source_order_no)
             except WaveError as e:
                 _log.debug('교차 검증: %s 조회 실패 — 다음 주기에 다시 본다: %s', row.order_no, e)
                 continue
@@ -418,7 +435,7 @@ class CrossChecker:
         account_id = self._wave.sourcing_account_id(row.site, row.account) if row.site and row.account else None
         try:
             self._wave.record_sourcing(
-                row.order_no,
+                row.wave_key,
                 sourcing_order_number=row.source_order_no,
                 cost=row.cost,
                 # 배송비는 사람이 바꾸는 값(반품비·까대기)이라 지금 값을 지킨다

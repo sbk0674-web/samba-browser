@@ -2957,7 +2957,9 @@ class BuyerAgent(AgentBase):
         if len(by_code) == 1:
             self.note(
                 '옵션 선택',
-                mask_text(f'[{wanted}] → {by_code[0]} (한 자리 사이즈 ↔ 세 자리 코드, 상품 사이즈표 규칙)'),
+                mask_text(
+                    f'[{wanted}] → {by_code[0]} (한 자리 사이즈 ↔ 세 자리 코드, 상품 사이즈표 규칙)'
+                ),
             )
             return by_code
         pool = numeric_overlap_options(options, wanted)
@@ -4004,7 +4006,7 @@ class BuyerAgent(AgentBase):
         self._forwarder_seen = seen
         if order.order_no not in seen:
             try:
-                shipping = self._shipping_fn(order.order_no, 'direct')
+                shipping = self._shipping_fn(order.wave_key, 'direct')
             except (WaveError, AgentFailure):
                 return False  # 못 읽으면 기존 판정대로 — 직배 입력 단계에서 다시 멈춘다
             text = ' '.join(
@@ -4033,7 +4035,7 @@ class BuyerAgent(AgentBase):
         """
         if self._shipping_fn is not None:
             try:
-                fetched = self._shipping_fn(a.order.order_no, self.order_type_of(a.order, snap))
+                fetched = self._shipping_fn(a.order.wave_key, self.order_type_of(a.order, snap))
             except WaveError as e:
                 raise AgentFailure('fail', f'배송지 조회 실패: {e}', e.reason) from e
             if fetched:

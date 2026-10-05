@@ -29,6 +29,8 @@ _STATUS_REASON = {
     403: FailReason.PERMISSION_DENIED,
     404: FailReason.UNKNOWN,
     409: FailReason.DUPLICATE,
+    # 상품주문번호에 행이 여럿(행 id 로 다시 불러야 한다) — 사유는 UNKNOWN, 호출부가 status 로 가른다
+    422: FailReason.UNKNOWN,
     503: FailReason.PERMISSION_DENIED,
 }
 
@@ -204,6 +206,8 @@ class WaveOrder(BaseModel):
         sku = f'{name} [{option}]' if (name and option) else (name or self.order_number)
         return OrderRef(
             order_no=self.order_number,
+            # 행 id — 같은 상품주문번호의 다른 행(다른 사이즈)과 구분해 조회·기입한다
+            wave_id=(self.id or '').strip() or None,
             source=self.source_site or '',
             seller=(self.seller or '').strip(),
             sku=sku,
@@ -371,10 +375,12 @@ class WaveClient:
     ) -> WaveOrderDetail:
         """주문 1건 상세. 배송지가 실려 온다 — 호출부는 즉시 쓰고 버린다.
 
+        ``order_no`` 는 주문 키 — 행 id(`ord_…`, OrderRef.wave_key) 또는 상품주문번호. 한 상품주문번호에
+        행이 여럿이면 삼바웨이브는 번호만으로는 422 를 준다(실기 2026-10-05 20261005DFA7D9: 230 을 샀는데
+        되읽기가 210 행을 줬다) — 호출부는 행 id 로 부른다. ``sourcing_order_number`` 는 옛 호환(그 번호가
+        적힌 행).
         ``order_type`` 을 주면 그 종류의 배송지(까대기 = 사무실)를 달라고 요청한다. 삼바웨이브가
         아직 이 인자를 모르면 응답의 order_type 이 다르게 오고, 호출부가 그걸 보고 멈춘다.
-        한 상품주문번호에 행이 여럿이면 삼바웨이브는 아직 안 산 행을 준다. 기입 되읽기는
-        ``sourcing_order_number`` 로 방금 적은 행을 고른다(실기 20260927C5313B 240·260).
         """
         params: dict[str, str] = {}
         if order_type:
@@ -397,6 +403,8 @@ class WaveClient:
         replace: bool = False,
     ) -> WaveOrder:
         """소싱주문번호·매입금액을 삼바웨이브 행에 기입한다. 다른 번호가 이미 있으면 409(DUPLICATE).
+
+        ``order_no`` 는 주문 키(행 id 또는 상품주문번호) — 행이 여럿인 상품주문번호는 422 로 막힌다.
 
         replace=True 는 소싱처 주문을 취소하고 다시 산 경우(사용자 지시) — 다른 번호가 있어도 덮어쓴다.
 

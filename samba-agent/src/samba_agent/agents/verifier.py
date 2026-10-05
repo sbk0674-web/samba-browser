@@ -55,7 +55,7 @@ class VerifierAgent(AgentBase):
             )
         self.step('verifier: 삼바웨이브 주문 읽기')
         try:
-            order = self._wave.get_order(a.order.order_no)
+            order = self._wave.get_order(a.order.wave_key)
         except WaveError as e:
             raise AgentFailure('fail', f'삼바웨이브 조회 실패: {e}', e.reason) from e
         # 배송지(개인정보)는 쳐다보지 않는다 — 대조 대상 필드만 꺼내 쓴다

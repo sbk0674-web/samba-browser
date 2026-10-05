@@ -57,10 +57,10 @@ class WorkerDeps:
     events: EventLog | None = None
     env: str = 'dev'
     prompt_commit: str = '-'
-    # 이행하지 못한 주문 표시(가격X·재고X) — (주문번호, 실패 사유) → 결과 한 줄(붙일 게 없으면 None).
+    # 이행하지 못한 주문 표시(가격X·재고X) — (작업 키(행 id), 실패 사유) → 결과 한 줄(붙일 게 없으면 None).
     # dry-run 에서는 부르지 않는다
     flag_order: Callable[..., str | None] | None = None
-    # 주문 메모 한 줄 덧붙이기(주문번호, 글) — 카카오페이 최저가인데 비밀번호를 못 받은 주문에 쓴다. 없으면 보고만 한다
+    # 주문 메모 한 줄 덧붙이기(작업 키(행 id), 글) — 카카오페이 최저가인데 비밀번호를 못 받은 주문에 쓴다. 없으면 보고만 한다
     add_memo: Callable[[str, str], bool] | None = None
     # 끝난(done) 작업 뒤처리 — (작업, 그래프 결과) → 보고할 한 줄(할 일 없으면 None). SSG 선물 수락(폰)에 쓴다
     after_done: Callable[[Job, dict], str | None] | None = None
@@ -126,12 +126,12 @@ class Worker:
             msg = mask_text(str(e))[:300]
             self.d.queue.finish(job.id, 'needs_human', error=f'주문 조회 실패: {msg}')
             self.d.report(job, f'주문 조회 실패 — 사람 확인 필요: {msg}')
-            return self.d.queue.get(job.order_no)
+            return self.d.queue.get_by_id(job.id)
         if self.d.sources and order.source.upper() not in self.d.sources:
             why = f'처리 범위 밖 소싱처: {order.source or "(없음)"} — 범위 {sorted(self.d.sources)}'
             self.d.queue.finish(job.id, 'needs_human', error=why)
             self.d.report(job, f'{job.order_no} 건너뜀 — {why}')
-            return self.d.queue.get(job.order_no)
+            return self.d.queue.get_by_id(job.id)
         handler = self.d.phone_sources.get(order.source.upper())
         if handler is not None:
             return self._run_phone_order(job, order, handler)
@@ -161,7 +161,7 @@ class Worker:
             self.d.report(
                 job, f'{job.order_no} 폰 구매 소싱처({order.source}) — dry-run 이라 사지 않음'
             )
-            return self.d.queue.get(job.order_no)
+            return self.d.queue.get_by_id(job.id)
         self.d.queue.progress(job.id, agent=f'phone.{order.source.lower()}', step='폰 구매')
         try:
             outcome, fail, line = handler(job, order)
@@ -176,7 +176,7 @@ class Worker:
         # 슬랙 보고와 별개로 로그에도 남긴다 — 폰 구매는 그래프 이벤트가 없어 실패 사유를 로그에서 못 찾았다(실기 10/3)
         _log.info('[폰 구매] %s', mask_text(f'{job.order_no} {outcome} — {line}')[:300])
         self.d.report(job, mask_text(f'{job.order_no} {outcome} — {line}')[:300])
-        return self.d.queue.get(job.order_no)
+        return self.d.queue.get_by_id(job.id)
 
     def _close_leftovers(self, label: str) -> None:
         """작업 시작 직전 — 지난 작업(죽은 하네스·시간 초과)이 남긴 탭을 닫는다. 화면을 남기는 설정이면 건너뛴다."""
@@ -229,17 +229,16 @@ class Worker:
             _log.info('%s 작업이 연 탭 %d개 닫음', job.order_no, closed)
         return job
 
-    def resume(
-        self, order_no: str, approved: bool, by: str, stage: str | None = None
-    ) -> Job | None:
+    def resume(self, key: str, approved: bool, by: str, stage: str | None = None) -> Job | None:
         """슬랙 승인 버튼 → 멈춘 그래프를 깨운다.
 
+        ``key`` 는 작업 키(삼바웨이브 행 id 또는 상품주문번호 — Job.key). 승인 버튼 value 에 실려 돌아온다.
         끝난 주문이거나(중복 클릭 등) 이미 다른 단계로 넘어갔으면 None.
         ``stage`` 를 주면 지금 큐가 그 단계(``승인 대기: {stage}``)에 멈춰 있을 때만 재개한다 —
         같은 버튼을 두 번 눌러도 두 번째는 여기서 걸린다(스펙 리뷰 지적 — Critical 2).
         읽기→running 전환은 JobQueue 트랜잭션으로 원자화돼 있어 동시 호출도 하나만 통과한다.
         """
-        job = self.d.queue.try_start_resume(order_no, stage=stage)
+        job = self.d.queue.try_start_resume(key, stage=stage)
         if job is None:
             return None
         return self._cleanup_tabs(self._invoke(job, resume_command(approved, by)))
@@ -359,7 +358,7 @@ class Worker:
         self.d.queue.progress(job.id, agent=None, step=None)
         self.d.queue.finish(job.id, 'needs_human', error=str(FailReason.UNKNOWN))
         self.d.report(job, f'{job.order_no} 처리 중 오류로 사람에게 넘긴다 — {masked}')
-        return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+        return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
 
     def _apply(self, job: Job, out: dict) -> Job:
         """그래프 결과를 큐와 슬랙에 옮긴다."""
@@ -372,7 +371,8 @@ class Worker:
             self.d.queue.progress(job.id, agent=f'approval.{stage}', step=f'승인 대기: {stage}')
             self.d.queue.finish(job.id, 'needs_human')
             if self.d.approval_report is not None:
-                self.d.approval_report(job, order_no, stage, summary)
+                # 버튼 value 에는 작업 키(행 id)를 싣는다 — 같은 상품주문번호의 다른 행 승인과 섞이지 않게
+                self.d.approval_report(job, job.key, stage, summary)
             else:
                 # 버튼을 달 통로가 없을 때의 폴백 — 사람이 `@삼바` 명령으로 이어가야 한다
                 self.d.report(job, f'승인 요청\n{summary}')
@@ -385,9 +385,9 @@ class Worker:
             if self.d.auto_approve and not (manual and stage == 'pay'):
                 # 사용자가 자동 이행을 켰다 — 요약을 남긴 채 곧바로 승인해 이어 간다
                 self.d.report(job, f'자동 승인: {order_no} {stage}')
-                resumed = self.resume(order_no, True, 'auto-approve', stage)
-                return resumed if resumed is not None else self.d.queue.get(job.order_no)  # type: ignore[return-value]
-            return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+                resumed = self.resume(job.key, True, 'auto-approve', stage)
+                return resumed if resumed is not None else self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
+            return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         outcome = out['outcome']
         fail = out.get('fail_reason')
         self.d.queue.progress(job.id, agent=None, step=None)
@@ -410,10 +410,14 @@ class Worker:
                 # 기존 항목으로 골라 통과한다(실기 2026-09-30~10-01, 3건 모두 두 번째에 이행). 한 번만 다시 산다
                 self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
                 self.d.queue.enqueue(
-                    job.order_no, job.requester, {**job.options, SHIP_RETRY_KEY: 1}, job.thread_ts
+                    job.order_no,
+                    job.requester,
+                    {**job.options, SHIP_RETRY_KEY: 1},
+                    job.thread_ts,
+                    wave_id=job.wave_id,
                 )
                 self.d.report(job, f'{job.order_no} 배송지 저장 뒤 목록 미반영 — 한 번 다시 산다')
-                return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         tries = int(job.options.get(ACCOUNT_RETRY_KEY) or 0)
         if outcome == 'needs_human' and not self.d.dry_run and tries < ACCOUNT_RETRY_MAX:
             reason = _failed_reason(out)
@@ -430,13 +434,14 @@ class Worker:
                     job.requester,
                     {**job.options, 'skip_accounts': skip_all, ACCOUNT_RETRY_KEY: tries + 1},
                     job.thread_ts,
+                    wave_id=job.wave_id,
                 )
                 self.d.report(
                     job,
                     mask_text(f'{job.order_no} {reason}')[:200]
                     + f' — {skipped} 계정을 빼고 다시 산다',
                 )
-                return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         if outcome == 'needs_human' and not self.d.dry_run and not job.options.get('card'):
             reason = _failed_reason(out)
             if KAKAO_FALLBACK_MARK in reason:
@@ -450,13 +455,13 @@ class Worker:
                 note = '메모 남김'
                 if self.d.add_memo is not None:
                     try:
-                        self.d.add_memo(job.order_no, memo)
+                        self.d.add_memo(job.key, memo)
                     except Exception as exc:  # noqa: BLE001 — 메모 실패가 작업 결과를 바꾸지 않는다
                         note = f'메모 실패: {mask_text(str(exc))[:80]}'
                 self.d.report(
                     job, f'{job.order_no} 카카오페이 최저가·비밀번호 미입력 — {note}(사람이 결제)'
                 )
-                return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         export_alert = _export_alert(out)
         if export_alert is not None:
             self.d.report(job, mask_text(f'{job.order_no} 외부 기입 {export_alert}')[:200])
@@ -475,7 +480,8 @@ class Worker:
                     time.strftime('%m/%d %H:%M'),
                 )
                 if evidence:
-                    flagged = self.d.flag_order(job.order_no, str(fail), evidence)
+                    # 표시·취소는 그 행(사이즈)만 — 키는 행 id
+                    flagged = self.d.flag_order(job.key, str(fail), evidence)
                     self.d.report(
                         job, f'{job.order_no} {kind} 자동 취소중 — {flagged or "결과 없음"}'
                     )
@@ -484,10 +490,10 @@ class Worker:
                         job, f'{job.order_no} {kind} 보류 — 검수 필요({mask_text(reason)[:80]})'
                     )
             else:
-                flagged = self.d.flag_order(job.order_no, str(fail))
+                flagged = self.d.flag_order(job.key, str(fail))
                 if flagged:
                     self.d.report(job, f'{job.order_no} {flagged}')
-        return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+        return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
 
 
 def _export_alert(out: dict) -> str | None:

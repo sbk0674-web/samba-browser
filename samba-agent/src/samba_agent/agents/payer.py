@@ -755,7 +755,7 @@ class PayerAgent(AgentBase):
             return
         self.step('payer: 결제 직전 SAMBA 재조회')
         try:
-            current = self._wave.get_order(a.order.order_no)
+            current = self._wave.get_order(a.order.wave_key)
         except WaveError as e:
             raise AgentFailure(
                 'needs_human', f'결제 직전 SAMBA 재조회 실패(결제하지 않음): {e}', e.reason

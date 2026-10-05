@@ -107,6 +107,7 @@ def test_결과에_개인정보가_있어도_OrderRef_에는_없다():
     dumped = ref.model_dump()
     assert set(dumped) == {
         'order_no',
+        'wave_id',
         'source',
         'seller',
         'sku',

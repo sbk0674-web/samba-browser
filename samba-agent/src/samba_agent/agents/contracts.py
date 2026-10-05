@@ -15,6 +15,9 @@ class OrderRef(BaseModel):
     """처리 대상 주문. 고객 개인정보는 담지 않는다 — 마스킹 대상 자체를 안 들인다."""
 
     order_no: str
+    # 삼바웨이브 주문 행 id(ord_…). 한 상품주문번호에 행이 여럿일 수 있어(사이즈 2개) 조회·기입은 이 id 로 한다.
+    # 앱 저장 스크립트로 찾은 주문(옛 경로)은 None
+    wave_id: str | None = None
     source: str  # 소싱처: 무신사 · 29CM · ABC마트 · 롯데온
     seller: str  # 판매처: 포이즌 등
     sku: str
@@ -40,6 +43,11 @@ class OrderRef(BaseModel):
     # 삼바웨이브 플래그(action_tag 토큰, 소문자) — 가격X·재고X·직원A 등. 오류일 수 있어 제외하지 않고
     # 결제 승인 요약에 표시해 사람이 검토한다
     flags: tuple[str, ...] = ()
+
+    @property
+    def wave_key(self) -> str:
+        """삼바웨이브 내부 API 를 부를 때 쓰는 주문 키 — 행 id 가 있으면 그것, 없으면 상품주문번호."""
+        return self.wave_id or self.order_no
 
 
 class Evidence(BaseModel):

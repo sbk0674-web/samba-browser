@@ -267,7 +267,7 @@ def main() -> None:
     _parse_order = parse_order_fn(wave, lookup_bridge)
 
     def _source_sku_of(job: Job) -> tuple[str, str]:
-        order = _parse_order(job.order_no, job.options)
+        order = _parse_order(job.order_no, job.options, job.wave_id)
         return order.source, order.sku
 
     agents = build_agents(reg, bridge, decide, wave, settings.compare_accounts_max)
@@ -377,7 +377,8 @@ def main() -> None:
             graph=graph,
             version=version_fn,  # 콜러블 그대로 넘긴다 — tick 마다 다시 불러 규칙 변경을 반영한다
             report=_report,
-            parse_order=lambda job: _parse_order(job.order_no, job.options),
+            # 행 id(wave_id)가 있으면 그것으로 조회한다 — 같은 상품주문번호의 다른 행을 읽지 않게
+            parse_order=lambda job: _parse_order(job.order_no, job.options, job.wave_id),
             # 같은 주문을 취소 뒤 다시 접수하면 job id(=스레드)가 같다 — 끝난 실행의 attempts·results 가
             # 남은 채 새 입력이 들어가면 재시도 횟수가 이어져 버린다(실기). 끝난 스레드는 지우고 시작한다
             reset_thread=checkpointer.delete_thread,

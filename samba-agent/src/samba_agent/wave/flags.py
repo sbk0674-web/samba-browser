@@ -66,9 +66,10 @@ class FlagMarker:
         # 취소중으로 바뀐 주문을 외부 프로그램(샵마인·EMP)에도 알린다 — 없으면 하지 않는다
         self._on_cancelled = on_cancelled
 
-    def mark(self, order_no: str, error: str | None, evidence: str | None = None) -> str | None:
+    def mark(self, key: str, error: str | None, evidence: str | None = None) -> str | None:
         """표시 + 취소요청. 결과 한 줄(해당 없으면 None). 실패해도 예외를 내지 않는다(작업 결과는 이미 정해졌다).
 
+        ``key`` 는 주문 키 — 삼바웨이브 행 id(ord_…) 또는 상품주문번호. 행 id 면 그 행(사이즈)만 바꾼다.
         evidence 를 주면 그 글자가 삼바웨이브 메모의 [취소근거] 가 된다(없으면 사유 코드만).
         """
         flag = flag_for(error)
@@ -76,8 +77,9 @@ class FlagMarker:
             return None
         token, label = flag
         try:
-            changed = self._wave.set_cancel_requested(order_no, evidence or str(error), flag=token)
-            tagged = token in self._wave.get_order(order_no).flags
+            changed = self._wave.set_cancel_requested(key, evidence or str(error), flag=token)
+            detail = self._wave.get_order(key)
+            tagged = token in detail.flags
         except WaveError as e:
             return f'{label}·취소요청 실패: {e}'
         except Exception as e:  # 연결 오류 등 — 작업 결과에는 영향이 없다
@@ -85,7 +87,8 @@ class FlagMarker:
             return f'{label}·취소요청 실패: {type(e).__name__}'
         status = '취소요청으로 바꿈' if changed else '이미 취소요청'
         if self._on_cancelled is not None:
-            note = self._on_cancelled(order_no)
+            # 외부 프로그램(샵마인·EMP)은 상품주문번호로 찾는다 — 행 id 가 아니라 번호를 넘긴다
+            note = self._on_cancelled(detail.order_number or key)
             if note:
                 status = f'{status} · {note}'
         return f'{label} 표시함 · {status}' if tagged else f'{label} 태그 확인 안 됨 · {status}'

@@ -442,7 +442,9 @@ def make_shihuo_handler(
 
     def handle(job: object, order: object) -> tuple[str, str | None, str]:
         order_no = str(getattr(order, 'order_no', ''))
-        detail = wave.get_order(order_no)  # type: ignore[attr-defined]
+        # 조회·기입은 삼바웨이브 행 id 로(같은 주문번호의 다른 행과 구분) — 없으면 주문번호
+        wave_key = str(getattr(order, 'wave_key', '') or order_no)
+        detail = wave.get_order(wave_key)  # type: ignore[attr-defined]
         seller = (detail.source_seller or '').strip()
         if seller != '得物':
             return (
@@ -493,7 +495,7 @@ def make_shihuo_handler(
         # 주문접수로 남았다)
         account_id = wave.only_sourcing_account_id('DEWU')  # type: ignore[attr-defined]
         wave.record_sourcing(  # type: ignore[attr-defined]
-            order_no,
+            wave_key,
             sourcing_order_number=res.order_no,
             cost=res.cost_krw,
             shipping_fee=CN_SHIPPING_FEE,
