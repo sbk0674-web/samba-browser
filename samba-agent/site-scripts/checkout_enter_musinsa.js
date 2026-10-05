@@ -1,7 +1,7 @@
-// 무신사 결제창 진입(2026-09-26 검토 반영): 결제수단을 고르고 '결제하기'로 결제창을 띄운다(실결제 진입, 비밀번호는 하네스가)
+// 무신사 결제창 진입: 결제수단 고르고 결제하기 직전(또는 결제)까지
 // 인자 {card, profile?, dryRun?, expect:{name, option, selected, product_no}, amount?, tab?}
-// dry 면 결제하기 직전까지만. 실결제인데 expect 없으면 결제 안 함. 탭은 args.tab 만, 없으면 대조로 딱 하나
-// 총액을 못 읽으면 실패, args.amount 보다 크면 멈춤. 무신사페이는 두 번 누르지 않는다(비밀번호 없는 결제)
+// dry 면 누르기 직전까지. expect 없으면 결제 안 함. 탭은 args.tab
+// 총액 못 읽으면 실패, amount+배송비 초과면 멈춤
 // 반환 {ok, method, popup_url, dry?, points_only?, total, order_item, note, error?}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const lc = s => nz(s).toLowerCase()
@@ -9,7 +9,7 @@ const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const OF = /musinsa\.com\/order\/order-form/
 const get = async o => { for (let i = 0; i < 6; i++) { try { return (await page.get(o)).tree } catch (e) { await sleep(600) } } return '' }
 const text = async () => nz((await get({})).split('PAGE TEXT:')[1])
-// 총액: 못 읽으면 null(0 으로 보지 않는다)
+// 총액: 못 읽으면 null
 const totalOf = t => { const m = t.match(/총 결제 금액\s*(?:\d+%\s*)?([\d,]+)\s*원/); return m ? num(m[1]) : null }
 const segOf = t => nz((t.match(/주문 ?상품\s*\d+\s*개\s*(.*?)\s*\/\s*\d+\s*개/) || [])[1])
 const dry = !!(args.dryRun || args.dry_run)
@@ -90,15 +90,15 @@ if (m) {
   R.method = m
   if (m === '무신사페이' && !/\(\d{3,4}\*?\)\s*(신용카드|체크카드)/.test(tx.slice(tx.indexOf('결제 수단'), tx.indexOf('결제 금액 상품 금액')))) return fail('no-registered-card', '무신사페이 registered card not found')
   if (m === '무신사머니' && /잔액이 부족|계좌를 (등록|연결)해/.test(tx)) return fail('money-unavailable', '무신사머니 잔액·계좌 확인 필요')
+  if (m === '무신사머니') { const bal = num((tx.match(/현재 보유 머니\s*([\d,]+)\s*원/) || [])[1]); const tot = totalOf(tx); if (bal && tot && bal < tot) return fail('money-insufficient', `머니 ${bal} < ${tot}`) }
 }
 // 4) 금액: 수단을 고른 뒤의 화면 총액
 R.total = totalOf(tx)
 if (R.total == null) return fail('total-not-read', '총 결제 금액을 읽지 못함')
 if (pointsOnly && R.total > 0) return fail('not-points-only', `total ${R.total} > 0`)
 const amt = Number(args.amount)
-// 견적에 없던 배송비만큼 커진 건 넘어간다(결제 화면에만 배송비가 붙는 상품, 2026-10-05)
 const shipFee = num((tx.match(/배송비\s*\+?\s*([\d,]{3,})\s*원/) || [])[1]) || 0
-if (amt > 0 && R.total > amt + shipFee) return fail('amount-exceeded', `total ${R.total} > expected ${amt}+${shipFee}`)
+if (amt > 0 && R.total > amt + shipFee) return fail('amount-exceeded', `total ${R.total} > ${amt}+${shipFee}`)
 if (amt > 0 && R.total > amt) R.shipping_fee = shipFee
 const payLine = (t => t.split('\n').find(x => /^\[\d+\] button "[^"]*결제하기"/.test(x)))(await get({ interactive: 1 })) || String(await page.find('결제하기')).split('\n').find(x => /^\[\d+\] button "[^"]*결제하기"/.test(x))
 if (!payLine) return fail('pay-button-not-found')
