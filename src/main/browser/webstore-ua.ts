@@ -10,7 +10,11 @@
 
 import type { Session, WebContents } from 'electron'
 import { WEBSTORE_HOST } from '../../shared/extensions'
-import { isGoogleSigninUrl } from './google-signin-ua'
+import {
+  electronUserAgent,
+  GOOGLE_SIGNIN_URL_PATTERNS,
+  isGoogleSigninUrl
+} from './google-signin-ua'
 
 /** webRequest 필터 — 이 패턴에 걸리는 요청만 UA 를 갈아 끼운다 */
 export const WEBSTORE_URL_PATTERNS = [`https://${WEBSTORE_HOST}/*`]
@@ -38,15 +42,40 @@ export function chromeUserAgent(ua: string): string {
 }
 
 /**
- * 세션에 웹스토어 전용 UA 교체를 건다.
+ * 요청 헤더에 실을 사이트별 UA. 웹스토어는 순수 크롬 UA, 구글 로그인 호스트는 Electron 표기 UA
+ * (구글은 크롬 UA 를 보면 "안전하지 않은 브라우저" 로 로그인을 막는다 — 실기 2026-10-06), 그 밖은 undefined(그대로).
+ * webContents.setUserAgent 는 사람이 링크를 눌러 들어가는 항해의 첫 요청에 늦게 실려(구글 흐름이 GlifWebSignIn 으로 떨어짐)
+ * 헤더 단계에서 확실히 바꾼다
+ */
+export function headerUserAgentFor(
+  url: string,
+  defaultUa: string,
+  electronVersion: string
+): string | undefined {
+  if (isWebstoreUrl(url)) return chromeUserAgent(defaultUa)
+  if (isGoogleSigninUrl(url)) return electronUserAgent(defaultUa, electronVersion)
+  return undefined
+}
+
+/**
+ * 세션에 사이트별 UA 헤더 교체를 건다(웹스토어·구글 로그인).
  * onBeforeSendHeaders 는 세션당 리스너가 하나뿐이라 파티션마다 1회만 걸어야 한다
  * (호출부인 tab-manager 의 hardenSession 이 파티션 단위로 한 번만 부른다)
  */
-export function installWebstoreUserAgent(ses: Session): void {
-  const ua = chromeUserAgent(ses.getUserAgent())
-  ses.webRequest.onBeforeSendHeaders({ urls: WEBSTORE_URL_PATTERNS }, (details, callback) => {
-    callback({ requestHeaders: { ...details.requestHeaders, 'User-Agent': ua } })
-  })
+export function installSiteUserAgents(ses: Session): void {
+  const defaultUa = ses.getUserAgent()
+  const electronVersion = process.versions.electron ?? '0.0.0'
+  ses.webRequest.onBeforeSendHeaders(
+    { urls: [...WEBSTORE_URL_PATTERNS, ...GOOGLE_SIGNIN_URL_PATTERNS] },
+    (details, callback) => {
+      const ua = headerUserAgentFor(details.url, defaultUa, electronVersion)
+      callback({
+        requestHeaders: ua
+          ? { ...details.requestHeaders, 'User-Agent': ua }
+          : details.requestHeaders
+      })
+    }
+  )
 }
 
 /** url 의 호스트가 웹스토어인가(파싱 실패는 아니라고 본다) */
@@ -59,7 +88,7 @@ export function isWebstoreUrl(url: string): boolean {
 }
 
 /**
- * 요청 헤더의 UA 는 installWebstoreUserAgent 가 이미 세션 단위로 바꿔 주지만,
+ * 요청 헤더의 UA 는 installSiteUserAgents 가 이미 세션 단위로 바꿔 주지만,
  * 웹스토어 페이지 JS 가 직접 읽는 `navigator.userAgent` 는 webContents 단위로 따로 설정해야
  * 같이 바뀐다. 그렇지 않으면 헤더와 `navigator.userAgent` 가 서로 달라져 "Chrome으로
  * 전환할까요?" 배너가 계속 뜬다.

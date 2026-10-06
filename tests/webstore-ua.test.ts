@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   chromeUserAgent,
+  headerUserAgentFor,
   installWebstoreNavigatorUserAgent,
   isWebstoreUrl
 } from '../src/main/browser/webstore-ua'
@@ -146,5 +147,33 @@ describe('앱 기본 UA(userAgentFallback) — 모든 사이트에 순수 크롬
     expect(chromeUserAgent(real)).toBe(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.265 Safari/537.36'
     )
+  })
+})
+
+describe('headerUserAgentFor — 요청 헤더에 실을 사이트별 UA', () => {
+  const CHROME_UA =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.265 Safari/537.36'
+
+  it('웹스토어는 순수 크롬 UA', () => {
+    const ua = headerUserAgentFor(
+      'https://chromewebstore.google.com/detail/abc',
+      ELECTRON_UA,
+      '39.8.10'
+    )
+    expect(ua).not.toContain('Electron')
+    expect(ua).toContain('Chrome/129.0.0.0')
+  })
+
+  it('구글 로그인 호스트는 Electron 표기 UA', () => {
+    expect(
+      headerUserAgentFor('https://accounts.google.com/v3/signin/identifier', CHROME_UA, '39.8.10')
+    ).toBe(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.7444.265 Electron/39.8.10 Safari/537.36'
+    )
+  })
+
+  it('그 밖의 호스트는 건드리지 않는다', () => {
+    expect(headerUserAgentFor('https://www.google.com/', CHROME_UA, '39.8.10')).toBeUndefined()
+    expect(headerUserAgentFor('https://artlist.io/', CHROME_UA, '39.8.10')).toBeUndefined()
   })
 })
