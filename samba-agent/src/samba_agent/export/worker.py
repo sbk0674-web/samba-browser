@@ -49,6 +49,9 @@ class _Outcome:
 
 # 화면에서 못 찾은 주문을 포기하기까지의 시간 — 그 전에는 횟수를 넘겨도 다시 본다
 NOT_FOUND_GIVE_UP_S = 24 * 3600
+# EMP 취소 처리는 화면에서 몇 번 시도해도 주문이 안 보이면 사람이 이미 처리한 것이다 — 시간 없이 횟수만 보고
+# 처리완료로 닫는다(사용자 2026-10-06 "emp 처리조회 안 되는 건 사람이 해서 그런 거니 몇 회 시도해도 안 되면 처리완료로")
+HUMAN_HANDLED_TARGETS = frozenset({'emp_cancel'})
 
 
 def _age_s(req: ExportRequest) -> float:
@@ -168,6 +171,15 @@ class ExportWorker:
         # 실패하면(예: sqlite 오류) 리뷰 지적 M2 이전에는 UNKNOWN 실패로 잘못 남았다.
         # 여기서 나는 예외는 run_once 밖으로 그대로 나가고, running 인 행은 재시작 때
         # recover_running 이 되돌린다(같은 값이면 다시 입력하지 않으니 안전하다).
+        if (
+            req.target in HUMAN_HANDLED_TARGETS
+            and outcome.kind == 'fail'
+            and outcome.reason == ExportFail.NOT_FOUND
+        ):
+            outcome = _Outcome(
+                'done',
+                f'{outcome.detail} — 화면에서 못 찾아 사람이 이미 처리한 것으로 보고 처리완료로 닫았다',
+            )
         if batch and completed:
             # 일괄 처리가 찾아서 끝낸 다른 대기 요청도 함께 성공으로 적는다(집은 요청은 아래서)
             self._queue.done_orders(
@@ -285,7 +297,9 @@ class ExportWorker:
             return _Outcome('done', detail), completed
         # 화면(필터)에 아직 없는 주문 — 수집이 늦을 수 있으니 시간을 두고 다시 본다.
         # 쇼핑몰 수집이 몇 시간 늦기도 해서(2026-10-01: 5분 만에 실패로 끝나 미지정 18건 방치) 하루는 계속 본다
-        if req.attempts >= self._max_attempts and _age_s(req) >= NOT_FOUND_GIVE_UP_S:
+        if req.attempts >= self._max_attempts and (
+            _age_s(req) >= NOT_FOUND_GIVE_UP_S or req.target in HUMAN_HANDLED_TARGETS
+        ):
             return (
                 _Outcome(
                     'fail',

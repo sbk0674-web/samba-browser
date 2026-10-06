@@ -471,3 +471,25 @@ def test_취소_연동은_주문이_지금도_취소_상태일_때만_실행한�
     third = w.run_once()  # A3 — 상태를 확인 못 했다: 실행하지 않고 미룬다
     assert third.order_no == 'A3' and third.status == 'pending'
     assert adapter.seen == [['A2']]
+
+
+def test_EMP_취소는_몇_번_시도해도_화면에_없으면_사람이_처리한_것으로_보고_완료로_닫는다(queue):
+    adapter = FakeBatch(present=())
+    queue.enqueue('A1', 'emp_cancel', 0, 0)
+    w = ExportWorker(queue, {'emp_cancel': adapter}, user_idle_s=lambda: 999.0, retry_delay_s=0, max_attempts=2)
+    assert w.run_once().status == 'pending'
+    # 하루를 기다리지 않는다 — 횟수만 채우면 처리완료(사용자 2026-10-06)
+    out = w.run_once()
+    assert out.status == 'done'
+    assert '사람이 이미 처리' in out.detail
+    assert out.attempts == 2
+
+
+def test_EMP_취소가_아닌_대상은_못_찾아도_실패로_남는다(queue, monkeypatch):
+    adapter = FakeBatch(present=())
+    queue.enqueue('A1', 'shopmine', 1000, 0)
+    w = batch_worker(queue, adapter, retry_delay_s=0, max_attempts=2)
+    w.run_once()
+    assert w.run_once().status == 'pending'
+    monkeypatch.setattr('samba_agent.export.worker._age_s', lambda _req: 25 * 3600)
+    assert w.run_once().status == 'failed'
