@@ -21,7 +21,9 @@ const { pageBridge, filledLengths } = vi.hoisted(() => ({
       filledLengths.set(id, value.length)
       return 'ok'
     }),
-    valueLength: vi.fn(async (_tab: unknown, id: number): Promise<number> => filledLengths.get(id) ?? -1),
+    valueLength: vi.fn(
+      async (_tab: unknown, id: number): Promise<number> => filledLengths.get(id) ?? -1
+    ),
     // 로그인 칸 진짜 키 입력 — 테스트에서는 fillValue 와 같은 목으로 흘려 기존 기대를 그대로 둔다
     typeLogin: vi.fn(async (tab: unknown, id: number, value: string) =>
       pageBridge.fillValue(tab, id, value)
@@ -168,5 +170,64 @@ describe('autofillAccount', () => {
   it('계정을 찾지 못하면 값을 읽지 않는다', async () => {
     expect(await autofillAccount(deps({ account: null }), 99)).toBe('account-not-found')
     expect(pageBridge.findLoginFields).not.toHaveBeenCalled()
+  })
+})
+
+describe('2단계 로그인(구글) — 아이디 화면 → 비밀번호 화면', () => {
+  const noWait = async (): Promise<void> => undefined
+
+  it('아이디 칸만 있으면 아이디를 채워 넘기고, 비밀번호 칸이 나오면 이어서 채워 제출한다', async () => {
+    pageBridge.submitForm.mockClear()
+    const tab = tabAt('https://accounts.google.com/v3/signin/identifier')
+    pageBridge.findLoginFields
+      .mockResolvedValueOnce({ username: 1, password: undefined, submit: 3 })
+      .mockResolvedValueOnce({ username: undefined, password: undefined, submit: undefined })
+      .mockResolvedValueOnce({ username: undefined, password: 2, submit: 3 })
+      .mockResolvedValueOnce({ username: undefined, password: 2, submit: 3 })
+    const d = {
+      ...deps({ account: account({ host: 'accounts.google.com', username: 'hong@gmail.com' }) }),
+      autoSubmit: () => true,
+      wait: noWait
+    }
+    expect(await autofillAccount(d, 1, { tab, host: 'accounts.google.com' })).toBe(
+      'filled-username-only'
+    )
+    // 첫 화면: 아이디만 채우고 [다음]을 누른다. 비밀번호는 아직 읽지 않는다
+    expect(pageBridge.fillValue).toHaveBeenNthCalledWith(1, tab, 1, 'hong@gmail.com')
+    expect(pageBridge.submitForm).toHaveBeenCalledTimes(1)
+    // 비밀번호 화면이 나타나면 이어서 채우고 제출한다
+    await vi.waitFor(() => expect(pageBridge.fillValue).toHaveBeenCalledTimes(2))
+    expect(pageBridge.fillValue).toHaveBeenNthCalledWith(2, tab, 2, PASSWORD)
+    await vi.waitFor(() => expect(pageBridge.submitForm).toHaveBeenCalledTimes(2))
+  })
+
+  it('비밀번호 단계에서 비밀번호 칸이 없으면 아이디를 다시 치지 않는다(되돌이 방지)', async () => {
+    pageBridge.submitForm.mockClear()
+    const tab = tabAt('https://accounts.google.com/v3/signin/identifier')
+    pageBridge.findLoginFields.mockResolvedValueOnce({
+      username: 1,
+      password: undefined,
+      submit: 3
+    })
+    const d = {
+      ...deps({ account: account({ host: 'accounts.google.com' }) }),
+      autoSubmit: () => true
+    }
+    expect(
+      await autofillAccount(d, 1, { tab, host: 'accounts.google.com', stage: 'password' })
+    ).toBe('fields-not-found')
+    expect(pageBridge.fillValue).not.toHaveBeenCalled()
+    expect(pageBridge.submitForm).not.toHaveBeenCalled()
+  })
+
+  it('아이디 칸만 있어도 금고 아이디가 비어 있으면 채우지 않는다', async () => {
+    pageBridge.findLoginFields.mockResolvedValueOnce({
+      username: 1,
+      password: undefined,
+      submit: 3
+    })
+    const d = deps({ account: account({ username: '' }) })
+    expect(await autofillAccount(d, 1)).toBe('fields-not-found')
+    expect(pageBridge.fillValue).not.toHaveBeenCalled()
   })
 })
