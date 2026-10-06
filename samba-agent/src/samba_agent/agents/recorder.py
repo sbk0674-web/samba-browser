@@ -19,6 +19,7 @@ from samba_agent.agents.source_detail import (
     detail_goal,
     detail_script,
     site_of,
+    with_pay_card,
 )
 from samba_agent.failures import FailReason
 from samba_agent.ops.crosscheck import note_recorded
@@ -323,6 +324,7 @@ class RecorderAgent(AgentBase):
             # (실기 2026-09-25 HQ2414: 적립 1,640원이 빠져 원가 59,200 기록, 맞는 값 57,560)
             detail = {**detail, 'reward': float(quoted_reward)}
         # 애드픽·샵백 적립은 원가에 넣지 않는다(사용자 2026-09-27) — 주문 상세·견적의 사이트 적립만 쓴다
+        detail = with_pay_card(detail, a.handoff)
         cost = actual_cost(detail)
         if cost is None:
             self.note('실제 원가', '결제액을 못 읽어 견적 원가로 기록')
