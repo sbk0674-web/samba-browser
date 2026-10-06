@@ -1,3 +1,4 @@
+import { clipboard } from 'electron'
 import type { WebContents, WebFrameMain } from 'electron'
 import { z } from 'zod'
 import type {
@@ -48,6 +49,8 @@ const elementSchema = z.object({
 const HUMAN_KEY_MIN_MS = 35
 const HUMAN_KEY_JITTER_MS = 60
 const HUMAN_FOCUS_MS = 120
+// 이 길이를 넘는 값은 키 입력 대신 클립보드 붙여넣기(글자당 35~95ms × 길이가 도구 제한 90초를 넘김)
+const LONG_PASTE_CHARS = 300
 const HUMAN_MOVE_MS = 45
 const HUMAN_PRESS_MS = 55
 const HUMAN_BEFORE_SUBMIT_MS = 350
@@ -745,7 +748,14 @@ export const pageBridge = {
       wc.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: ['control'] })
       wc.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['control'] })
       await pause(HUMAN_FOCUS_MS)
-      for (const ch of value) {
+      // 긴 글(프롬프트 등)은 글자별 키 입력이 브릿지 제한(90초)을 넘기므로 클립보드 붙여넣기로 넣는다
+      const useClipboard = value.length > LONG_PASTE_CHARS
+      if (useClipboard) {
+        clipboard.writeText(value)
+        wc.paste()
+        await pause(HUMAN_FOCUS_MS * 3)
+      }
+      for (const ch of useClipboard ? '' : value) {
         // keyDown/keyUp 은 keyCode 가 가속기 이름이어야 해 영숫자만 보낸다. 글자는 char 이벤트가 넣는다
         const named = /^[A-Za-z0-9]$/.test(ch)
         if (named) wc.sendInputEvent({ type: 'keyDown', keyCode: ch })
