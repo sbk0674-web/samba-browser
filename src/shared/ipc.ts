@@ -85,6 +85,7 @@ export const IPC = {
   bookmarksCreateLink: 'bookmarks:createLink',
   bookmarksRename: 'bookmarks:rename',
   bookmarksMove: 'bookmarks:move',
+  bookmarksPlace: 'bookmarks:place', // 끌어 옮기기 — 폴더 안 자리까지 지정
   bookmarksRemoveFolder: 'bookmarks:removeFolder',
   bookmarksSort: 'bookmarks:sort',
   bookmarksExport: 'bookmarks:export',

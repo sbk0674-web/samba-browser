@@ -87,6 +87,11 @@ interface BookmarkMoveInput {
   toFolderId: number | null
 }
 
+// 끌어 옮기기 — 폴더 안 자리(toIndex)까지 지정한다
+interface BookmarkPlaceInput extends BookmarkMoveInput {
+  toIndex: number
+}
+
 // 항목 저장 요청. value(평문)는 렌더러 → 메인 방향으로만 흐른다
 interface PutFieldInput {
   key: string
@@ -359,6 +364,8 @@ const api = {
     rename: (id: number, kind: 'folder' | 'link', name: string): Promise<IpcResult<void>> =>
       invoke(IPC.bookmarksRename, { id, kind, name }),
     move: (input: BookmarkMoveInput): Promise<IpcResult<void>> => invoke(IPC.bookmarksMove, input),
+    place: (input: BookmarkPlaceInput): Promise<IpcResult<void>> =>
+      invoke(IPC.bookmarksPlace, input),
     removeFolder: (id: number): Promise<IpcResult<void>> => invoke(IPC.bookmarksRemoveFolder, id),
     sort: (folderId: number | null): Promise<IpcResult<void>> =>
       invoke(IPC.bookmarksSort, { folderId, by: 'name' }),

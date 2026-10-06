@@ -204,6 +204,55 @@ describe('BookmarkRepo', () => {
     })
   })
 
+  describe('placeLink / placeFolder (끌어 옮기기)', () => {
+    it('같은 폴더 안에서 링크 순서를 바꾼다', () => {
+      const a = repo.createLink(null, 'A', 'https://a.example.com')
+      repo.createLink(null, 'B', 'https://b.example.com')
+      repo.createLink(null, 'C', 'https://c.example.com')
+      repo.placeLink(a, null, 2)
+      expect(repo.tree().links.map((l) => l.title)).toEqual(['B', 'C', 'A'])
+    })
+
+    it('다른 폴더의 지정한 자리로 옮기고 양쪽 position 을 다시 매긴다', () => {
+      const folder = repo.createFolder(null, '폴더')
+      const a = repo.createLink(null, 'A', 'https://a.example.com')
+      repo.createLink(null, 'B', 'https://b.example.com')
+      repo.createLink(folder, 'X', 'https://x.example.com')
+      repo.createLink(folder, 'Y', 'https://y.example.com')
+      repo.placeLink(a, folder, 1)
+      const tree = repo.tree()
+      expect(tree.links.map((l) => l.title)).toEqual(['B'])
+      expect(tree.folders[0].links.map((l) => l.title)).toEqual(['X', 'A', 'Y'])
+      // 남은 쪽도 0부터 이어진다 — 다음에 만드는 링크가 끝에 붙는다
+      repo.createLink(null, 'C', 'https://c.example.com')
+      expect(repo.tree().links.map((l) => l.title)).toEqual(['B', 'C'])
+    })
+
+    it('범위를 벗어난 자리는 끝으로 간다', () => {
+      const a = repo.createLink(null, 'A', 'https://a.example.com')
+      repo.createLink(null, 'B', 'https://b.example.com')
+      repo.placeLink(a, null, 99)
+      expect(repo.tree().links.map((l) => l.title)).toEqual(['B', 'A'])
+    })
+
+    it('폴더도 자리를 지정해 옮긴다', () => {
+      const a = repo.createFolder(null, 'A')
+      const b = repo.createFolder(null, 'B')
+      repo.createFolder(null, 'C')
+      repo.placeFolder(b, null, 0)
+      expect(repo.tree().folders.map((f) => f.name)).toEqual(['B', 'A', 'C'])
+      repo.placeFolder(a, b, 0)
+      expect(repo.tree().folders.map((f) => f.name)).toEqual(['B', 'C'])
+      expect(repo.tree().folders[0].folders.map((f) => f.name)).toEqual(['A'])
+    })
+
+    it('폴더를 자기 자손 아래로는 못 옮긴다', () => {
+      const a = repo.createFolder(null, 'A')
+      const b = repo.createFolder(a, 'B')
+      expect(() => repo.placeFolder(a, b, 0)).toThrow()
+    })
+  })
+
   describe('remove (링크)', () => {
     it('링크 하나를 지울 수 있다', () => {
       const id = repo.createLink(null, '링크', 'https://example.com')

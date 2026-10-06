@@ -782,6 +782,11 @@ export function registerIpc(
     (o: { id: number; kind: 'folder' | 'link'; toFolderId: number | null }) =>
       importService.moveBookmark(o.id, o.kind, o.toFolderId)
   )
+  handleFromRenderer(
+    IPC.bookmarksPlace,
+    (o: { id: number; kind: 'folder' | 'link'; toFolderId: number | null; toIndex: number }) =>
+      importService.placeBookmark(o.id, o.kind, o.toFolderId, o.toIndex)
+  )
   handleFromRenderer(IPC.bookmarksRemoveFolder, (id: number) =>
     importService.removeBookmarkFolder(id)
   )
@@ -1462,7 +1467,13 @@ export function registerIpc(
     spawn: createSpawner(() => settings.get().adbPath),
     settings: () => settings.get(),
     saveRoom: (value) => void settings.set({ phoneRelayRoom: value }),
-    localOnline: () => new Set(phones.list().filter((p) => p.state === 'online' && p.transport !== 'relay').map((p) => p.serial))
+    localOnline: () =>
+      new Set(
+        phones
+          .list()
+          .filter((p) => p.state === 'online' && p.transport !== 'relay')
+          .map((p) => p.serial)
+      )
   })
   const phoneAdb = createRelayingAdb(rawAdb, (serial) => relay.targetOf(serial))
   // 원클릭 설치본이 들어가는 자리(%APPDATA%/SAMBA Browser/phone-tools)

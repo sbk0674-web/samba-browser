@@ -192,6 +192,17 @@ export class ImportService {
     else this.bookmarkRepo.moveLink(id, toFolderId)
   }
 
+  /** 끌어 옮기기 — 폴더 안 toIndex 자리에 놓는다(같은 폴더면 순서만 바뀐다) */
+  placeBookmark(
+    id: number,
+    kind: 'folder' | 'link',
+    toFolderId: number | null,
+    toIndex: number
+  ): void {
+    if (kind === 'folder') this.bookmarkRepo.placeFolder(id, toFolderId, toIndex)
+    else this.bookmarkRepo.placeLink(id, toFolderId, toIndex)
+  }
+
   removeBookmarkFolder(id: number): void {
     this.bookmarkRepo.removeFolder(id)
     this.vault.logAudit('delete', 'user')
