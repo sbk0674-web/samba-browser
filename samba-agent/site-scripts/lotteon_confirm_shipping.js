@@ -41,7 +41,9 @@ if(!/받는 분 주소로 보내기/.test(tx)){
   if(tx.includes(name)&&rd2&&!tx.replace(/\s+/g,'').includes(rd2[1]+rd2[2]))return{...R,note:'주문서에 받는 분 주소 없음(이름만 있음) — 배송지가 바뀌지 않았다'};
 }else if(rd2&&!(await els(null,'[role=dialog]')).length){
   // 선물 주문서도 고른 배송지가 보이면 도로명+번호가 우리 주소여야 한다 — 다른 도로명만 보이면 검색이 엉뚱한 곳을 고른 것(실기 2026-10-02 나주→경주)
-  const flat=tx.replace(/\s+/g,'');const roads=flat.match(/[가-힣A-Za-z0-9.]+(?:로|길)\d+(?:-\d+)?/g)||[];
+  // 푸터(롯데쇼핑 회사 주소 테헤란로 507 등)는 주문 주소가 아니다 — 푸터 앞 본문만 본다(실기 2026-10-06 하네스 수리를 옮김)
+  const cut=tx.search(/회사소개|롯데쇼핑 주식회사/);const body=cut>0?tx.slice(0,cut):tx;
+  const flat=body.replace(/\s+/g,'');const roads=flat.match(/[가-힣A-Za-z0-9.]+(?:로|길)\d+(?:-\d+)?/g)||[];
   if(roads.length&&!flat.includes(rd2[1]+rd2[2]))return{...R,note:'선물 주문서의 받는 분 주소가 주문 주소와 다르다('+roads[0].replace(/\d/g,'0')+') — 배송지 다시 확인'};
 }
 if(!tx.includes(name))return{...R,note:'주문서에 받는 분 이름 없음'+(saved?'(저장 창 거침)':'(저장 창 없음)')+(tx.includes(name.slice(0,2))?'(앞 두 글자는 있음)':'')+(/받는 분 주소로 보내기/.test(tx)?'(선물 주문서)':'')+' 창'+dlg.length+' 저장버튼 '+(await els('저장')).filter(e=>e.role==='button').map(e=>e.text).slice(0,3).join('/')+' 배송지칸 '+(/새 ?배송지|배송지 ?(선택|변경)/.exec(tx)||[''])[0]};

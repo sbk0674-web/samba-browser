@@ -2861,6 +2861,8 @@ class BuyerAgent(AgentBase):
             f'{label} {best["cost"]:,.0f}원 — 최저 (후보 {len(quotes)}건, 기본 '
             f'{_as_float(out.get("base_cost")):,.0f}원{payable_note})',
         )
+        # 후보 전체(수단/카드/원가)도 남긴다 — 왜 그 수단이 골라졌는지(예: L.PAY 롯데카드 줄이 있었는지) 로그로 확인(2026-10-06)
+        self.note('견적 후보', _quote_rows_brief(list(quotes)))
 
     @staticmethod
     def _adpick_for(snap: dict[str, object], paid: float) -> float:
