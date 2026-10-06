@@ -255,6 +255,7 @@ export class TabManager {
   constructor(private win: BrowserWindow) {
     downloadPolicy = {
       getDir: () => this.downloadDir,
+      reserved: new Set<string>(),
       onRecord: (record) => {
         this.downloads.unshift(record)
         if (this.downloads.length > 50) this.downloads.length = 50

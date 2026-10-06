@@ -4,7 +4,11 @@ import os from 'os'
 import path from 'path'
 import { EventEmitter } from 'events'
 import type { DownloadItem } from 'electron'
-import { handleWillDownload, type DownloadRecord } from '../src/main/browser/downloads'
+import {
+  handleWillDownload,
+  sanitizeFileName,
+  type DownloadRecord
+} from '../src/main/browser/downloads'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'samba-dl-'))
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }))
@@ -26,16 +30,21 @@ class FakeItem extends EventEmitter {
 // 세션 'will-download' 를 흉내 낸다: 이벤트 → handleWillDownload
 function setup(dir: string | null): {
   records: DownloadRecord[]
+  policy: { reserved: Set<string> }
   fire: (item: FakeItem) => { preventDefault: ReturnType<typeof vi.fn> }
 } {
   const records: DownloadRecord[] = []
-  const policy = { getDir: () => dir, onRecord: (r: DownloadRecord) => records.push(r) }
+  const policy = {
+    getDir: () => dir,
+    onRecord: (r: DownloadRecord) => records.push(r),
+    reserved: new Set<string>()
+  }
   const fire = (item: FakeItem): { preventDefault: ReturnType<typeof vi.fn> } => {
     const e = { preventDefault: vi.fn() }
     handleWillDownload(policy, e, item as unknown as DownloadItem)
     return e
   }
-  return { records, fire }
+  return { records, fire, policy }
 }
 
 beforeEach(() => {
@@ -92,5 +101,41 @@ describe('will-download 정책', () => {
     fire(c)
     c.emit('done', {}, 'interrupted')
     expect(records[2].state).toBe('interrupted')
+  })
+})
+
+describe('이름 경쟁·윈도우 파일명', () => {
+  it('같은 이름 두 건이 같은 틱에 와도 다른 경로를 받고, done 에서 예약을 푼다', () => {
+    const { fire, policy } = setup(tmp)
+    const a = new FakeItem('race.bin')
+    const b = new FakeItem('race.bin')
+    fire(a)
+    fire(b)
+    const pa = a.setSavePath.mock.calls[0][0] as string
+    const pb = b.setSavePath.mock.calls[0][0] as string
+    expect(pa).not.toBe(pb)
+    expect(path.basename(pb)).toBe('race-1.bin')
+    expect(policy.reserved.size).toBe(2)
+    a.emit('done', {}, 'completed')
+    b.emit('done', {}, 'cancelled')
+    expect(policy.reserved.size).toBe(0)
+  })
+
+  it('예약 장치명 앞에 _ 를 붙인다(확장자·대소문자 무관)', () => {
+    expect(sanitizeFileName('CON')).toBe('_CON')
+    expect(sanitizeFileName('nul.txt')).toBe('_nul.txt')
+    expect(sanitizeFileName('Com3.tar.gz')).toBe('_Com3.tar.gz')
+    expect(sanitizeFileName('console.txt')).toBe('console.txt')
+  })
+
+  it('끝의 점과 공백을 지운다', () => {
+    expect(sanitizeFileName('report.pdf. . ')).toBe('report.pdf')
+    expect(sanitizeFileName('...')).toBe('download')
+  })
+
+  it('150자로 줄이되 확장자는 보존한다', () => {
+    const out = sanitizeFileName(`${'a'.repeat(300)}.pdf`)
+    expect(out).toHaveLength(150)
+    expect(out.endsWith('.pdf')).toBe(true)
   })
 })
