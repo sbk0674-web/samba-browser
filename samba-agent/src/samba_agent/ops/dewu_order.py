@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 DEWU = 'com.shizhuang.duapp'
 ALIPAY = 'com.eg.android.AlipayGphone'
 CN_SHIPPING_FEE = 8500
+# 크림 판매 수수료 — 삼바 정산금(revenue)이 판매가와 같으면(수수료 미계산) 이 비율을 빼고 마진을 본다
+KREAM_FEE_RATE = 0.08
 FX_URL = 'https://api.frankfurter.dev/v1/latest?base=CNY&symbols=KRW'
 FX_FALLBACK_URL = 'https://open.er-api.com/v6/latest/CNY'
 _PRICE = re.compile(r'^¥\s*(\d+(?:\.\d+)?)$')
@@ -466,6 +468,11 @@ def make_shihuo_handler(
         if rate <= 0:
             return 'needs_human', 'unknown', '위안 환율을 못 받아 원가를 낼 수 없다 — 결제하지 않음'
         revenue = float(detail.revenue or 0)
+        sale = float(getattr(detail, 'sale_price', 0) or 0)
+        if sale > 0 and revenue >= sale:
+            # 삼바 정산금이 판매가 그대로면 수수료가 안 빠진 값이다 — 크림 수수료(8%)를 빼고 본다
+            # (실기 2026-10-06 뉴발란스 880: 92,000 그대로 보고 사서 실제 정산 84,640 < 원가 90,883 역마진)
+            revenue = round(sale * (1 - KREAM_FEE_RATE))
         # 마진 > 0: 청구 위안(상품 × 1.03) × 환율 + 배송비 8,500 < 정산금
         max_cny = (revenue - CN_SHIPPING_FEE) / rate / 1.03 if revenue > 0 else 0
         if max_cny <= 0:

@@ -197,3 +197,24 @@ def test_size_cell_의류는_설명이_붙고_2XL은_XXL로_표기된다():
     assert size_cell(nodes, 'XXL').x == 466
     assert size_cell(nodes, 'S') is None
     assert size_cell(nodes, '42.5') is not None
+
+
+def test_정산이_판매가_그대로면_크림_수수료를_빼고_마진을_본다(monkeypatch):
+    """실기 2026-10-06 뉴발란스 880: revenue 92,000(=판매가)로 보고 사서 실제 정산 84,640 < 원가 90,883 역마진."""
+    seen: dict = {}
+
+    def fake_buy(phone, model, eu, *, max_cny, approve, rate):
+        seen['max_cny'] = max_cny
+        raise DewuOrderError('시험 중단')
+
+    monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', fake_buy)
+    monkeypatch.setattr('samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL')
+    wave = SimpleNamespace(
+        get_order=lambda no: SimpleNamespace(
+            source_seller='淘宝', registered_option='40', source_product_code='MW880BD7', revenue=92000, sale_price=92000
+        )
+    )
+    handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 200.0)
+    handle(None, SimpleNamespace(order_no='A1'))
+    # (92,000 × 0.92 − 8,500) / 200 / 1.03
+    assert round(seen['max_cny'], 1) == round((92000 * 0.92 - 8500) / 200 / 1.03, 1)
