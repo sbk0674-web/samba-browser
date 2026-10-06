@@ -2828,6 +2828,9 @@ class BuyerAgent(AgentBase):
             {**q, 'points_used': used} if isinstance(q, dict) and not q.get('points_used') else q
             for q in raw_quotes
         ]
+        # 걸러내기 전 원본 견적(주문서가 보여 준 수단·스크립트가 읽은 줄)도 남긴다 — L.PAY 롯데카드 줄이
+        # 주문서에 없었는지, 읽다 실패했는지, 걸러졌는지 구분한다(사용자 2026-10-06 롯데온 노스페이스)
+        self.note('견적 원본', f'주문서 {offered} / 읽은 줄 {_quote_rows_brief(list(raw_quotes))}')
         # 애드픽 적립은 견적 원가에 더하지 않는다(사용자 2026-09-27: 제휴 적립은 원가 밖)
         quotes = cheapest_quotes(
             raw_quotes,
