@@ -133,7 +133,8 @@ import { ExtensionPopupHost, sessionWithExtension } from '../extensions/popup-vi
 import { WEBSTORE_HOST, isExtensionId } from '../../shared/extensions'
 import type { ExtensionActionResult, ExtensionAnchorDto } from '../../shared/extensions'
 // === 폰 연동(3단계) — child_process 는 phone/process.ts 안에만 있다 ===================
-import { createAdbRunner } from '../phone/process'
+import { createAdbRunner, createSpawner } from '../phone/process'
+import { createPhoneRelay, createRelayingAdb } from '../phone/relay'
 import { PhoneRepo } from '../phone/repo'
 import { PhoneService } from '../phone/service'
 import { registerPhoneScreenIpc } from '../phone/screen-ipc'
@@ -1454,7 +1455,15 @@ export function registerIpc(
 
   // === 폰 연동(3단계) — 이 블록만 따로 추가한다 ========================================
   // 결제 비밀번호·문자 본문은 이 채널들로 흐르지 않는다
-  const phoneAdb = createAdbRunner(() => settings.get().adbPath)
+  // 폰 중계(phone/relay.ts): 다른 PC 가 중계하는 폰은 -H/-P 로 그 PC 의 adb 서버에 보낸다. 로컬에 붙은 폰이 이긴다
+  const rawAdb = createAdbRunner(() => settings.get().adbPath)
+  const relay = createPhoneRelay({
+    adb: rawAdb,
+    spawn: createSpawner(() => settings.get().adbPath),
+    settings: () => settings.get(),
+    localOnline: () => new Set(phones.list().filter((p) => p.state === 'online' && p.transport !== 'relay').map((p) => p.serial))
+  })
+  const phoneAdb = createRelayingAdb(rawAdb, (serial) => relay.targetOf(serial))
   // 원클릭 설치본이 들어가는 자리(%APPDATA%/SAMBA Browser/phone-tools)
   const phoneToolsRoot = join(app.getPath('userData'), 'phone-tools')
   const phoneRepo = new PhoneRepo(db)
@@ -1469,7 +1478,11 @@ export function registerIpc(
   const phoneSecretGate = new SecretScreenGate()
   const phoneProgress = new AgentProgressRelay()
   // 폰 연동 동기화 — 폰 목록·담당 계정을 계정 설정에 실어 다른 PC 에서도 보이게 한다(registry-sync.ts)
-  const phoneRegistry = new PhoneRegistrySync({ repo: phoneRepo, settings })
+  const phoneRegistry = new PhoneRegistrySync({
+    repo: phoneRepo,
+    settings,
+    relay: () => relay.published()
+  })
   let phonePublishTimer: NodeJS.Timeout | null = null
   const publishPhonesSoon = (): void => {
     if (phonePublishTimer) clearTimeout(phonePublishTimer)
@@ -1491,11 +1504,14 @@ export function registerIpc(
       publishPhonesSoon()
     },
     emitAuthWaiting: (dto) => send(IPC.phoneAuthWaiting, dto),
-    onProgress: (t) => phoneProgress.emit(t)
+    onProgress: (t) => phoneProgress.emit(t),
+    relayHosts: () => relay.hosts()
   })
   phones.start()
+  relay.start()
   win.once('closed', () => {
     if (phonePublishTimer) clearTimeout(phonePublishTimer)
+    relay.stop()
     phones.dispose()
   })
   // 켤 때 한 번 맞추고, 다른 PC 의 변경이 내려오면 다시 맞춘다

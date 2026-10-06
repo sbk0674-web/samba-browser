@@ -205,6 +205,8 @@ export const DEFAULT_SETTINGS = {
   // 사용자가 목록에서 지운 폰의 시리얼. 같은 와이파이에 있으면 5초 검색이 다시 찾아오므로 여기 적어 건너뛴다.
   // 주소 연결·페어링을 직접 하면 비운다. 이 PC 의 사정이라 SYNCED_SETTING_KEYS 에 넣지 않는다
   phoneIgnoredSerials: [] as string[],
+  // 이 PC 에 붙은 폰을 다른 PC 가 쓰게 adb 서버를 LAN 에 연다(phone/relay.ts). 이 PC 의 사정이라 동기화하지 않는다
+  phoneRelayEnabled: false,
   // 폰 연동 동기화(phone-registry.ts) — 폰 목록과 계정↔담당 폰. 폰 표(로컬)의 사본이라 화면에서 직접 고치지 않는다
   // 키마스터 기준 시각(ms) — "이 시각에 이 PC 의 키마스터가 기준"이라는 선언(sync/authority.ts).
   // 다른 PC 는 이보다 앞선 자기 삭제 기록·안 올린 행을 버리고 서버 내용을 그대로 받는다. 0 이면 선언 없음
@@ -415,6 +417,7 @@ export const settingsSchema = z.object({
     .catch(DEFAULT_SETTINGS.phoneScreenFps),
   phoneAutoReconnect: z.boolean().catch(DEFAULT_SETTINGS.phoneAutoReconnect),
   phoneIgnoredSerials: z.array(z.string().max(120)).max(50).catch([]),
+  phoneRelayEnabled: z.boolean().catch(false),
   keymasterBaselineAt: z.number().int().min(0).catch(0),
   phoneRegistry: z
     .array(
@@ -422,10 +425,11 @@ export const settingsSchema = z.object({
         serial: z.string().min(1).max(120),
         label: z.string().max(80),
         country: z.enum(['KR', 'CN', 'JP']).catch('KR'),
-        transport: z.enum(['usb', 'wifi']).catch('usb'),
+        transport: z.enum(['usb', 'wifi', 'relay']).catch('usb'),
         wifiAddress: z.string().max(120).nullable().catch(null),
         model: z.string().max(80).catch(''),
-        isDefault: z.boolean().catch(false)
+        isDefault: z.boolean().catch(false),
+        relayHost: z.string().max(60).nullable().optional().catch(null)
       })
     )
     .max(50)

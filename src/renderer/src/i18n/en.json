@@ -1186,6 +1186,7 @@
     },
     "transport": {
       "usb": "USB",
+      "relay": "Relayed (other PC)",
       "wifi": "Wi-Fi"
     },
     "badge": {
@@ -1243,6 +1244,8 @@
       "fps": "Frames per second",
       "autoReconnect": "Auto reconnect",
       "autoReconnectDesc": "Try to reattach once when the connection drops.",
+      "relay": "Relay this PC's phones to other PCs",
+      "relayDesc": "Opens the adb server on the LAN so other PCs on the same account can use phones plugged into this PC (same network; allow TCP 5037 in the firewall)",
       "settingsOpen": "Phone settings",
       "settingsClose": "Close phone settings"
     },

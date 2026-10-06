@@ -1186,7 +1186,8 @@
     },
     "transport": {
       "usb": "USB",
-      "wifi": "와이파이"
+      "wifi": "와이파이",
+      "relay": "중계(다른 PC)"
     },
     "badge": {
       "still": "간이 화면",
@@ -1243,6 +1244,8 @@
       "fps": "초당 프레임",
       "autoReconnect": "자동 재연결",
       "autoReconnectDesc": "연결이 끊기면 한 번만 다시 붙여 봐요",
+      "relay": "이 PC 의 폰을 다른 PC 에 중계",
+      "relayDesc": "같은 계정의 다른 PC 가 이 PC 에 USB 로 붙은 폰을 쓸 수 있게 adb 서버를 LAN 에 열어요(같은 네트워크·방화벽 TCP 5037 허용 필요)",
       "settingsOpen": "폰 설정",
       "settingsClose": "폰 설정 닫기"
     },

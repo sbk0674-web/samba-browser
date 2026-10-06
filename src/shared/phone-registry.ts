@@ -9,9 +9,11 @@ export interface PhoneRegistryEntry {
   serial: string
   label: string
   country: 'KR' | 'CN' | 'JP'
-  transport: 'usb' | 'wifi'
+  transport: 'usb' | 'wifi' | 'relay'
   wifiAddress: string | null
   model: string
+  /** 이 폰이 붙어 있는 PC 의 adb 중계 주소(ip:port). 그 PC 가 중계를 켰을 때만. 없으면 null */
+  relayHost?: string | null
   /** 담당 폰이 없는 계정이 쓰는 기본 폰인가 */
   isDefault: boolean
 }
@@ -28,7 +30,7 @@ export interface LocalPhone {
   serial: string
   label: string
   country: 'KR' | 'CN' | 'JP'
-  transport: 'usb' | 'wifi'
+  transport: 'usb' | 'wifi' | 'relay'
   wifiAddress: string | null
   model: string
 }
@@ -45,7 +47,9 @@ export function isTransportSerial(serial: string): boolean {
 export function buildRegistry(
   rows: readonly LocalPhone[],
   defaultSerial: string,
-  ignored: readonly string[] = []
+  ignored: readonly string[] = [],
+  // 이 PC 가 중계를 켰으면 {host: 'ip:port', connected: 지금 붙어 있는 시리얼} — 그 폰에만 relayHost 를 싣는다
+  relay: { host: string; connected: readonly string[] } | null = null
 ): PhoneRegistryEntry[] {
   return rows
     .filter((r) => !isTransportSerial(r.serial) && !ignored.includes(r.serial))
@@ -56,7 +60,8 @@ export function buildRegistry(
       transport: r.transport,
       wifiAddress: r.wifiAddress,
       model: r.model,
-      isDefault: r.serial === defaultSerial
+      isDefault: r.serial === defaultSerial,
+      relayHost: relay && relay.connected.includes(r.serial) ? relay.host : null
     }))
     .sort((a, b) => a.serial.localeCompare(b.serial))
 }

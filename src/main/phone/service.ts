@@ -8,6 +8,7 @@ import { isPhoneCountry } from '../../shared/phone'
 import { detectAdbPath, shellArgs, toolCandidates } from './adb'
 import type { AdbRunner } from './adb'
 import { DeviceManager, type DeviceRepo, type PhoneRowLike } from './devices'
+import type { RelayHost } from './relay'
 import { watchIncomingCall } from './auth-flow'
 import { tr } from '../i18n'
 
@@ -44,6 +45,8 @@ export interface PhoneServiceDeps {
   toolsRoot?: string
   /** PATH 환경변수(테스트에서 갈아 끼운다) */
   pathEnv?: string
+  /** 다른 PC 가 중계하는 adb 서버들(phone/relay.ts) */
+  relayHosts?: () => readonly RelayHost[]
 }
 
 // 문자 DB 시험 조회. 권한이 없으면 adb 가 이 문구를 돌려준다
@@ -63,6 +66,7 @@ export class PhoneService {
       adbPath: () => deps.settings.get().adbPath,
       autoReconnect: () => deps.settings.get().phoneAutoReconnect,
       ignored: () => deps.settings.get().phoneIgnoredSerials,
+      relayHosts: deps.relayHosts,
       onChange: (list, warning) => {
         deps.emit(list, warning)
         void this.probeSms(list)

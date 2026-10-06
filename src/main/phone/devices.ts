@@ -17,6 +17,7 @@ import {
   type MdnsService,
   type RawDevice
 } from './adb'
+import { relayArgs, type RelayHost } from './relay'
 import { tr } from '../i18n'
 
 const WIFI_DEFAULT_PORT = 5555
@@ -67,6 +68,8 @@ export interface DeviceManagerDeps {
   autoReconnect: () => boolean
   /** 사용자가 지운 폰의 실제 시리얼 — 보여도 저장하지 않고, 발견돼도 붙이지 않는다 */
   ignored?: () => readonly string[]
+  /** 다른 PC 가 중계하는 adb 서버들(phone/relay.ts). 그쪽에 붙은 폰도 목록에 넣는다(transport 'relay') */
+  relayHosts?: () => readonly RelayHost[]
   // 경고 문구는 상한 초과처럼 사용자가 알아야 할 때만 함께 온다
   onChange: (phones: PhoneDto[], warning?: string) => void
   /**
@@ -90,7 +93,8 @@ export function pickOnePerPhone(
   services: readonly MdnsService[]
 ): LiveDevice[] {
   const rank = (d: RawDevice): number =>
-    (d.state === 'online' ? 0 : 10) + (d.transport === 'usb' ? 0 : isWifiSerial(d.serial) ? 2 : 1)
+    (d.state === 'online' ? 0 : 10) +
+    (d.transport === 'usb' ? 0 : d.transport === 'relay' ? 3 : isWifiSerial(d.serial) ? 2 : 1)
   const best = new Map<string, LiveDevice>()
   for (const d of raw) {
     const realSerial = realSerialOf(d.serial, services)
@@ -102,7 +106,7 @@ export function pickOnePerPhone(
 
 /** 표의 문자열 칸을 공용 타입으로 좁힌다(손상된 값은 기본값으로 본다) */
 function toTransport(value: string, serial: string): PhoneTransport {
-  if (value === 'usb' || value === 'wifi') return value
+  if (value === 'usb' || value === 'wifi' || value === 'relay') return value
   return isWifiSerial(serial) ? 'wifi' : 'usb'
 }
 
@@ -192,7 +196,8 @@ export class DeviceManager {
     const connected = await this.connectDiscovered(parseDevices(first.stdout), services)
     const res = connected || rejoined ? await this.deps.adb.run(['devices', '-l']) : first
     // 한 폰이 여러 전송 이름으로 보이면 하나만 남긴다(저장은 실제 시리얼로, 명령은 전송 이름으로)
-    const seen = parseDevices(res.stdout)
+    // 다른 PC 가 중계하는 폰은 로컬에 없을 때만 보탠다(로컬 연결이 이긴다)
+    const seen = [...parseDevices(res.stdout), ...(await this.relayedDevices(parseDevices(res.stdout)))]
     // 고르지 않은 전송 이름으로 예전에 만들어진 줄도 실제 줄로 합친다(한 폰이 두 이름으로 동시에 보일 때)
     for (const d of seen) {
       const realSerial = realSerialOf(d.serial, services)
@@ -248,6 +253,24 @@ export class DeviceManager {
       this.deps.onChange(next)
     }
     return next
+  }
+
+  /** 중계 PC 들의 adb 서버에 붙은 폰. 중계 PC 가 꺼져 있거나 막혀 있으면 조용히 빈 목록 */
+  private async relayedDevices(local: readonly RawDevice[]): Promise<RawDevice[]> {
+    const hosts = this.deps.relayHosts?.() ?? []
+    const out: RawDevice[] = []
+    for (const h of hosts) {
+      try {
+        const res = await this.deps.adb.run(relayArgs(h, ['devices', '-l']), 5000)
+        for (const d of parseDevices(res.stdout)) {
+          if (local.some((l) => l.serial === d.serial) || out.some((o) => o.serial === d.serial)) continue
+          out.push({ ...d, transport: 'relay' })
+        }
+      } catch {
+        // 중계 PC 가 안 보이면 그 폰은 이번 주기엔 끊김으로 남는다
+      }
+    }
+    return out
   }
 
   /**

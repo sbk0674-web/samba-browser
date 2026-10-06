@@ -117,7 +117,7 @@ class Phone:
 
     def _run(self, *args: str, timeout: float = 20) -> str:
         done = subprocess.run(
-            [self.adb, '-s', self.serial, *args],
+            [self.adb, *adb_server_args(), '-s', self.serial, *args],
             capture_output=True,
             timeout=timeout,
             check=False,
@@ -194,11 +194,22 @@ class Phone:
         self._run('shell', 'monkey', '-p', package, '-c', 'android.intent.category.LAUNCHER', '1')
 
 
+def adb_server_args() -> list[str]:
+    """다른 PC 가 중계하는 adb 서버로 보낼 때의 접두 인자(`-H host -P port`).
+
+    환경변수 SAMBA_ADB_SERVER='ip:port' 가 있으면 모든 adb 호출이 그 서버를 쓴다(폰이 다른 PC 에 USB 로 붙어 있을 때,
+    앱의 phone/relay.ts 와 같은 길). 없으면 빈 목록(로컬 adb 서버)
+    """
+    raw = os.environ.get('SAMBA_ADB_SERVER', '').strip()
+    m = re.match(r'^(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})$', raw)
+    return ['-H', m.group(1), '-P', m.group(2)] if m else []
+
+
 def find_phone_serial(adb: str, want: str = DEFAULT_PHONE) -> str | None:
     """연결된 기기 중 결제 폰. 무선(IP:포트·adb-<시리얼>-…)도 시리얼로 찾는다. 없으면 None."""
     try:
         out = subprocess.run(
-            [adb, 'devices'],
+            [adb, *adb_server_args(), 'devices'],
             capture_output=True,
             timeout=15,
             check=False,
@@ -215,7 +226,7 @@ def find_phone_serial(adb: str, want: str = DEFAULT_PHONE) -> str | None:
         try:
             got = (
                 subprocess.run(
-                    [adb, '-s', r, 'shell', 'getprop', 'ro.serialno'],
+                    [adb, *adb_server_args(), '-s', r, 'shell', 'getprop', 'ro.serialno'],
                     capture_output=True,
                     timeout=10,
                     check=False,

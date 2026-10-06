@@ -124,6 +124,15 @@ export function PhoneSettingsPanel({ settings, update }: SectionProps): React.JS
             onCheckedChange={(v) => update({ phoneAutoReconnect: v })}
           />
         </SettingsToggleRow>
+        <SettingsToggleRow
+          label={t('phone.settings.relay')}
+          description={t('phone.settings.relayDesc')}
+        >
+          <Switch
+            checked={settings.phoneRelayEnabled}
+            onCheckedChange={(v) => update({ phoneRelayEnabled: v })}
+          />
+        </SettingsToggleRow>
       </SettingsSection>
     </>
   )

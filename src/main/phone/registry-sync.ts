@@ -36,6 +36,8 @@ export interface PhoneRegistrySyncDeps {
     | 'phoneForAccount'
   >
   settings: { get(): Settings; set(patch: Partial<Settings>): Settings }
+  /** 이 PC 가 폰 중계를 켰으면 {host: 'ip:port', connected: 지금 붙어 있는 시리얼}, 아니면 null(phone/relay.ts) */
+  relay?: () => { host: string; connected: readonly string[] } | null
 }
 
 export class PhoneRegistrySync {
@@ -81,7 +83,12 @@ export class PhoneRegistrySync {
     this.applyRemote(false)
     const { repo, settings } = this.deps
     const s = settings.get()
-    const registry = buildRegistry(repo.list(), s.defaultPhoneSerial, s.phoneIgnoredSerials)
+    const registry = buildRegistry(
+      repo.list(),
+      s.defaultPhoneSerial,
+      s.phoneIgnoredSerials,
+      this.deps.relay?.() ?? null
+    )
     const local = repo.accountLinks()
     const localAccounts = new Set(local.map((l) => l.account))
     // 이 PC 가 모르는 계정(아직 안 내려온 계정)의 연결은 그대로 둔다 — 지우면 다른 PC 의 연결이 사라진다
