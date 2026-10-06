@@ -135,10 +135,10 @@ def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
         queue,
         adapters,
         user_idle_s=user_idle_seconds,
-        # 샵마인은 창 메시지로만 만져 사람이 PC 를 쓰는 중에도 돈다
-        min_idle_s=0.0,
-        # EMP 는 조작하면 창이 앞으로 나온다 — 키보드·마우스가 3분 넘게 멈췄을 때만 한다(사용자 지시 2026-09-29)
-        min_idle_by_target={t: EMP_MIN_IDLE_S for t in adapters if t.startswith('emp')},
+        # 샵마인·EMP 모두 키보드·마우스가 3분 넘게 멈췄을 때만 만진다.
+        # EMP 는 조작하면 창이 앞으로 나오고(사용자 지시 2026-09-29), 샵마인도 메뉴를 실제 마우스 클릭
+        # (click_input)으로 열어 작업 중인 사람 화면을 건드린다(사용자 지시 2026-10-06)
+        min_idle_s=EMP_MIN_IDLE_S,
         # 인증 창은 사람이 처리한다 — 슬랙을 안 보니 윈도우 알림으로 바로 알린다(사용자 2026-09-29)
         on_auth_required=_auth_toast,
         still_cancelling=_still_cancelling(),
