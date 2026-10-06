@@ -980,8 +980,12 @@ def quotes_problem(
     offered: list[str],
     allowed: set[str] | None,
     direct_card: str | None = None,
+    easy_pay_card: str | None = None,
 ) -> str | None:
     """결제수단 견적 검사 — 허용 수단으로 실제 낼 수 있는 줄이 있어야 하고, 주문서에 무신사머니가 있으면 그 줄도 있어야 한다.
+
+    소싱처 표에 easy_pay_card(롯데온 = 롯데카드)가 있고 주문서에 간편결제가 있으면 그 줄(cost)도 있어야 한다 —
+    없으면 청구할인까지 더 싼 줄이 빠진 채 다른 수단이 골라진다(실기 2026-10-06 롯데온 노스페이스).
 
     실기: 29CM 견적이 무신사 삼성카드 즉시할인 줄뿐이라 결제 가능한 수단이 없었다(빈 목록만 보던 검사가 통과시켰다).
     """
@@ -997,6 +1001,21 @@ def quotes_problem(
         return '주문서에 무신사머니가 있는데 무신사머니 줄(method 무신사머니, cost)이 없다 — 무신사머니를 골라 금액·적립을 읽어라'
     if not cheapest_quotes(rows, None, allowed, direct_card=direct_card):
         return f'허용 수단({sorted(allowed or [])})으로 낼 수 있는 견적 줄이 없다 — 가능한 수단마다 cost 를 읽어라'
+    if (
+        easy_pay_card
+        and (allowed is None or 'site' in allowed)
+        and any('간편결제' in m for m in offered)
+        and not any(
+            isinstance(r, dict)
+            and '간편결제' in str(r.get('method') or '')
+            and _as_float(r.get('cost')) > 0
+            for r in rows
+        )
+    ):
+        return (
+            f'주문서에 간편결제가 있는데 간편결제({easy_pay_card}) 줄의 cost 가 없다 — 간편결제를 누르고 '
+            f'"L.PAY 카드" 라디오를 켠 뒤 카드선택에서 {easy_pay_card}를 골라 즉시할인이 반영된 결제 금액을 읽어라'
+        )
     return None
 
 
@@ -2807,7 +2826,7 @@ class BuyerAgent(AgentBase):
                     'points_used 에는 사용한 적립금·포인트를 넣는다 — 원가 = cost × 카드 청구할인 − reward + points_used. '
                     '결제하기는 누르지 않는다.'
                 ),
-                check=lambda o: quotes_problem(o, offered, allowed, src.direct_card),
+                check=lambda o: quotes_problem(o, offered, allowed, src.direct_card, src.easy_pay_card),
             )
         except AgentFailure as e:
             self.note('결제수단 견적', mask_text(f'못 읽음({e.reason[:80]}) — 스냅샷 원가로 진행'))
