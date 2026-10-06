@@ -95,6 +95,20 @@ try{
     const bl=(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];
     const amt=bl?parseInt((bl.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;
     if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
+    // 롯데카드 즉시할인(L.PAY 카드 = 롯데카드) — 같은 창의 '롯데카드 N% 즉시할인' 라디오다. 카카오페이 머니와 할인액이 같아도
+    // 롯데카드는 청구할인 2%가 더 붙어 더 싸다(사용자 2026-10-06 — 카카오페이로 계속 요청돼 항의). 견적은 받지 않고 읽기만 한다
+    const lr=(await Q('롯데카드',/radio "롯데카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/롯데카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
+    const lmx=lr.length?Math.max(...lr.map(x=>x.id)):0;
+    const lbest=lr.filter(r=>r.id>lmx-20).sort((a,b)=>b.p-a.p)[0];
+    if(lbest){
+      if(!lbest.on){await page.click(lbest.id);await sleep(1200);}
+      const lb=(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];
+      const lamt=lb?parseInt((lb.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;
+      if(lamt>0){
+        for(let i=quotes.length-1;i>=0;i--)if(quotes[i].method==='간편결제'&&quotes[i].cost==null)quotes.splice(i,1);
+        quotes.push({method:'간편결제',card:'롯데카드',cost:base_cost-lamt,discount:'롯데카드 '+lbest.p+'% 즉시할인'});
+      }
+    }
     // 장바구니 쿠폰(결제수단과 무관한 주문할인, 2026-10-02): 고르면 버튼 금액이 그 쿠폰 금액으로 바뀐다 — 읽기만 하고 닫는다
     const cs=(await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>parseInt(l.slice(1)));
     if(cs.length){await page.click(Math.max(...cs));await sleep(1200);

@@ -38,6 +38,7 @@ if (mc) {
   // 확인창 '적용하기'. 창은 두 벌이라 번호가 큰 쪽이 살아 있고 전체 목록이 잘려 검색으로 찾는다. 할인이 안 붙으면…
   // 그 밖의 간편결제는 같은 창의 장바구니 쿠폰을 받는다(2026-10-02 선캡 3개: 쿠폰 12,070원을 안 받고…
   const KP=mp==='카카오페이';
+  const LC=mp==='간편결제'; // 간편결제 = L.PAY 롯데카드 — 같은 창의 '롯데카드 N% 즉시할인'을 받는다(2026-10-06)
   if(!KP){await page.clickText(mp);await sleep(1500);}
   {
     const Q=async(q,re)=>(await page.get({query:q})).tree.split('\n').filter(l=>re.test(l));
@@ -46,9 +47,10 @@ if (mc) {
     if(!(await disc())){
       const hb=await page.idOf('할인변경'); if(hb<0&&KP) return {ok:false,error:'카카오페이 할인변경 버튼 없음'};
       if(hb>=0){await page.click(hb); await sleep(2000);
-      const rs=(KP?await Q('카카오페이 머니',/radio "카카오페이 머니\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
+      const rs=(KP?await Q('카카오페이 머니',/radio "카카오페이 머니\d+%/):LC?await Q('롯데카드',/radio "롯데카드\s*\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
       const mx=rs.length?Math.max(...rs.map(x=>x.id)):0; const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
       if(!best&&KP) return {ok:false,error:'카카오페이 머니 즉시할인 없음'};
+      if(!best&&LC) return {ok:false,error:'롯데카드 즉시할인 없음 — 결제하지 않음'};
       if(!best){const c=hi(await Q('닫기',/button "닫기"/)); if(c>0){await page.click(c); await sleep(600);}}
       else{var want=1; if(!best.on){await page.click(best.id); await sleep(1200);}
       const b=hi(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)); if(b<0) return {ok:false,error:'할인혜택 받기 버튼 없음'};
@@ -56,7 +58,7 @@ if (mc) {
       const ap=hi(await Q('적용하기',/button "적용하기"/)); if(ap>0){await page.click(ap); await sleep(3500);}
       }}
     }
-    if((KP||typeof want!=='undefined')&&!(await disc())) return {ok:false,error:(KP?'카카오페이 머니 즉시할인':'장바구니 쿠폰')+'이 주문서에 안 붙음 — 결제하지 않음'};
+    if((KP||typeof want!=='undefined')&&!(await disc())) return {ok:false,error:(KP?'카카오페이 머니 즉시할인':LC?'롯데카드 즉시할인':'장바구니 쿠폰')+'이 주문서에 안 붙음 — 결제하지 않음'};
   }
   await page.clickText(mp);
   method = mp;
