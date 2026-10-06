@@ -93,6 +93,23 @@ describe('keypadLayout', () => {
     expect(keypadLayout()).toBeNull()
   })
 
+  it('키패드가 모달이면 뒤 페이지의 같은 숫자(수량 1)는 세지 않는다(롯데온 L.PAY)', () => {
+    document.body.innerHTML =
+      '<div class="order"><span>수량</span> <span>1</span></div>' +
+      `<div role="dialog" aria-label="L.PAY 비밀번호 입력">${keypadHtml(DIGITS, (d) => `<div class="key">${d}</div>`)}</div>`
+    const layout = keypadLayout()
+    expect(layout?.digits.map((d) => d.digit)).toEqual(DIGITS)
+    // 고른 요소는 모달 안의 것이다
+    const one = layout!.digits.find((d) => d.digit === '1')!
+    performClick(one.id)
+  })
+
+  it('모달 밖에만 같은 숫자가 있어도 모달 안 배치가 불완전하면 null 이다', () => {
+    document.body.innerHTML =
+      keypadHtml() + `<div role="dialog">${keypadHtml(DIGITS.slice(0, 9))}</div>`
+    expect(keypadLayout()).toBeNull()
+  })
+
   it('숨겨진 버튼은 세지 않는다', () => {
     document.body.innerHTML = keypadHtml() + '<button style="display:none">3</button>'
     expect(keypadLayout()?.digits.length).toBe(10)

@@ -1288,10 +1288,10 @@ function ensureId(el: HTMLElement): number {
  * 부분·중복 배치로 누르면 잘못 눌러 계정이 잠긴다. 이미지로 그려진 숫자는 잡지 못한다.
  * 값은 어디에서도 읽지 않는다: filled 는 비밀 입력칸의 길이(자리수)뿐이다
  */
-export function keypadLayout(): KeypadLayoutDto | null {
-  const visible: VisibilityCache = new Map()
+/** root 안에서 0~9 가 정확히 한 번씩 보이면 그 요소들. 빠지거나 겹치면 null */
+function digitCellsIn(root: ParentNode, visible: VisibilityCache): Map<string, HTMLElement> | null {
   const found = new Map<string, HTMLElement>()
-  const candidates = Array.from(document.querySelectorAll<HTMLElement>(KEYPAD_DIGIT_SELECTOR))
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>(KEYPAD_DIGIT_SELECTOR))
   for (const el of candidates) {
     const digit = singleDigitOf(el)
     if (digit === null) continue
@@ -1303,6 +1303,23 @@ export function keypadLayout(): KeypadLayoutDto | null {
     found.set(digit, el)
   }
   if (KEYPAD_DIGITS.some((d) => !found.has(d))) return null
+  return found
+}
+
+export function keypadLayout(): KeypadLayoutDto | null {
+  const visible: VisibilityCache = new Map()
+  // 키패드가 모달(role=dialog)이면 그 안만 본다 — 뒤 페이지의 '수량 1' 같은 한 자리 숫자가 키패드의 1 과 겹쳐
+  // 배치 전체가 버려졌다(실기 2026-10-06 롯데온 L.PAY 비밀번호). 모달 밖은 눌러도 먹지 않으니 볼 필요가 없다
+  let found: Map<string, HTMLElement> | null = null
+  for (const modal of Array.from(
+    document.querySelectorAll<HTMLElement>('[role="dialog"], dialog[open], [aria-modal="true"]')
+  )) {
+    if (!isVisible(modal, visible)) continue
+    found = digitCellsIn(modal, visible)
+    if (found) break
+  }
+  found = found ?? digitCellsIn(document, visible)
+  if (!found) return null
   const digits = KEYPAD_DIGITS.map((digit) => ({ digit, id: ensureId(found.get(digit)!) }))
   const pin = pinCounterInput()
   return { digits, filled: pin ? pin.value.length : null }

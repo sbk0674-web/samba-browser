@@ -176,6 +176,10 @@ class Phone:
     def swipe_up(self) -> None:
         self._run('shell', 'input', 'swipe', '360', '1300', '360', '500', '400')
 
+    def input_text(self, text: str) -> None:
+        """영문·숫자만(adb input text 는 한글을 못 친다) — 주문번호 검색에 쓴다."""
+        self._run('shell', 'input', 'text', text)
+
     def swipe_down(self) -> None:
         """위로 스크롤(손가락을 아래로) — 채팅방의 오래된 알림을 본다."""
         self._run('shell', 'input', 'swipe', '360', '500', '360', '1300', '400')
@@ -456,6 +460,15 @@ def gift_order_of(out: dict) -> bool:
     return False
 
 
+def source_order_no_of(out: dict) -> str:
+    """결제 단계가 기록한 SSG 주문번호(source_order_no). 없으면 ''."""
+    for _name, r in (out.get('results') or {}).items():
+        payload = getattr(r, 'payload', None) if not isinstance(r, dict) else r.get('payload')
+        if isinstance(payload, dict) and payload.get('source_order_no'):
+            return str(payload['source_order_no'])
+    return ''
+
+
 def make_after_done(
     source_of_job: Callable[[object], tuple[str, str]],
     *,
@@ -484,10 +497,18 @@ def make_after_done(
         serial = find_phone_serial(adb_path, want)
         if serial is None:
             return 'SSG 선물 수락 못 함 — 결제 폰이 연결돼 있지 않다(카카오톡에서 직접 수락 필요, 기한 1주일)'
+        phone = Phone(adb_path, serial)
         try:
-            return 'SSG ' + accept_ssg_gift(
-                Phone(adb_path, serial), model_code_of(sku) or '', sku=sku
-            )
+            # 주문번호로 카톡 검색해 받는다(스크롤 탐색은 알림이 쌓이면 못 찾는다) — 번호를 모르거나 실패하면 옛 방식으로
+            order_no = source_order_no_of(out)
+            if order_no:
+                from samba_agent.ops.ssg_gift_search import accept_ssg_gift_by_search
+
+                try:
+                    return 'SSG ' + accept_ssg_gift_by_search(phone, order_no)
+                except GiftAcceptError as e:
+                    log.warning('선물 수락(카톡 검색) 실패 — 옛 방식으로 다시: %s', e)
+            return 'SSG ' + accept_ssg_gift(phone, model_code_of(sku) or '', sku=sku)
         except GiftAcceptError as e:
             return f'SSG 선물 수락 실패 — {e}(카카오톡에서 직접 수락 필요)'
         except (OSError, subprocess.TimeoutExpired) as e:
