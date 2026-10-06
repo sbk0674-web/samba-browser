@@ -955,6 +955,24 @@ describe('토스 결제 화면(실기 구조) — 글자와 눌리는 영역이 
     )
     expect(selectedCardOf(screen(TOSS.packageName, [el(1, '홈')]), TOSS)).toBe('')
   })
+
+  it('selectedCardOf: 카드 줄과 [결제수단 변경] 사이에 글자 없는 클릭 요소가 끼어 있어도 카드 이름을 읽는다', () => {
+    // 실기 2026-10-06 토스: 체크 원·행 틀 같은 빈 요소가 사이에 있어 '넥슨현대UNLIMITED' 가 범위 밖으로 밀렸다
+    const s = screen(TOSS.packageName, [
+      el(1, '토스페이머니 충전'),
+      el(2, '넥슨현대UNLIMITED'),
+      el(3, '', { className: 'android.widget.ImageView' }),
+      el(4, '', { className: 'android.view.ViewGroup' }),
+      el(5, '', { className: 'android.view.ViewGroup' }),
+      el(6, '할부 선택 ・ 일시불'),
+      el(7, '', { className: 'android.view.ViewGroup' }),
+      el(8, '결제수단 변경 ・ 설정')
+    ])
+    expect(selectedCardOf(s, TOSS)).toContain('넥슨현대UNLIMITED')
+    expect(cardPatternOf('현대카드').test(selectedCardOf(s, TOSS))).toBe(true)
+    // 다른 카드를 지정하면 이미 선택됨으로 보지 않는다
+    expect(cardPatternOf('롯데카드').test(selectedCardOf(s, TOSS))).toBe(false)
+  })
 })
 
 describe('결제 화면이 아닌 곳에서는 아무것도 누르지 않는다(실기: 토스 홈의 버튼을 눌러 용돈 화면으로 들어감)', () => {

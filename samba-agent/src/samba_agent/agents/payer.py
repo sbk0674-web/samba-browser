@@ -607,6 +607,7 @@ KAKAO_TAB_WAIT_MS = 1500
 KAKAO_REQUEST_WAIT_MS = 2500
 # 토스페이 PC 결제창: 탭을 누른 뒤·생년월일을 채워 알림 대기 화면으로 넘어가기를 기다리는 시간(ms)
 TOSS_TAB_WAIT_MS = 1000
+TOSS_POPUP_POLL_TRIES = 12
 TOSS_PUSH_WAIT_MS = 4000
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
 KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck')
@@ -883,9 +884,37 @@ class PayerAgent(AgentBase):
         번호·생년월일은 하네스를 지나가지 않는다. 토스 결제 항목에 값이 없으면 같은 사람의 카카오페이 항목 값을 쓴다
         (같은 휴대폰·생년월일). 창이 로그인 화면이 아니면(이미 알림 대기 등) 아무것도 하지 않고 False.
         """
+        # 결제창은 주문서 탭과 별개의 팝업으로 뜬다(실기 2026-10-06: 앞 탭만 읽어 알림 없이 폰 승인으로 넘어가 92초 뒤 끊겼다) —
+        # 토스 팝업이 뜰 때까지 기다려 그 탭으로 옮기고, 알림을 보낸 뒤 원래 탭으로 돌아온다
+        front = _active_tab_id(self.tool('list_tabs'))
+        labels: list[str] = []
+        try:
+            labels = re.findall(r'"label":"([^"]+)"', self.tool('list_accounts'))
+        except AgentFailure:
+            labels = []
+        toss_tab: str | None = None
+        for _ in range(TOSS_POPUP_POLL_TRIES):
+            popups, _active = self._list_tabs_popups()
+            toss = [p for p in popups if p.get('id') and 'toss.im' in str(p.get('url') or '')]
+            if toss:
+                toss_tab = str(toss[-1]['id'])
+                break
+            self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+        if toss_tab is None:
+            return False
+        self.tool('switch_tab', id=toss_tab)
+        # 팝업은 about:blank 로 뜬 뒤 토스 화면이 그려진다 — 로그인 화면(휴대폰번호 칸)이 보일 때까지 기다린다
         page = self.tool('get_page')
+        for _ in range(TOSS_POPUP_POLL_TRIES):
+            head = page.split('\n', 1)[0]
+            if 'pay.toss.im' in head and ('/login' in head or 'app-payment' in head):
+                break
+            self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+            page = self.tool('get_page')
         head = page.split('\n', 1)[0]
         if 'pay.toss.im' not in head or '/login' not in head:
+            if front:
+                self.tool('switch_tab', id=front)
             return False
         self.step('payer: 토스페이 알림 보내기')
         tab = _element_id_of(page, r'clickable "휴대폰번호"')
@@ -897,6 +926,7 @@ class PayerAgent(AgentBase):
             (r'textbox "휴대폰번호"', 'payment.phone', 'digits'),
             (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
         )
+        attempts: list[tuple[str, str | None]] = [('toss', None), *[('toss', lab) for lab in labels], ('kakao', None)]
         for pattern, field, fmt in fields:
             element_id = _element_id_of(page, pattern)
             if element_id is None:
@@ -904,7 +934,9 @@ class PayerAgent(AgentBase):
                     'needs_human', f'토스페이 알림 요청 칸 없음({field})', FailReason.UNKNOWN
                 )
             out = ''
-            for provider in ('toss', 'kakao'):
+            # 휴대폰·생년월일은 같은 사람의 값이다 — 이 구매 계정의 토스 항목에 없으면 같은 사이트의 다른 계정 토스 항목,
+            # 그래도 없으면 카카오페이 항목 값을 쓴다(계정마다 따로 넣지 않게, 사용자 2026-10-06)
+            for provider, label in attempts:
                 out = self.tool(
                     'fill_secret',
                     elementId=element_id,
@@ -912,6 +944,7 @@ class PayerAgent(AgentBase):
                     provider=provider,
                     field=field,
                     format=fmt,
+                    **({'accountLabel': label} if label else {}),
                 )
                 if out.strip().lower().startswith('ok'):
                     break
@@ -930,6 +963,9 @@ class PayerAgent(AgentBase):
                 FailReason.UNKNOWN,
             )
         self.note('토스페이', '결제 알림 보냄(휴대폰·생년월일은 키마스터 값)')
+        if front:
+            # 폰 승인은 앞 탭의 사이트 계정으로 결제 계정을 고른다 — 토스 창이 앞이면 계정을 못 찾는다
+            self.tool('switch_tab', id=front)
         return True
 
     def _kakao_talk_request(self, a: Assignment) -> tuple[str, str | None] | None:

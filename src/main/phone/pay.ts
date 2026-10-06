@@ -315,6 +315,8 @@ type CardStep =
 
 /** 결제 화면에서 [결제수단 변경] 위로 이만큼 안의 글자를 "지금 선택된 카드" 줄로 본다(카드명·일시불 안내) */
 const SELECTED_CARD_LOOKBACK = 3
+/** 글자 있는 줄 기준으로 카드명·일시불 안내 두 줄만 본다 */
+const SELECTED_CARD_TEXT_LINES = 2
 
 /**
  * 결제 화면에 지금 선택돼 있는 카드 이름. [결제수단 변경] 버튼 바로 위 몇 줄만 본다 —
@@ -325,10 +327,14 @@ export function selectedCardOf(screen: PhoneScreen, spec: PayProviderSpec): stri
   if (!spec.changeMethodText) return ''
   const idx = screen.elements.findIndex((e) => spec.changeMethodText?.test(e.text))
   if (idx < 0) return ''
+  // 글자 없는 클릭 요소(체크 원·행 틀)는 세지 않는다 — 사이에 끼어 있어도 카드 이름 줄이 밀리지 않게(실기 2026-10-06 토스:
+  // '넥슨현대UNLIMITED' 와 [결제수단 변경] 사이에 빈 요소가 있어 선택 카드를 못 읽고 card-not-found).
+  // 다만 보는 범위는 옛 규칙(원래 요소 3개)과 같은 크기의 글자 있는 줄 2개로 좁힌다 — 카드 줄과 '일시불' 안내 줄뿐이다
   return screen.elements
-    .slice(Math.max(0, idx - SELECTED_CARD_LOOKBACK), idx)
+    .slice(0, idx)
     .map((e) => e.text.trim())
     .filter((t) => t !== '')
+    .slice(-SELECTED_CARD_TEXT_LINES)
     .join(' ')
 }
 

@@ -86,6 +86,8 @@ TOSS_POPUP_URL = 'https://pay.toss.im/checkout'
 @respx.mock
 def test_dry_run_이면_결제하지_않는다(reg):
     respx.post(f'{URL}/tool/run_script').mock(return_value=page(ENTER_OK))
+    # 토스 알림 단계가 같은 사이트의 계정 라벨을 읽는다
+    respx.post(f'{URL}/tool/list_accounts').mock(return_value=page('[]'))
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
     pay = respx.post(f'{URL}/tool/phone_approve_payment')
@@ -450,6 +452,7 @@ def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL, toss_front: bool = F
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/find_elements').mock(return_value=page('[12] textbox "주문자 이름"'))
+    respx.post(f'{URL}/tool/list_accounts').mock(return_value=page('[]'))
     fill = respx.post(f'{URL}/tool/fill_secret').mock(return_value=page('filled'))
     pay = respx.post(f'{URL}/tool/phone_approve_payment').mock(return_value=page('ok'))
     return fill, pay
@@ -1610,12 +1613,30 @@ TOSS_LOGIN = (
 TOSS_PUSH = 'URL: https://pay.toss.im/payfront/web/app-payment/push\nTITLE: 토스페이\n'
 
 
+# 주문서 탭(앞)과 토스 결제 팝업(별개 탭) — 하네스에서는 이렇게 뜬다
+TOSS_TABS = json.dumps(
+    [
+        {'id': 'order-tab', 'kind': 'tab', 'url': 'https://www.musinsa.com/order', 'active': True},
+        {
+            'id': 'toss-pop',
+            'kind': 'popup',
+            'url': 'https://pay.toss.im/payfront/web/login',
+            'openerId': 'order-tab',
+        },
+    ]
+)
+
+
 def _toss_tools(agent_, pages, fill_results):
     calls: list[tuple[str, dict]] = []
     queue = list(pages)
 
     def tool(name, **kwargs):
         calls.append((name, kwargs))
+        if name == 'list_tabs':
+            return TOSS_TABS
+        if name == 'list_accounts':
+            return '[{"label":"hwangnol06"},{"label":"edelvise06"}]'
         if name == 'get_page':
             return queue.pop(0) if len(queue) > 1 else queue[0]
         if name == 'fill_secret':
@@ -1637,6 +1658,8 @@ def test_토스_결제창이면_휴대폰과_생년월일을_채워_알림을_�
         (9, 'payment.birth', 'toss'),
     ]
     assert [f['format'] for f in fills] == ['digits', 'yymmdd']
+    switches = [kw['id'] for n, kw in calls if n == 'switch_tab']
+    assert switches == ['toss-pop', 'order-tab']  # 토스 팝업으로 가서 알림을 보내고 주문서 탭으로 돌아온다
 
 
 def test_토스_항목에_값이_없으면_같은_사람의_카카오페이_항목_값을_쓴다(reg):
@@ -1648,7 +1671,8 @@ def test_토스_항목에_값이_없으면_같은_사람의_카카오페이_항�
     calls = _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_PUSH], fill)
     assert a._toss_phone_request(assignment(reg, dry_run=False)) is True
     providers = [kw['provider'] for n, kw in calls if n == 'fill_secret']
-    assert providers == ['toss', 'kakao', 'toss', 'kakao']
+    # 이 계정 토스 → 같은 사이트의 다른 계정 토스 → 카카오페이 항목 순서로 찾는다(휴대폰·생년월일은 같은 사람)
+    assert providers == ['toss', 'toss', 'toss', 'kakao', 'toss', 'toss', 'toss', 'kakao']
 
 
 def test_토스_로그인_화면이_아니면_아무것도_하지_않는다(reg):
