@@ -1,6 +1,9 @@
 
 // 신용카드 탭 직접결제는 card='신용카드'+issuer=카드사(2026-10-06)
-const card = args.issuer || args.card || '';
+// 간편결제(L.PAY 롯데카드)는 수단 이름이 card, 카드사가 issuer 로 온다 — 이때 issuer 를 수단으로 쓰면 신용카드 탭 경로로 빠져
+// 'card select box not found' 로 멈춘다(실기 2026-10-06). 신용카드 탭 직접결제만 issuer 가 카드사다
+const isEasy = args.card === '간편결제';
+const card = isEasy ? '간편결제' : (args.issuer || args.card || '');
 const cardCompanies=['롯데카드','신한카드','KB국민카드','삼성카드','현대카드','BC카드','하나카드','씨티카드','우리BC카드','우리카드','NH농협카드','카카오뱅크','광주카드'];
 // 간편결제=L.PAY 카드(롯데카드 즉시할인, 웹 결제비번·폰 불필요 2026-10-06)
 const simplePays=['간편결제','카카오페이','네이버페이','토스페이','삼성페이','휴대폰결제','충전결제','퀵계좌이체','온누리상품권'];
@@ -64,7 +67,7 @@ if (mc) {
   method = mp;
   if(mp==='간편결제'){
     await sleep(1200);
-    const want=String(args.easy_card||'롯데카드');
+    const want=String(args.easy_card||(isEasy?args.issuer:'')||'롯데카드');
     const rl=(await page.get({query:'L.PAY 카드'})).tree.split('\n').find(l=>/^\[\d+\] radio "L\.PAY 카드"/.test(l));
     if(rl&&!/value="on"/.test(rl)){await page.click(parseInt(rl.slice(1)));await sleep(1200);}
     let sel='';for(let k=0;k<8&&!sel;k++){const P=(String((await page.get({})).tree||'').split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await sleep(700);}
