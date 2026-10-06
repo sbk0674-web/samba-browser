@@ -223,8 +223,17 @@ export function createSupabaseBackend(
       try {
         const channel = client
           .channel(`samba-${table}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table }, () => onChange())
-          .subscribe()
+          .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+            // 다른 PC 의 변경이 왔다 — 바로 한 번 동기화한다(60초 폴링을 기다리지 않는다)
+            console.info(`[sync] Realtime ${table} ${String(payload.eventType)}`)
+            onChange()
+          })
+          .subscribe((status, err) => {
+            // 구독 상태를 남긴다 — SUBSCRIBED 가 아니면 Realtime 이 안 붙은 것(표가 publication 에 없거나 권한)
+            // 이라 60초 폴링만 돈다. 사용자 2026-10-06: "1분이 아니라 실시간으로 같이 바뀌어야 한다"
+            const detail = err instanceof Error ? ` ${err.message}` : ''
+            console.info(`[sync] Realtime 구독 ${table}: ${status}${detail}`)
+          })
         return () => {
           void client.removeChannel(channel)
         }
