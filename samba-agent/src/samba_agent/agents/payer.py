@@ -1023,7 +1023,19 @@ class PayerAgent(AgentBase):
             raise AgentFailure(
                 'needs_human', f'주문서가 이 주문과 다르다 — 결제하지 않음: {mask_text(problem)}', FailReason.VERIFY_MISMATCH
             )
-        self.note('주문서 대조', '상품·옵션 일치 확인')
+        # 받는 분 주소 — 구매가 넣은 도로명+번호(handoff ship_key)가 주문서에 보여야 한다. 주문서에 다른 도로명 주소만
+        # 보이면 배송지가 엉뚱하게 들어간 것(실기 2026-10-02 롯데온 선물: 주소 검색이 다른 도시 '화전남1길 10'을 골라 경주로 감)
+        ship_key = str(a.handoff.get('ship_key') or '')
+        if ship_key:
+            flat = re.sub(r'\s+', '', page)
+            roads = re.findall(r'[가-힣A-Za-z0-9.]+(?:로|길)\d+(?:-\d+)?', flat)
+            if roads and ship_key not in flat:
+                raise AgentFailure(
+                    'needs_human',
+                    '주문서의 받는 분 주소가 주문 주소와 다르다 — 결제하지 않음(배송지 다시 확인)',
+                    FailReason.VERIFY_MISMATCH,
+                )
+        self.note('주문서 대조', '상품·옵션 일치 확인' + (' · 받는 분 주소 일치' if ship_key else ''))
 
     def _web_pay(self, a: Assignment) -> None:
         """사이트 결제창(팝업)의 '결제하기' → 웹 키패드에 fill_secret(password) — 플레이북 §7 무신사머니 흐름.

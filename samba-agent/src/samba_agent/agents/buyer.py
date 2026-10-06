@@ -105,6 +105,16 @@ def _norm_address(text: str) -> str:
     return _ADDR_DROP.sub('', text).lower()
 
 
+def road_key(address: object) -> str:
+    """주소에서 도로명+건물번호(또는 지번 동·리+번지)만 공백 없이 — 결제 직전 주문서에 받는 분 주소가 맞게 들어갔는지
+    대조하는 열쇠. 전체 주소는 handoff 에 싣지 않는다(실기 2026-10-02 롯데온 선물: 주소 검색이 다른 도시를 골라 경주로 감)."""
+    text = str(address or '')
+    m = re.search(r'([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)', text) or re.search(
+        r'([가-힣]+(?:동|리|가))\s+(\d+(?:-\d+)?)', text
+    )
+    return f'{m.group(1)}{m.group(2)}'.replace(' ', '') if m else ''
+
+
 def shipping_matches(expected: dict[str, object], applied: dict[str, object]) -> bool:
     """넣은 배송지와 사이트가 되읽어 준 배송지가 같은 곳인가.
 
@@ -3862,6 +3872,7 @@ class BuyerAgent(AgentBase):
                 'buy_source': source_of(self.spec.name).id,
                 'accounts_compared': len(accounts),
                 'shipping_set': True,
+                **({'ship_key': self._ship_key} if getattr(self, '_ship_key', '') else {}),
                 'order_type': self.order_type_of(a.order, snap),
                 'shipping_fee': shipping_fee_for(a.order, self.order_type_of(a.order, snap)),
                 'card': card,
@@ -4283,6 +4294,8 @@ class BuyerAgent(AgentBase):
             )
         self._fill_phone(applied)
         self._confirm_shipping(shipping, args)
+        # 결제 직전 주문서 대조용 열쇠(도로명+번호) — 전체 주소는 남기지 않는다
+        self._ship_key = road_key(shipping.get('address'))
         # 마스킹 규칙이 이름을 가리려면 라벨이 앞에 있어야 한다(ops.masking) — 라벨을 붙여서 가린다
         summary = f'수취인 {shipping.get("name", "")} · {shipping.get("address", "")}'
         self.note('배송지', f'반영 완료 — {mask_text(summary)}')

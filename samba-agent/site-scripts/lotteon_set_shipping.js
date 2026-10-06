@@ -61,11 +61,15 @@ await page.click(z.id);await sleep(1200);
 const nums=s=>(String(s).match(/[0-9]+/g)||[]);const want=nums(query);
 let si=L(await E('올림픽로 300'),e=>e.role==='textbox');
 if(!si)return{...R,error:'address-search-input-nf'};
+// 결과는 도로명(또는 지번 동·리)과 시·군·구가 같은 줄만 후보다 — 숫자만 맞는 다른 도시 주소를 골라 엉뚱한 곳으로 보냈다(실기 2026-10-02 나주→경주)
+const NS=s=>String(s).replace(/\s+/g,'');const roadKey=((full.match(/[가-힣A-Za-z0-9.]+(?:로|길)(?=\s*\d)/)||full.match(/[가-힣]+(?:동|리|가)(?=\s+\d)/)||[''])[0]);
+const guKeys=(full.match(/[가-힣]{1,6}(?:시|군|구)(?=\s)/g)||[]).filter(k=>!/(특별자치|광역|특별)시$/.test(k)&&!/^(서울|부산|대구|인천|광주|대전|울산|세종)시$/.test(k));
+const okLine=t=>{const n=NS(t);if(roadKey&&!n.includes(NS(roadKey)))return false;if(guKeys.length&&!guKeys.some(k=>n.includes(k)))return false;return true;};
 async function search(q){
   await page.type(si.id,q,true);
   for(let i=0;i<8;i++){await sleep(600);
     const ls=(await E('[',null)).filter(e=>e.role==='link'&&/^\[\d{5}\]/.test(e.text));
-    if(ls.length){let b=null,sc=-1;for(const l of ls){const s=nums(l.text).filter(x=>want.includes(x)).length;if(s>sc){sc=s;b=l;}}return{hit:b,count:ls.length};}
+    if(ls.length){let b=null,sc=-1;for(const l of ls.filter(l=>okLine(l.text))){const s=nums(l.text).filter(x=>want.includes(x)).length;if(s>sc){sc=s;b=l;}}return{hit:b,count:ls.length};}
   }
   return{hit:null,count:0};
 }
@@ -74,7 +78,7 @@ if(!hit){const sh=query.replace(/^\S*(특별자치도|특별시|광역시|특별
 // 도로명과 건물번호가 붙어 온 주소('○○로167')는 검색이 안 된다(실기 2026-09-29) — 띄워서, 그래도 없으면 도로명+번호만으로 찾는다
 if(!hit){const sp=query.replace(/([가-힣])(\d)/g,'$1 $2');if(sp!==query)({hit,count}=await search(sp));
   if(!hit){const rd=sp.match(/[가-힣0-9]+(?:로|길)\s?\d+(?:-\d+)?/);if(rd)({hit,count}=await search(rd[0]));}}
-if(!hit)return{...R,error:'address-result-nf',note:'주소 검색 결과 없음: '+query};
+if(!hit)return{...R,error:'address-result-nf',note:'주소 검색 결과 없음(도로명·시군구 일치 줄 없음): '+query};
 R.address_results=count;
 await page.click(hit.id);await sleep(1200);
 const lt=hit.text;const mz=lt.match(/\[(\d{5})\]/);R.zip=mz?mz[1]:(A.postal_code||null);
@@ -91,5 +95,6 @@ if(!R.gift){
   if(sv){await page.click(sv.id);await sleep(1000);}
   R.saved=true;
 }
-R.name=name0;R.address=addr;
+// 되읽기 대조용 — 넣으려던 주소가 아니라 실제로 고른 검색 결과 줄을 돌려준다(예전엔 입력값을 그대로 돌려줘 검증이 늘 통과했다)
+R.name=name0;R.address=lt.replace(/^\[\d{5}\]\s*/,'');R.address_input=addr;
 return R;
