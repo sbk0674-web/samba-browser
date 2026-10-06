@@ -13,7 +13,7 @@ function fakeSession(opts: { slowMs?: number; fail?: boolean } = {}): {
   return {
     disposed: () => disposed,
     make: (onStep) => ({
-      names: () => ['get_page', 'click'],
+      names: () => ['get_page', 'click', 'upload_file'],
       call: async (name, args) => {
         if (name === 'click') onStep(`클릭: ${String(args.id)}`, true)
         if (opts.slowMs) await new Promise((r) => setTimeout(r, opts.slowMs))
@@ -75,7 +75,7 @@ describe('BridgeServer', () => {
     const base = await up()
     const r = await fetch(`${base}/health`, { headers: H })
     expect(r.status).toBe(200)
-    expect(await r.json()).toEqual({ ok: true, tools: ['get_page', 'click'] })
+    expect(await r.json()).toEqual({ ok: true, tools: ['get_page', 'click', 'upload_file'] })
   })
 
   it('도구를 부르고 진행 로그를 함께 돌려주며, 요청마다 세션을 닫는다', async () => {

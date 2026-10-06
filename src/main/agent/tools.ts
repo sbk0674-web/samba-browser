@@ -36,6 +36,9 @@ import {
 } from '../vault/access-gate'
 import { DEFAULT_FIELD_KEY } from '../vault/fields'
 import { formatDialogNote } from '../browser/dialogs'
+import { promises as fsp } from 'fs'
+import { isAbsolute } from 'path'
+import { ensureDebuggerAttached, keepDebuggerAttached } from '../browser/emulation'
 import { createOcrTool, ocrDigitInRegion, resolveKeypadDigits, type DigitRead } from './tools-ocr'
 import {
   createPayTool,
@@ -543,7 +546,7 @@ const text = (t: string): { content: [{ type: 'text'; text: string }] } => ({
 // 지금 조작할 창. 팝업(결제창·주소 검색창)을 골라 둔 상태면 그 팝업, 아니면 활성 탭.
 // 대상이 없으면 null
 // 행동 도구(action)가 아니어도 탭에 입력하는 도구의 라벨 머리 — fill_secret('입력: …')·login('로그인…')·run_script
-const HUMAN_GATED_LABEL_RE = /^(입력|로그인|스크립트 실행)/
+const HUMAN_GATED_LABEL_RE = /^(입력|로그인|스크립트 실행|파일 업로드)/
 
 function activeOr(ctx: ToolContext): Tab | null {
   return agentTargetOf(ctx.tabs)
@@ -1871,6 +1874,67 @@ overlays left: ${after.length}${kept}`
     }
   )
 
+  const uploadFile = tool(
+    'upload_file',
+    '활성 탭의 <input type=file> 에 이 PC 의 로컬 파일을 넣는다. selector 는 CSS 셀렉터(숨겨진 input 도 가능), ' +
+      'paths 는 절대 경로 목록. 파일을 고르는 대화상자는 열리지 않는다.',
+    { selector: z.string().min(1), paths: z.array(z.string()).min(1) },
+    ({ selector, paths }) =>
+      guard(
+        `파일 업로드: ${selector}`,
+        async () => {
+          if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
+          const tab = activeOr(ctx)
+          if (!tab) return 'no active tab'
+          for (const p of paths) {
+            const st = isAbsolute(p) ? await fsp.stat(p).catch(() => null) : null
+            if (!st || !st.isFile()) return `파일 없음: ${p}`
+          }
+          // 이 PC 의 파일을 웹사이트로 내보내는 도구라 권한 모드와 무관하게 항상 확인한다
+          const ok = await ctx.confirm(`파일 업로드: ${paths.join(', ')} → ${selector}`, 'danger')
+          if (!ok) return 'denied by user'
+          const wc = tab.view.webContents
+          ensureDebuggerAttached(wc)
+          keepDebuggerAttached(wc)
+          const { root } = await wc.debugger.sendCommand('DOM.getDocument', { depth: 0 })
+          const { nodeId } = await wc.debugger.sendCommand('DOM.querySelector', {
+            nodeId: root.nodeId,
+            selector
+          })
+          if (!nodeId) return `셀렉터 없음: ${selector}`
+          try {
+            await wc.debugger.sendCommand('DOM.setFileInputFiles', { files: paths, nodeId })
+          } catch {
+            return `file input 아님: ${selector}`
+          }
+          return JSON.stringify({ ok: true, files: paths.length })
+        }
+      )
+  )
+
+  const setDownloadDir = tool(
+    'set_download_dir',
+    '웹페이지가 시작한 다운로드를 저장할 폴더(절대 경로)를 정한다. 없으면 만든다. 정하기 전에는 모든 다운로드가 막힌다.',
+    { path: z.string().min(1) },
+    ({ path }) =>
+      guard(`다운로드 폴더: ${path}`, async () => {
+        if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
+        if (!isAbsolute(path)) return `절대 경로가 아님: ${path}`
+        await fsp.mkdir(path, { recursive: true })
+        const st = await fsp.stat(path)
+        if (!st.isDirectory()) return `폴더 아님: ${path}`
+        ctx.tabs.downloadDir = path
+        return JSON.stringify({ ok: true, dir: path })
+      })
+  )
+
+  const listDownloads = tool(
+    'list_downloads',
+    '받은 파일 기록(최근 순, 최대 50건): file, url, state, bytes, startedAt.',
+    {},
+    () => guard('다운로드 목록', async () => JSON.stringify(ctx.tabs.downloads.slice(0, 50)))
+  )
+
   const wait = tool(
     'wait',
     'Wait up to 5000 ms for the page to settle.',
@@ -2500,6 +2564,9 @@ ${submittedNote}`
     scroll,
     dismissOverlay,
     runJs,
+    uploadFile,
+    setDownloadDir,
+    listDownloads,
     wait,
     newTab,
     listTabs,
@@ -2539,6 +2606,9 @@ export const SAMBA_TOOL_NAMES = [
   'scroll',
   'dismiss_overlay',
   'run_js',
+  'upload_file',
+  'set_download_dir',
+  'list_downloads',
   'wait',
   'new_tab',
   'list_tabs',
