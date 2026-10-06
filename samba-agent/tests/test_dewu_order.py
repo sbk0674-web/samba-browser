@@ -123,18 +123,21 @@ def test_상한을_넘으면_결제하지_않는다():
         )
 
 
-def test_得物_외_판매처는_사람에게(monkeypatch):
+def test_得物_외_판매처도_得物을_검색한다(monkeypatch):
+    """사용자 2026-10-06: 식화 판매처가 唯品会 라도 得物에서 살 수 있다(조던 IB7256-010) — 판매처로 거르지 않는다."""
     wave = SimpleNamespace(
         get_order=lambda no: SimpleNamespace(
-            source_seller='淘宝',
+            source_seller='唯品会',
             registered_option='41⅓',
             source_product_code='IE7426',
             revenue=202070,
         )
     )
+    monkeypatch.setattr('samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: None)
     handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 202.16)
     outcome, _fail, line = handle(None, SimpleNamespace(order_no='A1'))
-    assert outcome == 'needs_human' and '淘宝' in line
+    # 판매처 게이트를 지나 폰 연결 단계까지 간다
+    assert outcome == 'needs_human' and '폰' in line and '판매처' not in line
 
 
 def test_성공하면_원가와_배송비_8500을_기록한다(monkeypatch):

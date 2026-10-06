@@ -445,13 +445,8 @@ def make_shihuo_handler(
         # 조회·기입은 삼바웨이브 행 id 로(같은 주문번호의 다른 행과 구분) — 없으면 주문번호
         wave_key = str(getattr(order, 'wave_key', '') or order_no)
         detail = wave.get_order(wave_key)  # type: ignore[attr-defined]
-        seller = (detail.source_seller or '').strip()
-        if seller != '得物':
-            return (
-                'needs_human',
-                'unknown',
-                f'판매처 {seller or "모름"} — 得物 외 판매처는 사람이 산다',
-            )
+        # 식화 판매처가 唯品会·淘宝 라도 得物에서 같은 품번을 팔 수 있다(사용자 2026-10-06: 조던 IB7256-010) —
+        # 판매처로 거르지 않고 得物을 검색한다. 없으면 검색 단계가 needs_human 으로 돌려준다
         eu = (detail.registered_option or '').strip()
         model = (detail.source_product_code or '').strip()
         if not eu or not model:
