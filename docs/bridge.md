@@ -22,6 +22,12 @@ dismiss_overlay, run_js, wait, new_tab, list_tabs, switch_tab, close_tab, list_a
 fill_secret, login, progress, remember_site, save_script, run_script, list_playbooks, update_playbook,
 phone_*(폰 연결 시), phone_approve_payment(결제 배선 시). `done` 은 없다.
 
+추가 도구:
+
+- `upload_file` — 활성 탭의 `<input type=file>`(숨김 포함)에 이 PC 의 절대 경로 파일을 넣는다. 인자 `{ selector, paths[] }`
+- `set_download_dir` — 웹페이지 다운로드를 저장할 폴더(절대 경로)를 지정한다. 지정 전에는 모든 다운로드가 막힌다. 인자 `{ path }`
+- `list_downloads` — 받은 파일 기록(최근 순, 최대 50건). 읽기 전용에서도 쓸 수 있다
+
 ## 하네스 .env
 
 ```
@@ -31,6 +37,7 @@ SAMBA_BRIDGE_TOKEN=<설정 카드에서 복사한 토큰>
 
 ## 주의
 
+- **브릿지 토큰 보유자는 `upload_file` 로 이 PC 의 임의 파일을 웹사이트에 올릴 수 있고, `set_download_dir` 로 웹에서 파일을 받아 이 PC 의 원하는 폴더에 저장할 수 있다.** 브릿지에서는 확인 카드가 뜨지 않는다 — 토큰 보관에 특히 주의한다.
 - 브릿지 호출 중에는 채팅창 AI 실행이 거부된다(한 손발). 반대도 같다.
 - 확인 카드는 뜨지 않는다(판단은 하네스가 한다). 캡차·2단계 인증은 도구가 `needs_user` 문자열을 돌려주니 하네스가 사람에게 넘긴다.
 - 응답에 비밀값(비밀번호·키패드 값)은 없다 — 도구가 애초에 돌려주지 않는다.
