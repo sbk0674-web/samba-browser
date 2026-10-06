@@ -20,6 +20,7 @@ import { extractCode } from '../ai/visual'
 import type { HandoffResult } from '../agent/handoff'
 import type { PayToolRequest, PhoneOps, SmsCodeOutcome } from '../agent/tools-phone'
 import { execOutArgs, shellArgs, type AdbRunner } from './adb'
+import { ensureAwake } from './input'
 import { runSmsAuth } from './auth-flow'
 import { keypadFromUiTree } from './pay-secret'
 import type { PaySecretVault } from './pay-secret'
@@ -118,9 +119,17 @@ export function createLaunchApp(
   adb: AdbRunner
 ): (serial: string, deepLink: string) => Promise<void> {
   return async (serial, deepLink) => {
+    const spec = Object.values(PAY_PROVIDERS).find((p) => p.deepLink === deepLink)
+    if (spec?.launchActivity) {
+      // 결제 화면 액티비티를 바로 띄우는 앱(롯데카드 로카페이) — 딥링크·런처보다 확실하다
+      const direct = await adb.run(
+        shellArgs(serial, ['am', 'start', '-n', spec.launchActivity]),
+        10000
+      )
+      if (direct.code === 0 && !LAUNCH_FAILED_RE.test(`${direct.stdout}\n${direct.stderr}`)) return
+    }
     const res = await adb.run(amStartArgs(serial, deepLink), 10000)
     if (res.code === 0 && !LAUNCH_FAILED_RE.test(`${res.stdout}\n${res.stderr}`)) return
-    const spec = Object.values(PAY_PROVIDERS).find((p) => p.deepLink === deepLink)
     if (!spec) return
     await adb.run(monkeyArgs(serial, spec.packageName), 10000)
   }
@@ -376,6 +385,13 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
       const assigned = deps.phones.assignForJob(accountId)
       if (assigned && list.some((p) => p.serial === assigned.serial)) return [assigned.serial]
     }
+    // 담당 폰이 없으면 설정의 기본 폰(붙어 있을 때). 없으면 연결된 폰 전부
+    const fallback = deps.settings().defaultPhoneSerial
+    if (fallback && list.some((p) => p.serial === fallback)) return [fallback]
+    // 무선 디버깅으로 붙으면 이름이 'adb-<시리얼>-xxxx._adb-tls-connect._tcp' 로 바뀐다 — 정확히 같지 않아
+    // 연결된 폰 전부로 넘어가 득물 전용 폰에서 결제 알림을 기다렸다(실기 2026-09-30). 시리얼을 품은 이름도 같은 폰으로 본다
+    const wireless = fallback ? list.find((p) => p.serial.includes(fallback)) : undefined
+    if (wireless) return [wireless.serial]
     return list.map((p) => p.serial)
   }
 
@@ -474,7 +490,26 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
       )
       return { ok: false, reason: 'no-phone' }
     }
-    const serial = serialsFor(account.id)[0]
+    // 담당 폰이 없는 계정은 연결된 폰 중 **그 결제 앱이 깔린 폰**만 고른다 — 첫 폰으로 가면 결제 앱이 없는 폰
+    // (다른 일에 쓰는 폰)에 결제 탭이 찍힐 수 있다(2026-09-29: 플립은 得物 전용, 결제 앱은 A426N 에만 있다)
+    const candidates = serialsFor(account.id)
+    const withApp: string[] = []
+    for (const s of candidates) {
+      const res = await deps.adb
+        .run(shellArgs(s, ['pm', 'path', PAY_PROVIDERS[req.provider].packageName]), 8000)
+        .catch(() => null)
+      if (res && res.code === 0 && /package:/.test(res.stdout)) withApp.push(s)
+    }
+    const serial = withApp[0]
+    if (candidates.length && !serial) {
+      ctx.onStep(
+        tr('phone.payRejected', {
+          reason: `${PAY_PROVIDERS[req.provider].packageName} 가 깔린 폰이 없다`
+        }),
+        false
+      )
+      return { ok: false, reason: 'no-phone' }
+    }
     if (!serial) {
       ctx.onStep(tr('phone.payRejected', { reason: tr('phone.gateNoPhone') }), false)
       return { ok: false, reason: 'no-phone' }
@@ -506,17 +541,22 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         tap: deps.ops.tap,
         screenshot: deps.ops.screenshot,
         // 시험 입력(dry-run)을 취소하고 키패드에서 빠져나올 때만 쓴다
-        back: (s) => deps.ops.key(s, 'back')
+        back: (s) => deps.ops.key(s, 'back'),
+        // 결제창 숫자코드(롯데카드 앱카드) 입력 — 비밀 값은 지나가지 않는다
+        typeText: (s, text) => deps.ops.typeText(s, text)
       },
-      launchApp: createLaunchApp(deps.adb),
+      // 폰이 잠들어 있으면 결제 앱 화면을 못 읽는다 — 앱을 부르기 전에 깨운다(실기 2026-09-30)
+      launchApp: async (serial, link) => {
+        await ensureAwake(deps.adb, serial).catch(() => {})
+        await createLaunchApp(deps.adb)(serial, link)
+      },
       // 결제 요청 알림을 누르는 것이 가장 짧은 길이다. 누를 알림은 알림 기록에서 **그 결제 앱이 올린 것**만 고르고
       // 제목이 정확히 같은 요소만 누른다 — 카카오톡의 "토스" 메시지 같은 남의 알림은 후보가 되지 않는다
       notifications: {
-        open: async (serial) =>
-          void (await deps.adb.run(
-            shellArgs(serial, ['cmd', 'statusbar', 'expand-notifications']),
-            10000
-          )),
+        open: async (serial) => {
+          await ensureAwake(deps.adb, serial).catch(() => {})
+          await deps.adb.run(shellArgs(serial, ['cmd', 'statusbar', 'expand-notifications']), 10000)
+        },
         close: async (serial) =>
           void (await deps.adb.run(shellArgs(serial, ['cmd', 'statusbar', 'collapse']), 10000)),
         list: async (serial, packageName) =>
@@ -553,6 +593,7 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         methodLabel: req.methodLabel,
         ...(req.card === undefined ? {} : { cardHint: req.card }),
         ...(req.dryRunDigits === undefined ? {} : { dryRunDigits: req.dryRunDigits }),
+        ...(req.code === undefined ? {} : { code: req.code }),
         phoneLabel: deps.phones.list().find((p) => p.serial === serial)?.label ?? serial,
         accountId: account.id,
         phoneId: phoneIdOf(serial),

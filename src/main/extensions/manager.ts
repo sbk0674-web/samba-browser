@@ -183,12 +183,29 @@ export function createSessionExtensionHost(session: SessionLike): ExtensionHost 
   }
 }
 
-// 기본 세션과 일반 탭(default 프로필) 세션에만 올리는 확장 — 삼바웨이브 확장은 삼바 페이지에서 설정(proxyUrl·apiKey)을 받는다.
-// 계정 프로필 세션에는 그 페이지가 없어 설정 없이 떠서 API 호출이 전부 실패했다(실기 2026-09-28: 10분에 173건)
-const PRIMARY_ONLY_IDS = new Set(['ojfcneljbbajgcmpmklgglhenieehicb'])
-// 계정 프로필 파티션인가 — 파티션 이름이 'default' 로 끝나면(persist:ws1-default) 일반 탭 세션이다(삼바 페이지가 여기서 열린다)
-const isAccountPartition = (key: string | undefined): boolean =>
-  key !== undefined && !/(^|[:-])default$/.test(key)
+/**
+ * 파티션 이름(persist:ws1-<프로필>)에서 프로필 이름을 뽑는다. 기본 세션(파티션 없음)은 null
+ */
+export function profileOfPartitionKey(key: string | undefined): string | null {
+  if (key === undefined) return null
+  return key.replace(/^persist:/, '').replace(/^ws[^-]*-/, '')
+}
+
+/**
+ * 이 확장을 그 세션에 올리지 말아야 하는가(설정 extensionProfiles).
+ * 적혀 있지 않은 확장은 어디든 올린다. 기본 세션과 일반 탭(default)에는 늘 올린다
+ */
+export function skipsProfile(
+  scopes: Record<string, string[]>,
+  extensionId: string,
+  key: string | undefined
+): boolean {
+  const allow = scopes[extensionId]
+  if (allow === undefined) return false
+  const profile = profileOfPartitionKey(key)
+  if (profile === null || profile === 'default') return false
+  return !allow.some((p) => p.trim().toLowerCase() === profile.toLowerCase())
+}
 
 export class ExtensionManager {
   /** 로드에 성공한 확장. 설정에 저장되는 경로 순서와 같다 */
@@ -197,10 +214,10 @@ export class ExtensionManager {
   private hosts: ExtensionHost[] = []
   /** 이미 붙인 파티션 이름. 같은 세션을 두 번 붙여 목록이 불어나는 것을 막는다 */
   private hostKeys = new Set<string>()
-  /** 세션별 파티션 이름 — 계정 프로필 세션에는 PRIMARY_ONLY_IDS 확장을 올리지 않는다 */
+  /** 세션별 파티션 이름 — 설정(extensionProfiles)에 따라 그 프로필에 올릴 확장을 고른다 */
   private keyOfHost = new WeakMap<ExtensionHost, string>()
   private skips(host: ExtensionHost, id: string): boolean {
-    return PRIMARY_ONLY_IDS.has(id) && isAccountPartition(this.keyOfHost.get(host))
+    return skipsProfile(this.settings.get().extensionProfiles, id, this.keyOfHost.get(host))
   }
   private failures: ExtensionError[] = []
   /** 진행 중인 최초 로드. 새 파티션 세션에 확장을 걸기 전에 이것을 기다린다 */

@@ -7,6 +7,7 @@ import {
   setExtensionActionListener,
   warmExtensionWorkers
 } from '../extensions/cookies-bridge'
+import { loadFallbackTokens } from '../agent/fallback-tokens'
 import { applyProfileProxy, loadProfileProxies, profileOfPartition } from '../browser/profile-proxy'
 import { ChatSessionStore } from '../agent/chat-session'
 import {
@@ -21,6 +22,10 @@ import {
   type WebFrameMain
 } from 'electron'
 import { join } from 'node:path'
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { profileNames } from '../../shared/profiles'
+import { PHONE_SYNC_KEYS, PhoneRegistrySync } from '../phone/registry-sync'
+import { declareKeymasterBaseline } from '../sync/authority'
 import * as os from 'node:os'
 import { IPC, type IpcResult, type Layout, type Settings } from '../../shared/ipc'
 import { defaultTabUrl } from '../../shared/settings'
@@ -28,7 +33,7 @@ import type { TabManager } from '../browser/tab-manager'
 import { ClosedTabStack, newProfileName, runGesture, type GestureDeps } from '../browser/gestures'
 import { SettingsStore } from '../settings/store'
 import { setOcrEnabled } from '../agent/tools-ocr'
-import { AgentRunner } from '../agent/runner'
+import { AgentRunner, BRIDGE_BUSY_ERROR } from '../agent/runner'
 import { BridgeServer } from '../bridge/server'
 import { applyBridgeSettings, newBridgeToken } from '../bridge/wiring'
 import { createHarnessApi } from '../harness/wiring'
@@ -97,7 +102,12 @@ import {
 } from '../ai/connections'
 import { resolveAgentAuth } from '../ai/auth-route'
 import { remapOnProviderChange, resolveModel, taskModelChoices } from '../ai/models'
-import { agentBackend, setApiKeyResolver, setAuthResolver } from '../agent/provider'
+import {
+  agentBackend,
+  setApiKeyResolver,
+  setAuthResolver,
+  setSubscriptionFallbackTokens
+} from '../agent/provider'
 // === AI 연결 끝 =======================================================================
 import { AuthService } from '../sync/auth'
 import {
@@ -123,7 +133,8 @@ import { ExtensionPopupHost, sessionWithExtension } from '../extensions/popup-vi
 import { WEBSTORE_HOST, isExtensionId } from '../../shared/extensions'
 import type { ExtensionActionResult, ExtensionAnchorDto } from '../../shared/extensions'
 // === 폰 연동(3단계) — child_process 는 phone/process.ts 안에만 있다 ===================
-import { createAdbRunner } from '../phone/process'
+import { createAdbRunner, createSpawner } from '../phone/process'
+import { createPhoneRelay, createRelayingAdb } from '../phone/relay'
 import { PhoneRepo } from '../phone/repo'
 import { PhoneService } from '../phone/service'
 import { registerPhoneScreenIpc } from '../phone/screen-ipc'
@@ -146,6 +157,10 @@ import { registerCaptureIpc } from '../capture/capture-ipc'
 import { isAllowedCaptureDir } from '../capture/paths'
 import type { CaptureShortcutInput } from '../../shared/capture'
 import { tr } from '../i18n'
+
+// 빌드가 넣어 주는 코드 판(커밋 짧은 해시·날짜, electron.vite.config.ts). 시험 환경에는 없다
+declare const __APP_REV__: string | undefined
+const APP_REV = typeof __APP_REV__ === 'string' ? __APP_REV__ : 'dev'
 
 /**
  * 렌더러가 보낸 툴바 버튼 좌표를 숫자만 남긴 형태로 받는다.
@@ -385,7 +400,8 @@ export function registerIpc(
   // 팝업(결제창·주소 검색창)까지 함께 돌려준다 — 사이드바가 "팝업" 배지로 보여 준다
   handleFromRenderer(IPC.tabList, () => tabs.listAll())
   handleFromRenderer(IPC.tabCreate, (o: { url?: string; profile?: string; mobile?: boolean }) =>
-    tabs.create(o)
+    // 화면에서 사람이 연 탭 — 바깥 자동화가 닫지 못하게 표시한다
+    tabs.create({ ...o, user: true })
   )
   // 팝업 id 로도 닫기·전환이 되게 대상(탭+팝업) 경로로 보낸다
   handleFromRenderer(IPC.tabClose, (id: string) => tabs.closeTarget(id))
@@ -395,6 +411,24 @@ export function registerIpc(
   handleFromRenderer(IPC.tabForward, (id: string) => tabs.forward(id))
   handleFromRenderer(IPC.tabReload, (id: string) => tabs.reload(id))
   handleFromRenderer(IPC.tabSetMobile, (id: string, mobile: boolean) => tabs.setMobile(id, mobile))
+  handleFromRenderer(IPC.tabMove, (id: string, toIndex: number) => tabs.move(id, toIndex))
+  // 프로필 메뉴용 목록 — 이 작업공간에서 한 번이라도 쓴 프로필(세션 폴더)과 지금 열린 탭의 프로필
+  handleFromRenderer(IPC.profileList, () => {
+    const dirPrefix = workspace.partitionPrefix().replace(/^persist:/, '')
+    let dirs: string[] = []
+    try {
+      dirs = readdirSync(join(app.getPath('userData'), 'Partitions'), { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+    } catch {
+      // 아직 프로필 탭을 연 적이 없으면 폴더가 없다
+    }
+    return profileNames(
+      dirs,
+      dirPrefix,
+      tabs.listAll().map((t) => t.profile)
+    )
+  })
   handleFromRenderer(IPC.layoutSet, (l: Layout) => tabs.setLayout(l))
 
   // 실행 시작만 즉시 확인해 주고, 완료·실패는 status 이벤트로만 알린다.
@@ -411,9 +445,12 @@ export function registerIpc(
       // 활동 기록도 같은 자리에서 지시를 받아 둔다(마스킹은 저장 직전에 한다)
       activity.notePrompt(prompt)
       const overrides = scheduler.claimOverrides(scheduleToken)
-      void agent
-        .run(prompt, chatId, overrides, images)
-        .catch((e: unknown) => console.error('작업 실행 실패', e))
+      void agent.run(prompt, chatId, overrides, images).catch((e: unknown) => {
+        console.error('작업 실행 실패', e)
+        // 시작도 못 한 지시는 상태 이벤트가 하나도 안 나간다 — 알리지 않으면 화면이 영영 '생각 중'이다
+        const message = e instanceof Error ? e.message : String(e)
+        agent.notifyNotStarted(message === BRIDGE_BUSY_ERROR ? tr('ipc.agentBridgeBusy') : message)
+      })
       return { started: true }
     }
   )
@@ -745,6 +782,11 @@ export function registerIpc(
     (o: { id: number; kind: 'folder' | 'link'; toFolderId: number | null }) =>
       importService.moveBookmark(o.id, o.kind, o.toFolderId)
   )
+  handleFromRenderer(
+    IPC.bookmarksPlace,
+    (o: { id: number; kind: 'folder' | 'link'; toFolderId: number | null; toIndex: number }) =>
+      importService.placeBookmark(o.id, o.kind, o.toFolderId, o.toIndex)
+  )
   handleFromRenderer(IPC.bookmarksRemoveFolder, (id: number) =>
     importService.removeBookmarkFolder(id)
   )
@@ -803,20 +845,21 @@ export function registerIpc(
     scrollTo: (id, to) => tabs.scrollTo(id, to),
     homeUrl: () => settings.get().homeUrl,
     newTab: () => {
-      tabs.create({})
+      tabs.create({ user: true })
     },
     // 이 앱은 단일 창이라 '새 창 열기' 는 새 탭으로 대체한다(설정 라벨에도 그렇게 적혀 있다)
     newWindow: () => {
-      tabs.create({})
+      tabs.create({ user: true })
     },
     // 시크릿창 대체 — 세션이 분리된 새 프로필 탭
     newProfileTab: () => {
-      tabs.create({ profile: newProfileName(Date.now()) })
+      tabs.create({ profile: newProfileName(Date.now()), user: true })
     },
     closeTab: (id) => tabs.close(id),
     reopenTab: () => {
       const last = closedTabs.pop()
-      if (last) tabs.create({ url: last.url, profile: last.profile, mobile: last.mobile })
+      if (last)
+        tabs.create({ url: last.url, profile: last.profile, mobile: last.mobile, user: true })
     },
     toggleFullScreen: () => {
       if (!win.isDestroyed()) win.setFullScreen(!win.isFullScreen())
@@ -867,9 +910,12 @@ export function registerIpc(
       hasApiKey: Boolean(apiKeys.masked().anthropic)
     })
   })
+  // 구독 예비 계정 토큰(하네스와 공유). 등록·삭제가 재시작 없이 반영되게 부를 때마다 읽는다
+  setSubscriptionFallbackTokens(() => loadFallbackTokens([process.cwd(), app.getAppPath()]))
   win.once('closed', () => {
     setApiKeyResolver(null)
     setAuthResolver(null)
+    setSubscriptionFallbackTokens(null)
   })
 
   // 첫 실행 1회 승계: 이미 Claude 구독으로 쓰고 있던 기존 사용자는 연결됨으로 올려 준다
@@ -1200,7 +1246,7 @@ export function registerIpc(
     device: {
       hostname: () => os.hostname(),
       osLabel: () => `${os.type()} ${os.release()}`,
-      appVersion: () => app.getVersion()
+      appVersion: () => `${app.getVersion()}+${APP_REV}`
     },
     // 서버 키 재료가 다르면 계정 비밀번호로 자동으로 맞춘다(사용자 개입 없음)
     onVaultKeyMismatch: () => void account.onVaultKeyMismatch()
@@ -1208,6 +1254,36 @@ export function registerIpc(
   onDataBackend = (backend) => connection.setBackend(backend)
   // 수동 동기화는 연결을 거친다 — 최초 업로드가 놓친 행을 먼저 보충하고 한 주기를 돈다
   handleFromRenderer(IPC.syncNow, () => connection.syncNow())
+  // 이 PC 의 키마스터를 기준으로 선언한다(sync/authority.ts). 실행했으면 곧바로 한 주기 돌려 올린다
+  handleFromRenderer(IPC.syncKeymasterBaseline, async (dryRun: boolean) => {
+    if (!syncBackend || !auth.state().signedIn) throw new Error(tr('ipc.loginRequired'))
+    if (vault.state() !== 'unlocked') throw new Error(tr('vault.locked'))
+    const scope = workspace.scope()
+    const report = await declareKeymasterBaseline(
+      {
+        db,
+        backend: syncBackend,
+        workspace: {
+          localId: scope.id,
+          remoteId: workspaceRemoteId(
+            db,
+            scope.id,
+            scope.isDefault || accountWorkspaces.isAccountWorkspace(scope.id)
+          )
+        },
+        settings,
+        // 서버에만 있던 행은 지우기 전에 앱 데이터 폴더에 남긴다(암호문 그대로 — 되돌릴 때 쓴다)
+        backup: (table, rows, at) => {
+          const dir = join(app.getPath('userData'), 'keymaster-baseline-backup')
+          mkdirSync(dir, { recursive: true })
+          writeFileSync(join(dir, `${at}-${table}.json`), JSON.stringify(rows))
+        }
+      },
+      { dryRun: dryRun !== false }
+    )
+    if (!report.dryRun) await connection.syncNow()
+    return report
+  })
   // 저장된 세션이 있으면 조용히 되살린다(디렉터리 → 주소 내려받기 → 데이터 세션). 실패는 로그아웃으로 본다.
   // 연결부가 만들어진 뒤에 돌려야 새 백엔드 교체가 연결부까지 닿는다
   void account.restore().then(() => connection.refresh())
@@ -1251,7 +1327,11 @@ export function registerIpc(
   // 막는 사이트는 전용 프로필에만 프록시를 건다(사용자 2026-09-28)
   const profileProxies = loadProfileProxies(app.getPath('userData'))
   tabs.setSessionHook((ses, partition) => {
-    applyProfileProxy(ses, profileOfPartition(partition, workspace.partitionPrefix()), profileProxies)
+    applyProfileProxy(
+      ses,
+      profileOfPartition(partition, workspace.partitionPrefix()),
+      profileProxies
+    )
     enableExtensionServiceWorkerSupport(ses, join(__dirname, '../preload/extension-sw.js'))
     // 파티션 이름을 함께 넘긴다 — 같은 세션이 두 번 들어와도 한 번만 붙는다
     void extensions
@@ -1275,7 +1355,8 @@ export function registerIpc(
     setTimeout(() => {
       const t = tabs.active()
       const wc = t?.view.webContents
-      if (wc && !wc.isDestroyed()) sendExtensionTabEvent(wc.session, 'activated', { tabId: wc.id, windowId: 0 })
+      if (wc && !wc.isDestroyed())
+        sendExtensionTabEvent(wc.session, 'activated', { tabId: wc.id, windowId: 0 })
     }, 0)
   })
 
@@ -1379,7 +1460,22 @@ export function registerIpc(
 
   // === 폰 연동(3단계) — 이 블록만 따로 추가한다 ========================================
   // 결제 비밀번호·문자 본문은 이 채널들로 흐르지 않는다
-  const phoneAdb = createAdbRunner(() => settings.get().adbPath)
+  // 폰 중계(phone/relay.ts): 다른 PC 가 중계하는 폰은 -H/-P 로 그 PC 의 adb 서버에 보낸다. 로컬에 붙은 폰이 이긴다
+  const rawAdb = createAdbRunner(() => settings.get().adbPath)
+  const relay = createPhoneRelay({
+    adb: rawAdb,
+    spawn: createSpawner(() => settings.get().adbPath),
+    settings: () => settings.get(),
+    saveRoom: (value) => void settings.set({ phoneRelayRoom: value }),
+    localOnline: () =>
+      new Set(
+        phones
+          .list()
+          .filter((p) => p.state === 'online' && p.transport !== 'relay')
+          .map((p) => p.serial)
+      )
+  })
+  const phoneAdb = createRelayingAdb(rawAdb, (serial) => relay.targetOf(serial))
   // 원클릭 설치본이 들어가는 자리(%APPDATA%/SAMBA Browser/phone-tools)
   const phoneToolsRoot = join(app.getPath('userData'), 'phone-tools')
   const phoneRepo = new PhoneRepo(db)
@@ -1393,17 +1489,53 @@ export function registerIpc(
   // 비밀번호 화면 표식(결제 실행기가 갱신 → 화면 전송이 참조)과 ARS 진행 로그 중계
   const phoneSecretGate = new SecretScreenGate()
   const phoneProgress = new AgentProgressRelay()
+  // 폰 연동 동기화 — 폰 목록·담당 계정을 계정 설정에 실어 다른 PC 에서도 보이게 한다(registry-sync.ts)
+  const phoneRegistry = new PhoneRegistrySync({
+    repo: phoneRepo,
+    settings,
+    relay: () => relay.published()
+  })
+  let phonePublishTimer: NodeJS.Timeout | null = null
+  const publishPhonesSoon = (): void => {
+    if (phonePublishTimer) clearTimeout(phonePublishTimer)
+    phonePublishTimer = setTimeout(() => {
+      try {
+        phoneRegistry.publish()
+      } catch (e: unknown) {
+        console.warn('폰 목록 동기화 실패', e instanceof Error ? e.message : String(e))
+      }
+    }, 2000)
+  }
   const phones = new PhoneService({
     adb: phoneAdb,
     repo: phoneRepo,
     settings,
     toolsRoot: phoneToolsRoot,
-    emit: (list, warning) => send(IPC.phoneUpdated, { list, warning }),
+    emit: (list, warning) => {
+      send(IPC.phoneUpdated, { list, warning })
+      publishPhonesSoon()
+    },
     emitAuthWaiting: (dto) => send(IPC.phoneAuthWaiting, dto),
-    onProgress: (t) => phoneProgress.emit(t)
+    onProgress: (t) => phoneProgress.emit(t),
+    relayHosts: () => relay.hosts()
   })
   phones.start()
-  win.once('closed', () => phones.dispose())
+  relay.start()
+  win.once('closed', () => {
+    if (phonePublishTimer) clearTimeout(phonePublishTimer)
+    relay.stop()
+    phones.dispose()
+  })
+  // 켤 때 한 번 맞추고, 다른 PC 의 변경이 내려오면 다시 맞춘다
+  publishPhonesSoon()
+  settings.onSynced((keys) => {
+    if (!keys.some((k) => PHONE_SYNC_KEYS.includes(k))) return
+    try {
+      if (phoneRegistry.applyRemote()) void phones.refresh()
+    } catch (e: unknown) {
+      console.warn('받은 폰 목록 반영 실패', e instanceof Error ? e.message : String(e))
+    }
+  })
 
   handleFromRenderer(IPC.phoneList, () => phones.list())
   handleFromRenderer(IPC.phoneRefresh, () => phones.refresh())
@@ -1418,9 +1550,11 @@ export function registerIpc(
   handleFromRenderer(IPC.phoneSetLabel, (id: number, label: string, country: string) =>
     phones.setLabel(id, label, country)
   )
-  handleFromRenderer(IPC.phoneAssign, (accountId: number, phoneId: number | null) =>
+  handleFromRenderer(IPC.phoneAssign, (accountId: number, phoneId: number | null) => {
     phones.assign(accountId, phoneId)
-  )
+    // 담당 폰도 다른 PC 로 따라간다
+    publishPhonesSoon()
+  })
   handleFromRenderer(IPC.phoneAssigned, (accountId: number) => phones.assignedPhoneId(accountId))
   handleFromRenderer(IPC.phoneAuthEvents, (limit?: number) => phones.authEvents(limit))
   // 폰 연동 프로그램 원클릭 설치 — 내려받기·해제·설정 저장까지 메인에서만 한다
@@ -1491,6 +1625,8 @@ export function registerIpc(
     // 결제 비밀번호 화면 프레임은 보내지도 저장하지도 않는다
     isSecretScreen: (serial) => phoneSecretGate.isSecret(serial)
   })
+  // 폰 도구가 큰 화면(scrcpy 창)을 열 수 있게 잇는다 — 캡차는 사람이 이 창에서 푼다
+  phoneOps.openWindow = (serial) => phoneScreen.windows.open(serial)
   win.once('closed', () => phoneScreen.dispose())
   // === 폰 화면 끝 ======================================================================
 

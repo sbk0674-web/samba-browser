@@ -33,12 +33,15 @@ function mismatch(f, e) {
 async function pickForm() {
   let c = (await tabs.list()).filter(x => /29cm\.co\.kr\/order\/checkout/.test(x.url || ''))
   if (args.tab) c = c.filter(x => x.id === String(args.tab))
+  // 계정 비교를 동시에 돌리면 계정마다 주문서 탭이 열린다 — 이 계정(프로필)의 탭만 본다
+  // (실기 2026-09-29: 'multiple checkout tabs' 로 원가를 못 읽었다)
+  if (args.profile) { const mine = c.filter(x => !x.profile || x.profile === args.profile); if (mine.length) c = mine }
   if (!c.length) return { err: 'no checkout tab' }
   const ok = []
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/총 결제금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
@@ -83,7 +86,7 @@ const same = (e, w) => {
 const w = { name: String(args.name || '').trim(), address: String(args.address || '').trim(), address_detail: String(args.address_detail || '') }
 const F = await pickForm()
 if (F.err) return { ok: false, note: F.err + (F.why ? ': ' + F.why : '') }
-const dlg = async () => (await page.get({ selector: '[role=dialog]' })).tree
+const dlg = async () => { const t = (await page.get({ selector: '[role=dialog]' })).tree; return /\] (button|textbox) /.test(t) ? t : (await page.get({})).tree }
 let dl = await dlg()
 const save = lines(dl).find(l => /\] button "저장하기"/.test(l))
 if (!save) return { ok: false, note: '배송지 추가 창(저장하기)이 열려 있지 않음' }

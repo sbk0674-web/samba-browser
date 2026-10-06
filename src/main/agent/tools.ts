@@ -178,7 +178,11 @@ export const PAYMENT_KEYPAD_REFUSAL =
 // 숫자 배치를 모델에게 보여 주지 않는다
 export const SECRET_SCREEN_REFUSAL = 'refused: secret screen'
 // 비밀 키패드 화면에서 fill_secret 이 사람에게 넘길 때의 안내
-export const KEYPAD_HANDOFF_MESSAGE = '결제 비밀번호는 직접 눌러 주세요'
+// 글자 없는 키패드 버튼이 늦게 뜰 때 다시 찾는 횟수·간격(합쳐 약 6초)
+const KEYPAD_CELLS_RETRIES = 8
+// 시험에서는 기다리지 않는다(VITEST)
+const KEYPAD_CELLS_WAIT_MS = process.env['VITEST'] ? 0 : 750
+export const KEYPAD_HANDOFF_MESSAGE ='결제 비밀번호는 직접 눌러 주세요'
 // 사용자가 키패드 넘김을 건너뛴 뒤 모델이 할 일(같은 키패드에 다시 시도하지 않게)
 export const KEYPAD_SKIPPED_NEXT =
   'user skipped: they will enter the payment password themselves later. Do NOT call fill_secret, ' +
@@ -286,6 +290,8 @@ const PAYMENT_PROVIDER_NAMES = [
   'kakao',
   'naver',
   'payco',
+  'alipay',
+  'lottecard',
   'samsung',
   'apple',
   'other'
@@ -474,6 +480,8 @@ export async function withToolTimeout<T>(
 
 export interface ToolContext {
   tabs: TabManager
+  /** 브릿지(하네스) 호출이면 true — 보이는 탭·창 포커스를 가져가지 않는다 */
+  background?: boolean
   dangerWords: string[]
   // 사용 권한 모드. read_only 는 조작 도구를 실행하지 않고, full 은 위험 단어 확인을 생략한다
   mode: PermissionMode
@@ -709,7 +717,11 @@ export function createSambaTools(
       // 페이지가 대화상자·무한 로딩으로 응답하지 않으면 실행 전체가 멈춘다(실기에서 14분 대기).
       // 도구 하나는 이 시간 안에 끝나야 하고, 넘기면 문구로 돌려줘 모델이 다른 길을 찾게 한다
       // 자동화 흐름으로 표시해 아래 입력 함수들이 '사람이 쓰는 탭' 검사를 하게 한다
-      const r = await withToolTimeout(runAsAutomation(fn), TOOL_TIMEOUT_MS, () => humanWaits > 0)
+      const r = await withToolTimeout(
+        runAsAutomation(fn, ctx.background === true),
+        TOOL_TIMEOUT_MS,
+        () => humanWaits > 0
+      )
       const raw = typeof r === 'string' ? r : JSON.stringify(r)
       const ok = isToolResultOk(raw, content)
       ctx.onStep(resolveLabel(), ok)
@@ -1206,9 +1218,16 @@ ${raw}`
     ctx.tabs.withFront(tab.id, () => ocrKeypadLayoutInner(tab))
 
   const ocrKeypadLayoutInner = async (tab: Tab): Promise<KeypadLayout | null> => {
-    const cells = await pageBridge.keypadUnlabeled(tab).catch(() => null)
+    // 비밀번호 화면 글이 먼저 뜨고 키패드 버튼은 늦게 그려진다(실기 2026-09-29 롯데온 바로구매:
+    // 결제하기 8초 뒤엔 버튼이 아직 없어 사람에게 넘겼다) — 몇 초 동안 다시 찾아본다
+    let cells = await pageBridge.keypadUnlabeled(tab).catch(() => null)
+    for (let i = 0; i < KEYPAD_CELLS_RETRIES && !cells; i++) {
+      await new Promise((resolve) => setTimeout(resolve, KEYPAD_CELLS_WAIT_MS))
+      cells = await pageBridge.keypadUnlabeled(tab).catch(() => null)
+    }
     if (!cells) {
-      ctx.onStep('키패드 배치(OCR): 글자 없는 버튼 10~14개를 못 찾음', false)
+      const diag = await pageBridge.keypadDiag(tab).catch(() => '')
+      ctx.onStep(`키패드 배치(OCR): 글자 없는 버튼 10~14개를 못 찾음${diag ? ` (${diag})` : ''}`, false)
       return null
     }
     // 못 읽은 사유만 모은다(어느 칸이 어느 숫자인지는 남기지 않는다)
@@ -1731,6 +1750,22 @@ overlays left: ${after.length}${kept}`
         }
         case 'page.idOf':
           return idOfText(asText(args[0]), asId(args[1]))
+        case 'page.ancestorsOf': {
+          const tab = activeOr(ctx)
+          if (!tab) return ''
+          return pageBridge.ancestorsOf(tab, asId(args[0]))
+        }
+        case 'page.idOfRowCell': {
+          const tab = activeOr(ctx)
+          if (!tab) return -1
+          return pageBridge.idOfRowCell(tab, asId(args[0]), asId(args[1]))
+        }
+        case 'page.idOfExact': {
+          // 요소 목록에 안 잡히는 칸(그리드 셀)을 글자로 찾아 번호를 준다 — 누르는 것은 click/clickNative 가 한다
+          const tab = activeOr(ctx)
+          if (!tab) return -1
+          return pageBridge.idOfExactText(tab, asText(args[0]), asId(args[1]))
+        }
         case 'page.clickNative': {
           const blocked = await payRefusal(asId(args[0]))
           if (blocked) return blocked
@@ -1935,6 +1970,31 @@ overlays left: ${after.length}${kept}`
         if (!target) return `not found: no tab or popup with id ${id}`
         closeTargetOf(ctx.tabs, id)
         return `ok: closed ${target.kind} ${id}. targets: ${JSON.stringify(targetList())}`
+      })
+  )
+
+  // 프로필 하나의 특정 사이트 쿠키만 지운다 — 그 프로필 세션만 사이트가 차단 화면을 띄울 때 쓴다
+  // (실기 2026-10-01: edelvise06 프로필만 www.ssg.com 차단, 기본 프로필은 정상). 지운 뒤에는 로그인이 풀린다
+  const clearSiteCookies = tool(
+    'clear_site_cookies',
+    'Delete cookies of one site (host and its subdomains) in one profile session. Logs that profile out of the site.',
+    { profile: z.string().min(1), host: z.string().min(3) },
+    ({ profile, host }) =>
+      guard(`쿠키 지우기 ${profile}`, async () => {
+        if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
+        const site = (normalizeHost(host) || host).replace(/^www\./, '').toLowerCase()
+        if (!site.includes('.')) return `error: host 가 도메인이 아니다: ${host}`
+        const ses = ctx.tabs.sessionForProfile(profile)
+        const all = await ses.cookies.get({})
+        const hit = all.filter((c) => {
+          const d = String(c.domain ?? '').replace(/^\./, '').toLowerCase()
+          return d === site || d.endsWith(`.${site}`)
+        })
+        for (const c of hit) {
+          const d = String(c.domain ?? '').replace(/^\./, '')
+          await ses.cookies.remove(`https://${d}${c.path ?? '/'}`, c.name)
+        }
+        return `ok: removed ${hit.length} cookies of ${site} in profile ${profile}`
       })
   )
 
@@ -2505,6 +2565,7 @@ ${submittedNote}`
     listTabs,
     switchTab,
     closeTab,
+    clearSiteCookies,
     listAccounts,
     fillSecret,
     login,
@@ -2544,6 +2605,7 @@ export const SAMBA_TOOL_NAMES = [
   'list_tabs',
   'switch_tab',
   'close_tab',
+  'clear_site_cookies',
   'list_accounts',
   'fill_secret',
   'login',

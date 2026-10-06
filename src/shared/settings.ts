@@ -1,5 +1,12 @@
+import type { PhoneAccountLink, PhoneRegistryEntry } from './phone-registry'
 import { z } from 'zod'
-import { AI_PROVIDERS, type AiConnections, type AiProviderId, type TaskModels } from './ai'
+import {
+  AI_PROVIDERS,
+  upgradeModelId,
+  type AiConnections,
+  type AiProviderId,
+  type TaskModels
+} from './ai'
 import { DEFAULT_DANGER_WORDS, mergeDangerWords } from './danger'
 import { EXTENSION_SOURCES, type ExtensionSource } from './extensions'
 import { defaultMouseGestures, GESTURE_ACTIONS } from './gestures'
@@ -136,9 +143,9 @@ export const DEFAULT_SETTINGS = {
   aiConnectionsMigrated: false,
   taskModels: {
     fast: 'claude-haiku-4-5-20251001',
-    standard: 'claude-sonnet-5',
-    deep: 'claude-opus-5',
-    visual: 'claude-sonnet-5'
+    standard: 'claude-sonnet-5-5',
+    deep: 'claude-opus-5-5',
+    visual: 'claude-sonnet-5-5'
   } as TaskModels,
   // 에이전트 동작
   agentNotify: true,
@@ -163,9 +170,16 @@ export const DEFAULT_SETTINGS = {
   extensionSources: {} as Record<string, ExtensionSource>,
   // 꺼 둔 확장의 id. 목록·경로는 그대로 두고 세션에만 올리지 않는다
   disabledExtensionIds: [] as string[],
+  // 확장별로 올릴 프로필. 적혀 있지 않은 확장은 모든 프로필에 올린다. 빈 목록이면 일반 탭(default)에만,
+  // 이름이 있으면 일반 탭 + 그 프로필에만 올린다. 삼바웨이브 확장은 삼바 페이지에서 설정을 받으므로
+  // 그 페이지를 열지 않는 계정 프로필에서는 API 호출이 전부 실패한다(실기 2026-09-28) — 기본은 일반 탭만
+  extensionProfiles: { ojfcneljbbajgcmpmklgglhenieehicb: [] } as Record<string, string[]>,
   // 주소창 툴바에 고정한 확장의 id(왼쪽부터 이 순서대로 놓인다).
   // 툴바를 이 기기에서 어떻게 보여 줄지에 대한 값이라 동기화하지 않는다
   extensionsPinned: [] as string[],
+  // 담당 폰이 정해지지 않은 계정이 쓸 기본 폰의 serial. 비우면 예전처럼 연결된 첫 폰(결제는 결제 앱이 깔린 폰).
+  // 다른 작업 전용 폰이 같이 붙어 있을 때 결제·문자가 그 폰으로 가지 않게 한다(사용자 2026-09-29 "모든 건 담당 폰")
+  defaultPhoneSerial: '',
   // 모양(기기 로컬 — 동기화하지 않는다)
   theme: 'system' as ThemeMode,
   uiZoom: 100,
@@ -191,6 +205,19 @@ export const DEFAULT_SETTINGS = {
   // 사용자가 목록에서 지운 폰의 시리얼. 같은 와이파이에 있으면 5초 검색이 다시 찾아오므로 여기 적어 건너뛴다.
   // 주소 연결·페어링을 직접 하면 비운다. 이 PC 의 사정이라 SYNCED_SETTING_KEYS 에 넣지 않는다
   phoneIgnoredSerials: [] as string[],
+  // 이 PC 에 붙은 폰을 다른 PC 가 쓰게 adb 서버를 LAN 에 연다(phone/relay.ts). 이 PC 의 사정이라 동기화하지 않는다
+  phoneRelayEnabled: false,
+  // 인터넷 너머 중계 브로커(삼바웨이브 API 의 WebSocket, 예: wss://api.samba-wave.co.kr/api/v1/samba/phone-relay).
+  // 계정 전체가 같은 브로커를 써야 하므로 동기화한다. 비어 있으면 같은 LAN 의 adb 원격 서버만 쓴다
+  phoneRelayBrokerUrl: '',
+  // 이 PC 가 중계 방을 여는 데 쓰는 방 id·열쇠('room:key'). 다른 PC 는 등록 정보(relayHost)로 받는다 — 동기화하지 않는다
+  phoneRelayRoom: '',
+  // 폰 연동 동기화(phone-registry.ts) — 폰 목록과 계정↔담당 폰. 폰 표(로컬)의 사본이라 화면에서 직접 고치지 않는다
+  // 키마스터 기준 시각(ms) — "이 시각에 이 PC 의 키마스터가 기준"이라는 선언(sync/authority.ts).
+  // 다른 PC 는 이보다 앞선 자기 삭제 기록·안 올린 행을 버리고 서버 내용을 그대로 받는다. 0 이면 선언 없음
+  keymasterBaselineAt: 0,
+  phoneRegistry: [] as PhoneRegistryEntry[],
+  phoneAccountLinks: [] as PhoneAccountLink[],
   // 결제 비밀번호 키패드 배치를 외부 AI(Visual)에게 물어볼지.
   // 켜면 키패드 화면 원본이 AI 제공자로 전송되므로 기본은 꺼짐이고,
   // 꺼져 있으면 UI 트리로 못 읽은 키패드는 사람에게 넘긴다
@@ -341,6 +368,13 @@ export const settingsSchema = z.object({
       deep: z.string(),
       visual: z.string()
     })
+    // 저장된 옛 모델 ID(Opus 5·Sonnet 5)는 최신(5.5)으로 올려 읽는다
+    .transform((m) => ({
+      fast: upgradeModelId(m.fast),
+      standard: upgradeModelId(m.standard),
+      deep: upgradeModelId(m.deep),
+      visual: upgradeModelId(m.visual)
+    }))
     .catch(DEFAULT_SETTINGS.taskModels),
   agentNotify: z.boolean().catch(DEFAULT_SETTINGS.agentNotify),
   agentSound: z.boolean().catch(DEFAULT_SETTINGS.agentSound),
@@ -355,7 +389,11 @@ export const settingsSchema = z.object({
     .record(z.string(), z.enum(EXTENSION_SOURCES))
     .catch(DEFAULT_SETTINGS.extensionSources),
   disabledExtensionIds: z.array(z.string()).catch(DEFAULT_SETTINGS.disabledExtensionIds),
+  extensionProfiles: z
+    .record(z.string(), z.array(z.string()))
+    .catch(DEFAULT_SETTINGS.extensionProfiles),
   extensionsPinned: z.array(z.string()).catch(DEFAULT_SETTINGS.extensionsPinned),
+  defaultPhoneSerial: z.string().catch(DEFAULT_SETTINGS.defaultPhoneSerial),
   // 모양 — 범위를 벗어나거나 타입이 틀리면 기본값으로 되돌린다
   theme: z.enum(THEME_MODES).catch(DEFAULT_SETTINGS.theme),
   uiZoom: z.number().int().min(MIN_UI_ZOOM).max(MAX_UI_ZOOM).catch(DEFAULT_SETTINGS.uiZoom),
@@ -384,6 +422,29 @@ export const settingsSchema = z.object({
     .catch(DEFAULT_SETTINGS.phoneScreenFps),
   phoneAutoReconnect: z.boolean().catch(DEFAULT_SETTINGS.phoneAutoReconnect),
   phoneIgnoredSerials: z.array(z.string().max(120)).max(50).catch([]),
+  phoneRelayEnabled: z.boolean().catch(false),
+  phoneRelayBrokerUrl: z.string().max(300).catch(''),
+  phoneRelayRoom: z.string().max(200).catch(''),
+  keymasterBaselineAt: z.number().int().min(0).catch(0),
+  phoneRegistry: z
+    .array(
+      z.object({
+        serial: z.string().min(1).max(120),
+        label: z.string().max(80),
+        country: z.enum(['KR', 'CN', 'JP']).catch('KR'),
+        transport: z.enum(['usb', 'wifi', 'relay']).catch('usb'),
+        wifiAddress: z.string().max(120).nullable().catch(null),
+        model: z.string().max(80).catch(''),
+        isDefault: z.boolean().catch(false),
+        relayHost: z.string().max(200).nullable().optional().catch(null)
+      })
+    )
+    .max(50)
+    .catch([]),
+  phoneAccountLinks: z
+    .array(z.object({ account: z.string().min(1).max(80), serial: z.string().min(1).max(120) }))
+    .max(2000)
+    .catch([]),
   phoneKeypadVisual: z.boolean().catch(DEFAULT_SETTINGS.phoneKeypadVisual),
   // === 폰 연동 끝 =============================================================
   // === 마우스 제스처 ==========================================================

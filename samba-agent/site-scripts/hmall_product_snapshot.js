@@ -88,6 +88,7 @@ const it = items[0]
 R.selected = it[2]
 if (pick && nm(R.selected) !== nm(lab(pick))) return { ...R, error: 'order_form_mismatch', note: `size ${R.selected} != ${lab(pick)}` }
 if (+it[3] !== qty) return { ...R, error: 'order_form_mismatch', note: `qty ${it[3]} != ${qty}` }
+R.qty = +it[3]
 R.normal_price = num(it[4])
 R.discount = num((t.match(/최대 할인 -([\d,]+)원/) || [])[1])
 const tot = num((t.match(/총 결제금액 (?:\d+% )?([\d,]+) ?원/) || [])[1])

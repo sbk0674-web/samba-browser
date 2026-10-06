@@ -63,7 +63,12 @@ sources:
     required_seller: 롯데백화점
     gift_unless_poison: true
     shipping_confirm: true
-    pay_provider: naver
+    # 결제수단 고정(네이버페이)을 뺀다 — 모든 수단의 원가를 비교해 가장 싼 것으로(사용자 2026-09-27·09-30: 카카오페이 머니 7% 가 더 쌌다)
+    # 롯데카드 할인은 '간편결제'(L.PAY 카드 = 롯데카드)로 받는다 — PC 웹 결제 비밀번호(키마스터 site 항목)로 끝나 폰이 필요 없다
+    # (사용자 2026-10-06). 신용카드 탭의 롯데카드 앱카드(폰 숫자코드) 경로는 코드만 남기고 쓰지 않는다
+    easy_pay_card: 롯데카드
+    # 같은 상품을 SSG(신세계몰·백화점)에서도 견적해 싼 쪽에서 산다 — 사용자 2026-10-06(나이키 II7406: 롯데온 100,490 vs SSG 79,335)
+    cross_with: SSG
     buy_accounts: [buyer01]
   # 그랜드스테이지는 ABC마트와 같은 a-rt.com 흐름이다 — 스크립트(key)를 그대로 공유한다
   - id: GrandStage
@@ -99,6 +104,9 @@ sources:
     mall_item: true  # 2026-09-27 ssg_find_mall_item — 주문 링크가 신세계몰이 아니면 신세계몰 같은 모델 상품으로 산다
     route_compare: true  # 2026-09-27 ssg_route_quotes — 직접·애드픽(적립) 경로 원가 비교, 애드픽이 비싸면 패스
     allow_department: true  # 사용자 2026-09-27: 신세계백화점(6009)도 허용. 이마트·트레이더스 등은 금지
+    # 2026-09-29 사용자: 까대기(포이즌·라자다) 제외 전부 선물하기. 스냅샷(바로구매 주문서)으로 견적한 뒤 배송지 단계에서
+    # ssg_gift_enter → ssg_gift_address(없으면 ssg_set_shipping{gift} → 전화 → ssg_gift_save_address) → ssg_login_check 로 선물 주문서로 바꿔 탄다
+    gift_unless_poison: true
     status: active  # 2026-09-27 사용자 요청으로 켬(봇 차단이면 즉시 사람에게)
     # 2026-09-27 같은 상품을 현대H몰에서도 견적해 싼 쪽에서 산다. SSG 가 봇 차단(blocked)이면 H몰만 견적해 산다
     cross_with: HMALL
@@ -215,6 +223,15 @@ sources:
     login_host: kasina.co.kr
     status: hold
   # 보류 — 등록하지 않는다. 주문이 들어오면 감독자가 unsupported 로 사람에게 넘긴다
+  # 중국 크림 계정 주문(삼바웨이브가 연결 수집상품의 소싱처 SHIHUO 로 내보낸다) — 브라우저 그래프가 아니라 워커의
+  # 폰 처리기(ops/dewu_order.py, 得物 앱)가 산다. 표에는 접수 대상이 되도록만 둔다(사용자 2026-10-01)
+  - id: SHIHUO
+    key: shihuo
+    label: 식화
+    home: https://www.shihuo.cn/
+    login_host: shihuo.cn
+    status: scripts_pending
+
   - id: KREAM
     key: kream
     label: 크림

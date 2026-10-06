@@ -271,6 +271,8 @@ def test_결제수단_견적은_롯데카드만_묻고_카드_직접결제로_�
         calls,
     )
     # 키마스터 목록: 재시작 전 라벨(hmall.com) — 계정을 못 찾으면 허용 수단(card)으로 견적한다
+    # 견적 전에 주문서 탭을 앞에 둔다(키마스터 조회는 활성 탭 사이트 기준)
+    respx.post(f'{URL}/tool/switch_tab').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/list_accounts').mock(
         return_value=page(json.dumps([{'label': 'buyer01', 'payments': ['site', 'other', 'naver']}]))
     )

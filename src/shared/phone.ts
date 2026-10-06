@@ -3,7 +3,8 @@
 export const PHONE_COUNTRIES = ['KR', 'CN', 'JP'] as const
 export type PhoneCountry = (typeof PHONE_COUNTRIES)[number]
 
-export const PHONE_TRANSPORTS = ['usb', 'wifi'] as const
+// relay = 다른 PC 에 붙은 폰을 그 PC 의 adb 서버를 거쳐 쓴다(phone/relay.ts)
+export const PHONE_TRANSPORTS = ['usb', 'wifi', 'relay'] as const
 export type PhoneTransport = (typeof PHONE_TRANSPORTS)[number]
 
 // adb 가 보고하는 상태 + 목록에는 있으나 지금 안 보이는 상태(disconnected)

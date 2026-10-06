@@ -111,6 +111,9 @@ def mock_scripts(responses: dict[str, object], calls: Calls) -> None:
 
     respx.post(f'{URL}/tool/run_script').mock(side_effect=handler)
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    # 바로구매 전 장바구니 미리 열기(_warm_ssg_cart) — 다른 run_js 목(탭 정리 등)이 없을 때만 받는다
+    if 'run_js' not in respx.routes:
+        respx.post(f'{URL}/tool/run_js', name='run_js').mock(return_value=page('ok'))
 
 
 def snapshots(calls: Calls) -> list[dict[str, object]]:
@@ -389,3 +392,55 @@ def test_애드픽_적립_계산() -> None:
     assert BuyerAgent._adpick_for({'adpick_rate': 1.6}, 50000) == 800
     assert BuyerAgent._adpick_for({'adpick_reward': 700}, 50000) == 700
     assert BuyerAgent._adpick_for({}, 50000) == 0
+
+
+@respx.mock
+def test_www_ssg_주문_링크가_차단이면_신세계몰에서_같은_모델을_찾는다(ssg) -> None:
+    """실기 2026-10-01: edelvise06 프로필은 www.ssg.com 만 차단 화면이고 신세계몰 도메인은 열렸다."""
+    calls: Calls = []
+    www = 'https://www.ssg.com/item/itemView.ssg?itemId=1000000000999'
+
+    def snapshot(args: dict[str, object]) -> dict[str, object]:
+        if args['sku'] == www:
+            return {'error': 'blocked', 'note': 'SSG 봇 차단 화면'}
+        return snap_of(MALL_B, options=['270'], cost=95000)
+
+    mock_scripts(
+        {
+            'ssg_product_snapshot': snapshot,
+            'ssg_route_quotes': lambda args: (
+                {'error': 'blocked', 'note': 'SSG 봇 차단 화면'} if args.get('sku') == www else {'ok': False, 'routes': []}
+            ),
+            'ssg_find_mall_item': {
+                'ok': True,
+                'items': [{'item_id': '1000000000333', 'url': MALL_B, 'name': 'B', 'price': 99000}],
+            },
+        },
+        calls,
+    )
+    snap = ssg._snapshot(assignment(www), 'acc1')
+    assert 'ssg_find_mall_item' in [n for n, _ in calls]
+    assert snap['product_no'] == '1000000000333'
+
+
+def test_선물_결제_전_로그인이_풀려_있으면_다시_로그인하고_한_번_더_본다() -> None:
+    """실기 2026-10-01: 선물 주문서를 만든 뒤 pay.ssg.com 세션이 풀려 결제 전 확인에서 멈췄다."""
+    agent = BuyerAgent.__new__(BuyerAgent)
+    agent.note = lambda *_: None
+    agent._fetch_shipping = lambda a, snap: {'name': '고객', 'address': '서울 강남구 테헤란로 1'}
+    agent._close_order_tabs = lambda account: None
+    logins: list[str] = []
+    agent._login_as = lambda account: logins.append(account)
+    answers = iter(
+        [
+            {'ok': True},  # 선물 진입
+            {'ok': True, 'gift': True, 'order_tab': 'T1', 'amount': 30000},  # 받는 분 지정
+            {'logged_in': False},  # 결제 전 확인 — 풀림
+            {'logged_in': True},  # 다시 로그인한 뒤
+        ]
+    )
+    agent.json_tool = lambda *_, **__: next(answers)
+    snap: dict[str, object] = {'product_url': MALL_B, 'selected': '270', 'cost': 30000}
+    agent._ssg_gift(assignment(MALL_B), snap, 'acc1')
+    assert logins == ['acc1']
+    assert snap['order_tab'] == 'T1'

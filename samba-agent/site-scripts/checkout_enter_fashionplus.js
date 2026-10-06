@@ -110,4 +110,8 @@ if (pointsOnly) {
 }
 let popup = null
 for (let i = 0; i < 40 && !popup; i++) { await sleep(300); popup = (await tabs.list()).find(t => t.kind === 'popup' && !before.has(t.id)) || null }
-return { ...R, ok: !!popup, popup_url: popup ? popup.url : null, note: popup ? null : 'no payment popup' }
+// 팝업이 없으면 같은 탭이 네이버페이로 넘어갔는지 본다(롯데온처럼 탭 안 결제창) — 그러면 키패드도 이 탭에 뜬다(실기 2026-09-30)
+if (!popup) { const u = String(await page.url()); if (/pay\.naver\.com|nid\.naver\.com/.test(u)) return { ...R, ok: true, popup_url: null, keypad_in_tab: true, note: 'naverpay in same tab' }
+  const al = (await tabs.list()).filter(t => /pay\.naver\.com/.test(t.url || '')); if (al.length) { await tabs.switch(al[al.length - 1].id); return { ...R, ok: true, popup_url: al[al.length - 1].url, note: 'naverpay tab' } }
+  return { ...R, ok: false, popup_url: null, note: 'no payment popup @ ' + u.replace(/^https?:\/\//, '').split('?')[0].slice(0, 60) } }
+return { ...R, ok: true, popup_url: popup.url, note: null }

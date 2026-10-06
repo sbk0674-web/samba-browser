@@ -13,6 +13,8 @@ import { DEFAULT_FIELD_KEY } from './fields'
 export type AutofillResult =
   | 'ok'
   | 'filled-password-only'
+  // 2단계 로그인의 첫 화면(아이디 칸만) — 아이디를 채워 넘겼고 비밀번호 칸이 나오면 이어서 채운다
+  | 'filled-username-only'
   | 'no-active-tab'
   | 'locked'
   | 'insecure-page'
@@ -29,6 +31,8 @@ export interface AutofillDeps {
   excludedHosts: () => string[]
   /** 채운 뒤 로그인 폼을 바로 제출할지(계정 고르면 곧바로 로그인) */
   autoSubmit?: () => boolean
+  /** 비밀번호 화면을 기다리는 간격(테스트 주입용). 없으면 setTimeout */
+  wait?: (ms: number) => Promise<void>
 }
 
 // 채울 대상을 호출부가 지정할 때 쓰는 값(피커 경로).
@@ -36,7 +40,13 @@ export interface AutofillDeps {
 export interface AutofillTarget {
   tab: Tab
   host: string
+  // 'password' 면 2단계의 비밀번호 화면이다 — 비밀번호 칸이 없어도 아이디를 다시 치지 않는다(되돌이 방지)
+  stage?: 'password'
 }
+
+/** 아이디를 넘긴 뒤 비밀번호 칸이 나타나기를 기다리는 최대 시간·간격 */
+const PASSWORD_STEP_WAIT_MS = 20_000
+const PASSWORD_STEP_POLL_MS = 500
 
 /**
  * 계정 하나를 로그인 폼에 채운다(아이디 + 비밀번호).
@@ -71,7 +81,33 @@ export async function autofillAccount(
   if (!sameRegistrableDomain(account.host, host)) return 'host-mismatch'
 
   const fields = await pageBridge.findLoginFields(tab)
-  if (fields.password === undefined) return 'fields-not-found'
+  if (fields.password === undefined) {
+    // 2단계 로그인(구글)의 첫 화면: 아이디 칸만 있다. 아이디만 채워 [다음]을 누르고,
+    // 비밀번호 칸이 나타나면 이어서 채운다(실기 2026-10-06: 피커로 계정을 골라도 아무 일도 없었다).
+    // 비밀번호 단계에서 또 비밀번호 칸이 없으면(계정 없음 안내 등) 되돌지 않고 끝낸다
+    if (target?.stage === 'password' || fields.username === undefined || !account.username) {
+      return 'fields-not-found'
+    }
+    const typed = await pageBridge.typeLogin(tab, fields.username, account.username)
+    if (typed !== 'ok') return 'fill-failed'
+    if ((await pageBridge.valueLength(tab, fields.username)) !== account.username.length) {
+      return 'fill-failed'
+    }
+    if (deps.autoSubmit?.()) {
+      try {
+        await pageBridge.submitLogin(
+          tab,
+          fields.submit ?? fields.username,
+          fields.submit !== undefined
+        )
+      } catch {
+        // 제출 실패는 채우기 성공을 뒤집지 않는다 — 사용자가 [다음]을 누르면 비밀번호 단계로 이어진다
+      }
+    }
+    // 비밀번호 화면은 뒤에서 기다린다 — 피커에는 지금 결과를 돌려준다
+    void continuePasswordStep(deps, accountId, tab, host)
+    return 'filled-username-only'
+  }
 
   // 사용자가 직접 누른 채움이므로 감사 로그의 주체는 'user' 다
   const password = deps.vault.getSecretForFill(
@@ -116,4 +152,34 @@ export async function autofillAccount(
     }
   }
   return usernameFilled ? 'ok' : 'filled-password-only'
+}
+
+/**
+ * 2단계 로그인의 비밀번호 화면을 기다렸다가 같은 계정으로 이어서 채운다.
+ * 같은 등록 도메인에 머무는 동안만 기다리고, 탭이 닫히거나 다른 사이트로 가면 그만둔다.
+ * 결과는 돌려줄 곳이 없다(피커는 이미 닫혔다) — 실패는 조용히 끝낸다
+ */
+export async function continuePasswordStep(
+  deps: AutofillDeps,
+  accountId: number,
+  tab: Tab,
+  host: string
+): Promise<AutofillResult | null> {
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  for (let waited = 0; waited < PASSWORD_STEP_WAIT_MS; waited += PASSWORD_STEP_POLL_MS) {
+    await wait(PASSWORD_STEP_POLL_MS)
+    const wc = tab.view.webContents
+    if (!wc || wc.isDestroyed?.()) return null
+    const now = normalizeHost(wc.getURL())
+    if (!now || !sameRegistrableDomain(now, host)) return null
+    let fields: Awaited<ReturnType<typeof pageBridge.findLoginFields>>
+    try {
+      fields = await pageBridge.findLoginFields(tab)
+    } catch {
+      continue
+    }
+    if (fields.password === undefined) continue
+    return autofillAccount(deps, accountId, { tab, host: now, stage: 'password' })
+  }
+  return null
 }

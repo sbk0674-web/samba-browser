@@ -32,6 +32,11 @@ import {
   performScroll,
   rectOf,
   valueLength,
+  hasFocus,
+  focusEl,
+  idOfExactText,
+  idOfRowCell,
+  ancestorsOf,
   fillValue,
   findLoginFields,
   signedInHint,
@@ -43,6 +48,7 @@ import {
   checkByLabel,
   keypadLayout,
   keypadUnlabeled,
+  lastKeypadDiag,
   pressOnce,
   detectOverlays,
   runAgentOp,
@@ -113,6 +119,8 @@ if (!isExtensionDocument) {
     keypadLayout: () => keypadLayout(),
     // 글자 없는 키패드 버튼들의 뷰포트 사각형(앱이 OCR 로 숫자를 읽는다). 값은 담기지 않는다
     keypadUnlabeled: () => keypadUnlabeled(),
+    // 마지막 키패드 판정 요약(후보 수) — 실패 사유 기록용
+    keypadDiag: () => lastKeypadDiag(),
     // 키패드 버튼 단발 누름(폴백 없음)
     pressOnce: (id: number) => pressOnce(id),
     // 화면을 덮고 있는 레이어(공지·쿠폰·앱 설치 배너·결제 확인창) 목록
@@ -120,7 +128,12 @@ if (!isExtensionDocument) {
     // 요소 가운데의 뷰포트 좌표. 메인 프로세스가 실제 마우스 클릭을 보낼 자리다
     rectOf: (id: number) => rectOf(id),
     // 입력칸 값의 글자 수만(값은 안 돌려준다) — 진짜 키 입력이 들어갔는지 확인용
-    valueLength: (id: number) => valueLength(id)
+    valueLength: (id: number) => valueLength(id),
+    hasFocus: (id: number) => hasFocus(id),
+    focusEl: (id: number) => focusEl(id),
+    idOfExactText: (text: string, nth: number) => idOfExactText(text, nth),
+    idOfRowCell: (id: number, index: number) => idOfRowCell(id, index),
+    ancestorsOf: (id: number) => ancestorsOf(id)
   }
 
   // globalThis 에 직접 대입(any 없이 타입 안전하게)

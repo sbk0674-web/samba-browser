@@ -12,6 +12,7 @@ UIA 요소를 만들어 automation id 색인을 만든다(약 4초). 숨은 탭 
 창이라 색인에 들어오지 않는다. 그리드 행·툴바 항목은 그 요소의 children 만 읽는다(0.1초대).
 """
 
+import contextlib
 import ctypes
 import datetime as dt
 import functools
@@ -19,7 +20,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from ctypes import wintypes
 
 from pywinauto import Desktop
@@ -37,15 +38,20 @@ from samba_agent.export.failures import ExportFail
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE_MARK = 'ShopMine::'
+# 사람이 처리해야 하는 인증 창 제목에 들어 있는 글자(실기 2026-09-29: '관리자 추가인증')
+AUTH_MARKS = ('인증', '로그인', 'OTP')
 ORDER_TAB = '통합주문관리'
 ORDER_MENU = '주문관리'
 NORMAL_ALL = '(정상전체)'
 FILTER_STATUS = '미지정'
 FILTER_EXCEL = '엑셀생성안됨'
+# 필터 콤보를 찾는 횟수(한 번에 못 찾으면 화면을 다시 읽고 찾는다)
+FILTER_COMBO_TRIES = 4
 STATUS_MENU = '작업상태지정'
 ORDER_NO_COLUMN = '주문번호'
 # 쿠팡은 삼바웨이브 주문번호가 샵마인의 배송번호 칸에 있다(실기 2026-09-29: 736… ↔ 배송번호)
 SHIPMENT_NO_COLUMN = '배송번호'
+SELLER_CODE_COLUMN = '판매자상품코드'
 _EMPTY_CELLS = ('', '(null)')
 # 우리가 완료됨을 누른 뒤 뜨는 확인 대화상자에서 눌러도 되는 버튼 이름
 CONFIRM_BUTTONS = ('예(Y)', '확인', 'OK', 'Yes')
@@ -176,8 +182,12 @@ def _visible_children(hwnd: int) -> list[int]:
 class PywinautoShopMineUi:
     """ShopMineUi 구현."""
 
-    def __init__(self, *, poll_s: float = 0.5) -> None:
+    def __init__(
+        self, *, poll_s: float = 0.5, user_idle_s: Callable[[], float] | None = None
+    ) -> None:
         self._poll_s = poll_s
+        # 사람이 키보드·마우스를 안 쓴 시간(초). 주면 배경 조작이 안 먹을 때 자리 비움에만 실제로 누른다
+        self._user_idle_s = user_idle_s
         # 메인 창(win32 래퍼) — 핸들·최소화·활성 여부만 본다
         self._main = None
         # automation id → UIA 요소 정보(보이는 컨트롤만)
@@ -256,9 +266,38 @@ class PywinautoShopMineUi:
             if w.handle != self._main.handle and w.is_enabled():
                 title = w.window_text() or '(제목 없음)'
                 break
+        if any(mark in title for mark in AUTH_MARKS):
+            # 인증 창은 사람이 처리한다 — 건드리지 않는다(사용자에게 알린다)
+            raise AdapterRetry(ExportFail.AUTH_REQUIRED, f'샵마인 {title[:40]} 창 — 직접 인증 필요')
         raise AdapterRetry(ExportFail.BLOCKED, f'샵마인에 대화상자가 떠 있다: {title[:40]!r}')
 
     # ---- 탭 ----
+    def _order_tab_by_menu(self) -> None:
+        """주 메뉴 '주문관리' 를 펼쳐 '통합주문관리(I)' 를 누른다 — 창 메시지·UIA 만(실제 마우스 없음)."""
+        menu = next(
+            (m for m in self._el('mainMenu').children() if m.window_text().startswith(ORDER_MENU)),
+            None,
+        )
+        if menu is None:
+            raise AdapterRetry(ExportFail.BLOCKED, '샵마인 주 메뉴에 주문관리가 없다')
+        with contextlib.suppress(Exception):
+            menu.expand()  # 펼치면 예외 없이도 오류를 낼 때가 있다(실기) — 자식은 그래도 보인다
+        time.sleep(self._poll_s)
+        item = next(
+            (
+                c
+                for c in menu.children()
+                if c.window_text().startswith(ORDER_TAB)
+                and c.window_text()[len(ORDER_TAB) :][:1] in ('(', '')
+            ),
+            None,
+        )
+        if item is None:
+            with contextlib.suppress(Exception):
+                menu.collapse()
+            raise AdapterRetry(ExportFail.BLOCKED, '주문관리 메뉴에서 통합주문관리를 찾지 못했다')
+        _invoke(item, timeout_s=3)
+
     def _order_page_shown(self) -> bool:
         """통합주문관리 페이지가 앞에 있는가 — TabItem.is_selected() 는 항상 0 이라(실기) 제목표로 본다."""
         self._refresh()
@@ -343,6 +382,11 @@ class PywinautoShopMineUi:
         else:
             # select() 는 예외 없이 조용히 실패한다(실기: 홈 탭 그대로) — 탭 막대를 눌러 고른다
             _post_click(tab.parent().element_info.handle, tab.rectangle())
+            time.sleep(self._poll_s * 2)
+        if not self._order_page_shown():
+            # 사람이 샵마인을 다른 탭에 두면 탭 막대는 창 메시지로 안 바뀐다(실기 2026-09-30) —
+            # 주 메뉴 '주문관리 → 통합주문관리(I)' 를 UIA 로 누르면 뒤에서도 바뀐다
+            self._order_tab_by_menu()
             time.sleep(self._poll_s * 2)
         if not self._order_page_shown():
             raise AdapterRetry(ExportFail.BLOCKED, '통합주문관리 탭으로 전환하지 못했다')
@@ -434,6 +478,7 @@ class PywinautoShopMineUi:
     # ---- 수집 ----
     @_guard_pywinauto_errors
     def collect(self) -> None:
+        # 수집 범위는 언제나 (정상전체) — 다른 값으로 바꾸지 않는다(사용자 지시 2026-09-29)
         self._select_combo(self._el('ComboBoxProcessStatus'), NORMAL_ALL)
         time.sleep(self._poll_s)
         _press_button(self._el('ButtonSearch'))
@@ -456,13 +501,19 @@ class PywinautoShopMineUi:
     # ---- 필터 ----
     def _filter_combo(self, item: str):
         """주문필터 툴바에서 그 항목을 가진 콤보 상자(id 가 숫자라 항목 목록으로 찾는다)."""
-        toolbar = self._el('ToolStripOrderFilter')
-        for combo in toolbar.children(control_type='ComboBox'):
-            try:
-                if item in combo.texts():
-                    return combo
-            except Exception:  # noqa: BLE001, S112 — 목록을 못 주는 콤보는 건너뛴다
-                continue
+        # 콤보가 화면에 멀쩡히 있어도 항목 목록을 한순간 못 줄 때가 있다(실기 2026-10-01: 1,239회 중 1회,
+        # 사람이 창을 만지는 중이었다). 바로 '막혔다'고 알리지 말고 화면을 다시 읽어 몇 번 더 찾는다
+        for attempt in range(FILTER_COMBO_TRIES):
+            if attempt:
+                time.sleep(self._poll_s * 2)
+                self._refresh()
+            toolbar = self._el('ToolStripOrderFilter')
+            for combo in toolbar.children(control_type='ComboBox'):
+                try:
+                    if item in combo.texts():
+                        return combo
+                except Exception:  # noqa: BLE001, S112 — 목록을 못 주는 콤보는 건너뛴다
+                    continue
         raise AdapterRetry(ExportFail.BLOCKED, f'주문필터에 {item!r} 항목을 가진 콤보 상자가 없다')
 
     @_guard_pywinauto_errors
@@ -471,6 +522,38 @@ class PywinautoShopMineUi:
         self._select_combo(self._filter_combo(FILTER_EXCEL), FILTER_EXCEL)
         time.sleep(self._poll_s * 2)
         self._refresh()
+
+    @_guard_pywinauto_errors
+    def seller_codes(self, order_nos: Sequence[str]) -> dict[str, str]:
+        """지금 목록에서 그 주문들의 판매자상품코드(주문번호 → 코드). 목록에 없는 주문은 빠진다."""
+        header, rows = self._rows()
+        if not rows:
+            return {}
+        cols = self._key_columns(header)
+        code_col = self._column(header, SELLER_CODE_COLUMN)
+        out: dict[str, str] = {}
+        for cells in rows:
+            keys = self._row_keys(cells, cols)
+            hit = next((o for o in order_nos if any(order_matches(o, k) for k in keys)), None)
+            if hit is not None and code_col < len(cells):
+                out[hit] = self._cell_value(cells[code_col])
+        return out
+
+    @_guard_pywinauto_errors
+    def order_nos_with_status(self, status: str) -> list[str]:
+        """작업상태 필터만 status 로 두고 목록을 읽는다. 필터는 부른 쪽이 되돌린다.
+
+        엑셀 생성 여부 필터는 건드리지 않는다(사용자 지시 2026-09-29) — 엑셀생성안됨 그대로다.
+        """
+        self._select_combo(self._filter_combo(FILTER_EXCEL), FILTER_EXCEL)
+        self._select_combo(self._filter_combo(FILTER_STATUS), status)
+        time.sleep(self._poll_s * 2)
+        self._refresh()
+        header, rows = self._rows()
+        if not rows:
+            return []
+        cols = self._key_columns(header)
+        return [key for cells in rows for key in self._row_keys(cells, cols)]
 
     # ---- 그리드 ----
     def _rows(self) -> tuple[list, list]:

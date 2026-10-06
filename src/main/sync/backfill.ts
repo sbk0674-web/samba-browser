@@ -129,7 +129,10 @@ export function backfillSettings(
   const result = emptyResult(false)
   if (db.isClosed) return emptyResult(true)
   const local = new SyncLocal(db)
-  if (local.getState(settingsBackfillStateKey(workspace.localId)) !== null) return emptyResult(true)
+  // '끝남' 표식이 있어도 키별로 다시 본다 — 뒤늦게 동기화 대상이 된 키(화면 배치·폰 연동)는 수정 시각 기록이
+  // 없어서, 통째로 건너뛰면 사용자가 그 값을 다시 바꾸기 전까지 영영 올라가지 않는다.
+  // 키별 검사(아래)가 있어 이미 올라갔거나 내려받은 키는 다시 올리지 않는다
+  const alreadyDone = local.getState(settingsBackfillStateKey(workspace.localId)) !== null
 
   const existing = existingPairs(db)
   const now = Date.now()
@@ -156,6 +159,7 @@ export function backfillSettings(
     add(key)
   }
 
+  if (keys.length === 0 && alreadyDone) return emptyResult(true)
   insertPending(db, pending, workspace.localId, now)
   for (const key of keys) local.setStateNumber(settingUpdatedAtKey(key), now)
   local.setState(settingsBackfillStateKey(workspace.localId), String(now))
@@ -291,6 +295,10 @@ function scopeWhere(
  */
 function bumpUpdatedAt(db: Db, table: RowTable, ids: number[], now: number): void {
   if (ids.length === 0) return
+  // 계정·금고 항목은 원래 수정 시각을 지킨다 — 옛 사본의 행이 "지금" 시각을 달고 올라가면 다른 기기의
+  // 삭제보다 늦은 것으로 보여 삭제를 이기고 되살아났다(9/30 계정 약 550개). 푸시가 올리기 전에
+  // 서버의 같은 자연 키 삭제 표식과 원래 시각을 비교한다
+  if (table === 'accounts' || table === 'vault_items') return
   const t = tableOf(table)
   db.drizzle.transaction((tx) => {
     for (let i = 0; i < ids.length; i += INSERT_CHUNK) {

@@ -119,12 +119,14 @@ export function isTaskModelKey(v: unknown): v is TaskModelKey {
 // 모델 ID·별칭을 사람이 읽는 이름으로. 모르는 값은 그대로 보여 준다
 const MODEL_LABELS: Record<string, string> = {
   'claude-fable-5-1': 'Fable 5.1',
+  'claude-opus-5-5': 'Opus 5.5',
+  'claude-sonnet-5-5': 'Sonnet 5.5',
   'claude-opus-5': 'Opus 5',
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
   fable: 'Fable 5.1',
-  opus: 'Opus 5',
-  sonnet: 'Sonnet 5',
+  opus: 'Opus 5.5',
+  sonnet: 'Sonnet 5.5',
   haiku: 'Haiku 4.5'
 }
 export function modelLabel(model: string): string {
@@ -134,10 +136,19 @@ export function modelLabel(model: string): string {
 // 별칭(sonnet 등)을 정식 ID 로. 저장값이 별칭이어도 목록의 정식 ID 와 같은 항목으로 취급한다
 const MODEL_ALIASES: Record<string, string> = {
   fable: 'claude-fable-5-1',
-  opus: 'claude-opus-5',
-  sonnet: 'claude-sonnet-5',
+  opus: 'claude-opus-5-5',
+  sonnet: 'claude-sonnet-5-5',
   haiku: 'claude-haiku-4-5-20251001'
 }
+// 한 세대 지난 모델 ID → 최신 ID(설정 저장값 승격용)
+const MODEL_UPGRADES: Record<string, string> = {
+  'claude-opus-5': 'claude-opus-5-5',
+  'claude-sonnet-5': 'claude-sonnet-5-5'
+}
+export function upgradeModelId(model: string): string {
+  return MODEL_UPGRADES[model] ?? model
+}
+
 export function canonicalModel(model: string): string {
   return MODEL_ALIASES[model] ?? model
 }

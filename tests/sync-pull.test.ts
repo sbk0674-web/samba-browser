@@ -126,16 +126,18 @@ describe('pullAll', () => {
     expect(local.accountForSync(id!)?.username).toBe('me')
   })
 
-  it('삭제 표식은 원격 id 로만 짝을 맞춘다 — 같은 host·아이디의 살아 있는 계정을 지우지 않는다', async () => {
-    // 실기: a-rt.com 합치기로 지운 중복 계정의 표식이, 이름을 a-rt.com 으로 바꾼 남은 계정에 걸려 그것까지 지웠다
+  it('다른 id 의 삭제 표식은 그 삭제 뒤에 고친 같은 host·아이디의 살아 있는 계정을 지우지 않는다', async () => {
+    // 실기: a-rt.com 합치기로 지운 중복 계정의 표식이, 이름을 a-rt.com 으로 바꾼 남은 계정에 걸려 그것까지 지웠다.
+    // 합치기는 나머지를 지운 뒤에 남은 계정을 고친다 — 남은 계정의 수정 시각이 삭제보다 늦다
     const kept = vault.upsertAccount({ host: 'a-rt.com', username: 'mjkim88' })
+    local.setAccountRemoteId(kept.id, 'acc-kept')
     backend.seed('accounts_sync', [
       accountRow({
         id: 'acc-removed',
         host: 'a-rt.com',
         username: 'mjkim88',
-        updated_at: new Date(Date.now() + 60_000).toISOString(),
-        deleted_at: new Date(Date.now() + 60_000).toISOString()
+        updated_at: new Date(Date.now() - 60_000).toISOString(),
+        deleted_at: new Date(Date.now() - 60_000).toISOString()
       })
     ])
     await pullAll(deps)
@@ -149,16 +151,25 @@ describe('pullAll', () => {
     await pullAll(deps)
     const id = local.accountIdByRemote('acc-del')!
     vault.deleteAccounts([id])
-    expect(local.accountIdByRemote('acc-del')).toBeNull()
+    // 행은 남고 삭제 표식만 찍힌다(soft delete)
+    expect(local.accountForSync(id)?.deletedAt).not.toBeNull()
     // 삭제 기록이 원격 id 를 메모해 둔다(outbox.record → rememberTombstoneFromPayload)
     expect(local.tombstoneAt('accounts', 'acc-del')).not.toBeNull()
     backend.seed('accounts_sync', [
-      accountRow({ id: 'acc-del', label: '되살아난 이름', updated_at: new Date(Date.now() + 60_000).toISOString() })
+      accountRow({
+        id: 'acc-del',
+        label: '되살아난 이름',
+        updated_at: new Date(Date.now() + 60_000).toISOString()
+      })
     ])
     const result = await pullAll(deps)
     expect(result.conflicts).toBe(1)
-    expect(local.accountIdByRemote('acc-del')).toBeNull()
+    expect(local.accountForSync(id)?.deletedAt).not.toBeNull()
     expect(vault.listAccounts('example.com')).toEqual([])
+    // 서버에 살아 있는 그 행에 삭제 표식을 다시 올리도록 변경 로그에 남았다
+    expect(
+      outbox.pendingFor('accounts').some((r) => r.op === 'delete' && r.rowId === String(id))
+    ).toBe(true)
   })
 
   it('원격이 더 최신이면 덮어쓰고, 로컬이 더 최신이면 유지한다', async () => {
@@ -195,8 +206,8 @@ describe('pullAll', () => {
     const remoteId = local.vaultItemForSync(item.id)!.remoteId!
     vault.deleteItem(item.id)
     outbox.clear(outbox.pending().map((r) => r.id))
-    // 다른 기기 흉내이므로 이 PC 의 삭제 메모(되살리기 방지)도 지운다
-    local.forgetTombstone('vault_items', remoteId)
+    // 다른 기기 흉내 — 삭제 표식 행과 삭제 메모(되살리기 방지)를 30일 정리로 모두 걷어낸다
+    local.pruneExpiredTombstones(Date.now() + TOMBSTONE_TTL_MS + 60_000)
     local.setStateNumber('pullCursor', 0)
 
     const result = await pullAll(deps)

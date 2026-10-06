@@ -207,6 +207,29 @@ def test_이미_구매한_흔적이_있으면_중복으로_거절한다(reg):
     assert (out.status, out.fail_reason) == ('fail', FailReason.DUPLICATE)
 
 
+@respx.mock
+def test_중복_흔적의_소싱번호가_이미_다른_삼바_주문에_기입돼_있으면_중복이_아니다(reg):
+    """실기 2026-10-04 ABC 반스 265: 아침에 다른 고객 주문으로 산 기록을 보고 새 주문을 중복으로 멈췄다."""
+    dup = {**SNAPSHOT_OK, 'already_ordered': True, 'existing_order_no': '2026100483623'}
+    respx.post(f'{URL}/tool/run_script').mock(
+        side_effect=route_run_script({'musinsa_product_snapshot': dup, 'musinsa_set_shipping': SHIPPING_ECHO})
+    )
+    respx.post(f'{URL}/tool/get_page').mock(return_value=page('결제수단 선택'))
+    respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    mock_accounts()
+    mock_fill_secret()
+    mus = agent(reg, lambda p, m: m(choice='260', reason='x'))
+    mus.known_sourcing_numbers = lambda: {'2026100483623'}
+    out = mus(assignment(reg))
+    assert out.status == 'ok', out.reason
+    assert any(e.label == '중복 확인' for e in out.evidence)
+    # 모르는 번호면 전처럼 중복으로 거절한다
+    mus2 = agent(reg, lambda p, m: m(choice='260', reason='x'))
+    mus2.known_sourcing_numbers = lambda: {'다른번호'}
+    out2 = mus2(assignment(reg))
+    assert (out2.status, out2.fail_reason) == ('fail', FailReason.DUPLICATE)
+
+
 @pytest.mark.parametrize('locked', [True, False])
 @respx.mock
 def test_금고가_잠겼거나_계정이_없으면_사람에게_넘긴다(generic_musinsa, reg, locked):
@@ -1211,6 +1234,30 @@ def test_matching_options_품절임박은_품절이_아니고_토큰_하나로�
     assert matching_options(['S 재고있음', 'M 재고있음'], '레드 M') == []
 
 
+def test_matching_options_한_글자_사이즈는_선택지_전체와_같을_때만():
+    from samba_agent.agents.buyer import matching_options, sold_out_option_matches
+
+    # 실기 2026-09-29 무신사 지오다노: 주문 '01올리브/L' ↔ 사이즈 단계 ['M (품절)', 'L (품절)', 'XL'] 를 옵션 불일치로 멈췄다
+    opts = ['M (품절)', 'L (품절)', 'XL']
+    assert matching_options(opts, '01올리브/L') == []
+    assert sold_out_option_matches(opts, '01올리브/L') == ['L (품절)']
+    assert matching_options(['M', 'L', 'XL'], '01올리브/L') == ['L']
+    assert matching_options(['M', 'L', 'XL'], '블랙 XL') == ['XL']
+    # 선택지 글자가 사이즈 하나와 똑같지 않으면 고르지 않는다
+    assert matching_options(['L 재고있음', 'XL 재고있음'], '블랙/L') == []
+
+
+def test_matching_options_모든_선택지에_든_색상_조각은_가르지_않는다():
+    from samba_agent.agents.buyer import matching_options
+
+    # 실기 2026-09-29 패션플러스: 품절 사이즈는 목록에서 빠진다 — 'YEL 270' 은 후보가 없어야 한다
+    opts = ['YEL 230', 'YEL 260', 'YEL 265', 'YEL 275']
+    assert matching_options(opts, 'YEL 270') == []
+    assert matching_options(opts, 'YEL 265') == ['YEL 265']
+    # 선택지가 하나뿐이면 그 조각으로 맞춘다
+    assert matching_options(['YEL 270'], 'YEL 270') == ['YEL 270']
+
+
 def test_cheapest_quotes_결제_가능한_수단만_싼_순으로():
     from samba_agent.agents.buyer import cheapest_quotes, parse_account_payments, quote_provider
 
@@ -1221,11 +1268,11 @@ def test_cheapest_quotes_결제_가능한_수단만_싼_순으로():
         {'method': '휴대폰결제', 'card': None, 'cost': 26000},
         {'method': '카카오페이', 'card': None, 'cost': 0},
     ]
-    # 거르지 않으면 원가순(0 원은 뺀다). 현대카드 줄은 청구할인 ×0.973 이 반영된다
-    assert [q['cost'] for q in cheapest_quotes(quotes, None)] == [26000, 26758, 28000, 29000]
+    # 거르지 않으면 원가순(0 원은 뺀다). 현대카드 줄·토스페이(현대카드) 줄은 청구할인 ×0.973 이 반영된다
+    assert [q['cost'] for q in cheapest_quotes(quotes, None)] == [26000, 26758, 27244, 29000]
     # 키마스터에 무신사머니(site)·토스만 있으면 그 둘만, 휴대폰결제는 제공자를 몰라 뺀다
     got = cheapest_quotes(quotes, None, {'site', 'toss'})
-    assert [(q['method'], q['cost']) for q in got] == [('토스페이', 28000), ('무신사머니', 29000)]
+    assert [(q['method'], q['cost']) for q in got] == [('토스페이', 27244), ('무신사머니', 29000)]
     # 카드 직접 결제는 후보가 아니다 — 카드는 토스페이·네이버페이 창 안에서 고른다
     assert cheapest_quotes(quotes, None, {'site', 'toss', 'card'})[0]['method'] == '토스페이'
     assert quote_provider('무신사페이') == 'musinsapay'
@@ -1444,13 +1491,15 @@ def test_무신사페이_등록_카드가_없으면_수리하지_않는다():
 
 
 def test_네이버페이_견적은_사이트_적립과_네이버페이_1퍼센트를_모두_뺀다():
-    """ABC 원가 = 결제액 − A-RT 적립 − 네이버페이 적립(1%) + 사용 포인트(사용자 2026-09-25)."""
+    """ABC 원가 = 결제액 × 현대카드 청구할인 − A-RT 적립 − 네이버페이 적립(1%) + 사용 포인트.
+
+    네이버페이는 등록한 현대카드로 결제된다 — 청구할인 2.7%(사용자 2026-10-02)."""
     from samba_agent.agents.buyer import cheapest_quotes
 
     rows = cheapest_quotes(
         [{'method': '네이버페이', 'cost': 64600, 'reward': 1300, 'points_used': 0}], None, {'naver'}
     )
-    assert rows[0]['cost'] == 64600 - 1300 - 646
+    assert rows[0]['cost'] == round(64600 * 0.973 - 1300 - 646)
 
 
 def test_같은_원가면_페이코보다_무신사페이가_먼저다():
@@ -1585,3 +1634,299 @@ def test_롯데온은_포이즌_외_전부_선물하기_포이즌은_까대기�
     assert a.order_type_of(other, None) == 'gift'
     poison = other.model_copy(update={'order_no': 'P1', 'seller': '포이즌'})
     assert a.order_type_of(poison, None) == 'kkadaegi'
+
+
+def test_matching_options_letter_number_size_uses_product_code() -> None:
+    """'S-3'(라코스테 숫자 사이즈)은 선택지의 세 자리 코드 003 에 맞춘다 — 글자로 95·100 을 짐작하지 않는다."""
+    from samba_agent.agents.buyer import matching_options
+
+    options = [
+        '003(95) 143,400 3개 남음 (품절임박)',
+        '004(100) 143,400 4개 남음 (품절임박)',
+        '005(105) 143,400 4개 남음 (품절임박)',
+    ]
+    assert matching_options(options, '블랙/031 S-3') == [options[0]]
+    assert matching_options(options, '블랙/031 XL-6') == []
+
+
+def test_주문_옵션에_한국_치수가_있으면_그_치수로_맞춘다():
+    from samba_agent.agents.buyer import matching_options
+
+    wanted = 'EU 화이트 EU 42 · KR 270'
+    assert matching_options(['230', '240', '250', '260', '270', '280'], wanted) == ['270']
+    # 외국 치수 숫자(42)가 든 선택지에 걸리지 않는다
+    assert matching_options(['42', '43', '270', '280'], wanted) == ['270']
+    # 선택지에도 한국 치수가 적혀 있으면 그것끼리 맞춘다
+    options = ['KR 265 / EU 42', 'KR 270 / EU 42.5', 'KR 275 / EU 43']
+    assert matching_options(options, wanted) == ['KR 270 / EU 42.5']
+
+
+def test_한국_치수가_없는_외국_치수_주문은_짐작하지_않는다():
+    from samba_agent.agents.buyer import matching_options
+
+    options = ['230', '240', '250', '260', '270', '280']
+    assert matching_options(options, 'EU 미디엄 다크 카키 EU 43/44') == []
+
+
+def test_한국_치수_선택지가_품절이면_다른_치수로_바꾸지_않는다():
+    from samba_agent.agents.buyer import matching_options
+
+    assert matching_options(['260', '270 (품절)', '280'], 'EU 42 · KR 270') == []
+
+
+def test_주문서_수량이_주문_수량과_다르면_사지_않는다():
+    from samba_agent.agents.buyer import order_qty_problem
+
+    # 실기 2026-09-30 무신사 노스페이스 모자: 2개 주문에 1개 결제
+    assert order_qty_problem(2, {'order_tab': 't', 'qty': 1}) is not None
+    assert order_qty_problem(2, {'order_tab': 't'}) is not None  # 수량을 못 읽었으면 사지 않는다
+    assert order_qty_problem(2, {'order_tab': 't', 'qty': 2}) is None
+    assert order_qty_problem(1, {'order_tab': 't'}) is None
+    assert order_qty_problem(2, {'error': 'sold_out'}) is None  # 주문서가 없으면 다른 사유가 가른다
+
+
+def test_matching_options_XL_은_2XL_에_맞추지_않는다():
+    from samba_agent.agents.buyer import matching_options, sold_out_option_matches
+
+    # 실기 2026-09-30 그랜드스테이지: 선택지 ['M','L','2XL','S 품절','XL 품절'], 주문 XL
+    opts = ['M', 'L', '2XL', 'S 품절', 'XL 품절']
+    assert matching_options(opts, 'XL') == []
+    assert sold_out_option_matches(opts, 'XL') == ['XL 품절']
+    assert matching_options(['XL', 'XXL'], 'XL') == ['XL']
+
+
+def test_선택란_없는_단일_상품은_프리사이즈_색상이_맞으면_진행():
+    from samba_agent.agents.buyer import single_item_ok
+
+    snap = {'order_tab': 't', 'cost': 33630, 'product_name': '[노스페이스]린덴 힙색 NN2PS26J_BLK'}
+    assert single_item_ok('BLK(BLACK) FREE', snap)
+    assert not single_item_ok('WHT(WHITE) FREE', snap)  # 색이 다르면 아니다
+    assert not single_item_ok('BLK 270', snap)  # 프리사이즈가 아니면 아니다
+    assert not single_item_ok('BLK FREE', {'cost': 1000})  # 주문서가 없으면 아니다
+    # 상품명에 색 글자가 없으면(품번뿐) 선택란 없는 단일 상품으로 본다 — 실기 2026-10-01 롯데온 라코스테 쇼퍼백
+    plain = {'order_tab': 't', 'cost': 100080, 'product_name': '[라코스테]2025 NEW L.12.12 스몰 사이즈 쇼퍼백 KP NF2037P55G000'}
+    assert single_item_ok('블랙 FREE', plain)
+    assert not single_item_ok('블랙 250', plain)  # 프리사이즈가 아니면 여전히 아니다
+    assert not single_item_ok('NF9999 FREE', plain)  # 색이 아닌 낯선 글자는 이름에 있어야 한다
+    # 이름에 다른 색이 적혀 있으면 막는다
+    assert not single_item_ok('블랙 FREE', {**plain, 'product_name': '[라코스테] 쇼퍼백 화이트 NF2037'})
+
+
+def test_선물하기가_막힌_지역_주소():
+    from samba_agent.agents.buyer import gift_blocked_address
+
+    # 롯데온 '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30)
+    assert gift_blocked_address('제주특별자치도 제주시 봉개북3길 1')
+    assert gift_blocked_address('경상북도 울릉군 울릉읍 도동리 1')
+    assert not gift_blocked_address('서울특별시 강남구 테헤란로 1')
+
+
+def test_margin_pct_rounded_keeps_tiny_positive():
+    from samba_agent.agents.buyer import margin_pct_rounded
+
+    # 정산금 272,161 - 원가 272,052 = +109원 → 0.035% — 0.0 으로 줄면 '0% 초과' 검사에 걸린다
+    assert margin_pct_rounded((272161 - 272052) / 307700 * 100) > 0
+    assert margin_pct_rounded(-0.03) < 0
+    assert margin_pct_rounded(7.5896) == 7.6
+    assert margin_pct_rounded(0.0) == 0.0
+
+
+def test_shipping_matches_when_site_reads_back_detail_in_address():
+    from samba_agent.agents.buyer import shipping_matches
+
+    expected = {'name': '홍길동', 'address': '경기 성남시 분당구 판교역로 12 (백현동,판교푸르지오)', 'address_detail': '101동 1203호'}
+    applied = {'name': '홍길동', 'address': '경기 성남시 분당구 판교역로 12 101동 1203호'}
+    assert shipping_matches(expected, applied)
+    other_road = {'name': '홍길동', 'address': '경기 성남시 분당구 대왕판교로 99 101동 1203호'}
+    assert not shipping_matches(expected, other_road)
+
+
+def test_xxl_matches_2xl_by_size_letters():
+    from samba_agent.agents.buyer import size_letter_options, size_letters
+
+    assert size_letters('그레이 XXL') == size_letters('2XL') == {'2XL'}
+    assert size_letter_options(['S (품절)', 'M (품절)', 'L', 'XL', '2XL'], '그레이 XXL') == ['2XL']
+
+
+def test_상품_도메인이_홈과_다르면_그_도메인에서_로그인한다():
+    """실기 2026-10-01 SSG: pay.ssg.com 은 로그인돼 있는데 신세계몰 상품의 바로구매가 로그인 팝업을 띄웠다."""
+    from samba_agent.agents import buyer as buyer_mod
+
+    agent = buyer_mod.BuyerAgent.__new__(buyer_mod.BuyerAgent)
+    agent.spec = type('S', (), {'name': 'buyer.ssg'})()
+    agent.note = lambda *_: None
+    calls: list[tuple[str, dict[str, object]]] = []
+    answers = iter([buyer_mod.LOGIN_SUBMITTED, buyer_mod.ALREADY_SIGNED_IN + ' (로그아웃)'])
+
+    def tool(name: str, /, **args: object) -> str:
+        calls.append((name, args))
+        if name == 'new_tab':
+            return 'ok: tab 0aba7b25-ae69-4d40-ab06-c0aa4d0cfa47'
+        if name == 'login':
+            return next(answers)
+        return 'ok'
+
+    agent.tool = tool
+    url = 'https://shinsegaemall.ssg.com/item/itemView.ssg?itemId=1'
+    assert agent._login_product_host('edelvise06', url) is True
+    assert ('new_tab', {'url': 'https://shinsegaemall.ssg.com/', 'profile': 'edelvise06'}) in calls
+    assert calls[-1] == ('close_tab', {'id': '0aba7b25-ae69-4d40-ab06-c0aa4d0cfa47'})
+    # 홈과 같은 도메인이면 다시 로그인하지 않는다
+    calls.clear()
+    assert agent._login_product_host('edelvise06', 'https://pay.ssg.com/myssg/x') is False
+    assert calls == []
+
+
+def test_나의_할인가보다_주문서가_크게_비싸면_결제하지_않는다():
+    """실기 2026-10-01 노스페이스 비니: 나의 할인가 27,590 · 주문서 쿠폰 0원 37,440 으로 결제됐다."""
+    from samba_agent.agents.buyer import coupon_gap_failure
+
+    with pytest.raises(AgentFailure) as e:
+        coupon_gap_failure(27590, 37440, 'edelvise06')
+    assert e.value.status == 'needs_human' and '쿠폰 미적용' in e.value.reason
+    assert e.value.fail_reason is not FailReason.MARGIN  # 자동 취소로 가면 안 된다
+    coupon_gap_failure(36350, 37850, 'edelvise06')  # 1,500원 — 적립금·등급 차이 범위, 통과
+    coupon_gap_failure(None, 37440, 'edelvise06')  # 빠른 비교 없음 — 검사 안 함
+
+
+def test_롯데홈쇼핑_나이키_아디다스는_직배():
+    """사용자 2026-10-01: 롯데홈쇼핑 나이키·아디다스 주문은 정가와 상관없이 직배."""
+    from samba_agent.agents.buyer import decide_order_type
+
+    def order(sku: str, seller: str = '롯데홈쇼핑(037800LT)') -> OrderRef:
+        return OrderRef(order_no='1', source='MUSINSA', seller=seller, sku=sku, qty=1, sale_price=50000, order_type='direct')
+
+    assert decide_order_type(order('매장정품 나이키 에어포스'), 40000)[0] == 'direct'  # 정가 ≤ 결제액이어도
+    assert decide_order_type(order('ADIDAS 삼바 OG'), 40000)[0] == 'direct'
+    assert decide_order_type(order('뉴발란스 530'), 40000)[0] == 'kkadaegi'  # 다른 브랜드는 정가 비교 그대로
+    assert decide_order_type(order('나이키 에어포스', seller='쿠팡(unclehg)'), 40000)[0] == 'kkadaegi'
+
+
+def test_주소에_건물번호가_없고_상세가_번호로_시작하는_주문도_같은_곳으로_본다():
+    """실기 2026-10-01 패션플러스: 주문 주소 '…로', 상세 '29, 5층' → 사이트는 '…로 29' + '5층' 으로 되읽는다."""
+    from samba_agent.agents.buyer import shipping_matches
+
+    want = {'name': '홍길동', 'address': '경기 용인시 처인구 가나다로', 'address_detail': '29, 5층'}
+    got = {'name': '홍길동', 'address': '경기 용인시 처인구 가나다로 29', 'address_detail': '5층', 'zip': '16827'}
+    assert shipping_matches(want, got)
+    # 건물번호가 다르면 다른 곳이다
+    assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 가나다로 31'})
+    # 도로명이 다르면 다른 곳이다
+    assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 라마바로 29'})
+
+
+def test_빠른_비교는_순서만_정하고_계정_전부를_주문서로_견적한다():
+    """실기 2026-10-02 비니: edelvise06 화면가 34,460(쿠폰 미반영)이라 비교에서 빠졌는데 주문서는 가장 쌌다."""
+    from samba_agent.agents.buyer import quick_batches
+
+    scores = {'edelvise06': 34460.0, 'cannonfort': 34460.0, 'hwangnol06': 27590.0, 'roasterydg': 28320.0}
+    ranked = ['hwangnol06', 'roasterydg', 'edelvise06', 'cannonfort', 'unread']
+    assert quick_batches(ranked, scores) == [ranked]
+    assert quick_batches([], {}) == []
+
+
+def test_단일_상품_색_표기가_달라도_같은_색이면_진행한다():
+    """실기 2026-10-02 롯데온 선캡: 주문 옵션 'BLACK ONE', 상품명 'NE3CS11A_BLK' — 선택란 없는 단일 상품."""
+    from samba_agent.agents.buyer import single_item_ok
+
+    snap = {'order_tab': 't1', 'cost': 36580, 'product_name': '우먼 유브이 라이트 선캡 NE3CS11A_BLK'}
+    assert single_item_ok('BLACK ONE', snap)
+    # 이름에 다른 색이 적혀 있으면 막는다
+    assert not single_item_ok('BLACK ONE', {**snap, 'product_name': '우먼 유브이 라이트 선캡 NE3CS11A_WHT'})
+
+
+def test_네이버페이는_현대카드_청구할인을_원가에_반영한다():
+    """사용자 2026-10-02: 네이버페이는 현대카드로 결제된다 — 2.7% 청구할인. 다른 카드가 적혀 있으면 그 카드 계수."""
+    from samba_agent.agents.buyer import effective_cost
+
+    assert effective_cost({'method': '네이버페이', 'card': None, 'cost': 97670, 'reward': 977}) == round(97670 * 0.973 - 977)
+    assert effective_cost({'card': '네이버페이', 'cost': 100000}) == 97300  # 주문 상세의 결제수단 글자
+    assert effective_cost({'card': '네이버페이 - 롯데카드', 'cost': 100000}) == 98000
+    # 토스페이도 현대카드(청구할인 2.7%) — 사용자 2026-10-06
+    assert effective_cost({'method': '토스페이', 'card': None, 'cost': 100000}) == 97300
+
+
+def test_목록에_없는_배송지는_스크립트_고장이_아니다():
+    from samba_agent.agents.buyer import shipping_not_listed
+
+    assert shipping_not_listed({'ok': False, 'note': '목록에 같은 배송지 없음(이름 라벨 0개, 이름 글자 0곳)'})
+    assert shipping_not_listed({'ok': False, 'note': '목록에 없음'})
+    # 창을 못 열었거나 다른 사유는 고장일 수 있다 — 수리로 넘긴다
+    assert not shipping_not_listed({'ok': False, 'note': '배송지 변경 버튼 없음'})
+    assert not shipping_not_listed({'ok': True, 'note': None})
+
+
+def test_같은_값이면_보유_적립금_많은_계정으로_바꾼다(reg, monkeypatch):
+    """사용자 2026-10-03: 동일 조건이면 무신사 적립금 많은 계정 — 같은 값 계정들을 마저 견적해 잔액이 가장 큰 쪽."""
+    mus = agent(reg, lambda _p, _m: '{}')
+    mus.evidence = []
+    mus._quick_scores = {'buyer01': 50000.0, 'buyer02': 50000.0, 'buyer03': 50000.0, 'buyer04': 52000.0}
+    batches: list[list[str]] = []
+
+    def fake_batch(self, a, accounts):
+        batches.append(list(accounts))
+        return [
+            ('buyer02', {'cost': 50000, 'points_balance': 120000, 'points_used': 20000}),
+            ('buyer03', {'cost': 50000, 'points_balance': 300000, 'points_used': 20000}),
+        ]
+
+    monkeypatch.setattr(BuyerAgent, '_quote_batch', fake_batch)
+    monkeypatch.setattr(BuyerAgent, '_audit_quotes', lambda self, a, q: q)
+    monkeypatch.setattr(BuyerAgent, '_payable_only', lambda self, q: q)
+    a = assignment(reg)
+    quotes = [('buyer01', {'cost': 50000, 'points_balance': 80000, 'points_used': 20000})]
+    out = mus._prefer_points_user(a, quotes, ['buyer01', 'buyer02', 'buyer03', 'buyer04'], ['buyer01'])
+    assert batches == [['buyer02', 'buyer03']]  # buyer04 는 값이 달라 안 본다
+    assert out == [('buyer03', {'cost': 50000, 'points_balance': 300000, 'points_used': 20000})]
+
+    # 이긴 계정 잔액이 가장 많으면 그대로
+    mus.evidence = []
+    quotes = [('buyer01', {'cost': 50000, 'points_balance': 500000, 'points_used': 20000})]
+    out = mus._prefer_points_user(a, quotes, ['buyer01', 'buyer02', 'buyer03'], ['buyer01'])
+    assert out == quotes
+
+
+
+@respx.mock
+def test_주문서까지_못_간_스냅샷은_고른_선택지로_다시_연다(reg):
+    """실기 2026-10-04 롯데온 선물 주문: 주문 옵션 글자로는 스크립트가 못 골라 options 만 돌아왔고(selected·methods 없음),
+    모델이 고른 뒤 그대로 진행해 결제수단이 없다며 card_missing 으로 끝났다 — 고른 글자(size)로 다시 열어야 한다."""
+    calls: list[dict[str, object]] = []
+
+    def snapshot(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        name = body.get('args', {}).get('name')
+        if name == 'musinsa_product_snapshot':
+            args = json.loads(body['args'].get('args') or '{}')
+            calls.append(args)
+            if args.get('size') == '260 ONE':
+                return page(json.dumps({**SNAPSHOT_OK, 'options': ['260 ONE', '265 ONE'], 'selected': '260 ONE'}))
+            # 주문 옵션 글자로는 못 골랐다 — 선택지만, 주문서 없음
+            return page(json.dumps({'options': ['260 ONE', '265 ONE'], 'methods': [], 'cost': None, 'note': 'option not matched'}))
+        return route_run_script({'musinsa_set_shipping': SHIPPING_ECHO})(request)
+
+    respx.post(f'{URL}/tool/run_script').mock(side_effect=snapshot)
+    respx.post(f'{URL}/tool/get_page').mock(return_value=page('결제수단 선택'))
+    respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    mock_accounts()
+    mock_fill_secret()
+    a = assignment(reg).model_copy(update={'order': ORDER.model_copy(update={'option': '260 FREE'})})
+    out = agent(reg, lambda p, m: m(choice='260 ONE', reason='주문 사이즈 260 과 일치'))(a)
+    assert out.status == 'ok', out.reason
+    assert out.payload['cost'] == 89000
+    # 첫 스냅샷은 주문 옵션 글자, 두 번째는 고른 선택지 글자로 열었다
+    assert [c.get('size') for c in calls][-1] == '260 ONE'
+    assert any('옵션 재선택' == e.label for e in out.evidence)
+
+
+def test_한_자리_사이즈는_세_자리_코드_선택지와_맞춘다():
+    """실기 2026-10-05 롯데온: 주문 'SKB/초콜릿향 3' ↔ 선택지 '003(95) 137,400 1개 남음 (품절임박)'."""
+    from samba_agent.agents.buyer import single_digit_code_options
+
+    opts = ['003(95) 137,400 1개 남음 (품절임박)', '004(100) 137,400 4개 남음', '005(105) 137,400', '006(110) 137,400']
+    assert single_digit_code_options(opts, 'SKB/초콜릿향 3') == ['003(95) 137,400 1개 남음 (품절임박)']
+    assert single_digit_code_options(opts, 'SKB/초콜릿향 4') == ['004(100) 137,400 4개 남음']
+    assert single_digit_code_options(opts, 'SKB 7') == []
+    # 두 자리 이상 사이즈(95·260)나 소수(7.5)는 이 규칙 밖
+    assert single_digit_code_options(opts, '블랙 95') == []
+    assert single_digit_code_options(opts, '7.5') == []

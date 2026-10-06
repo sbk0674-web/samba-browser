@@ -11,6 +11,8 @@ export const IPC = {
   tabForward: 'tab:forward',
   tabReload: 'tab:reload',
   tabSetMobile: 'tab:setMobile',
+  tabMove: 'tab:move',
+  profileList: 'profile:list',
   tabUpdated: 'tab:updated', // main → renderer 이벤트
   layoutSet: 'layout:set',
   agentRun: 'agent:run',
@@ -83,6 +85,7 @@ export const IPC = {
   bookmarksCreateLink: 'bookmarks:createLink',
   bookmarksRename: 'bookmarks:rename',
   bookmarksMove: 'bookmarks:move',
+  bookmarksPlace: 'bookmarks:place', // 끌어 옮기기 — 폴더 안 자리까지 지정
   bookmarksRemoveFolder: 'bookmarks:removeFolder',
   bookmarksSort: 'bookmarks:sort',
   bookmarksExport: 'bookmarks:export',
@@ -107,6 +110,7 @@ export const IPC = {
   // --- 동기화(2b) — 상태 조회·즉시 동기화. 토큰·비밀값은 오가지 않는다 ---------
   syncStatus: 'sync:status',
   syncNow: 'sync:now',
+  syncKeymasterBaseline: 'sync:keymasterBaseline',
   syncStatusChanged: 'sync:statusChanged', // main → renderer 이벤트
   // --- 기기(2b) — 목록과 원격 로그아웃. 토큰은 오가지 않는다 -------------------
   devicesList: 'devices:list',
@@ -351,7 +355,7 @@ export type {
   BookmarkLinkDto
 } from './import'
 
-export type { SyncStatus, DeviceDto } from './sync'
+export type { SyncStatus, DeviceDto, BaselineReport } from './sync'
 
 export type {
   TranslateLang,

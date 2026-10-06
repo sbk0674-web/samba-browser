@@ -195,7 +195,28 @@ export const SYNCED_SETTING_KEYS = [
   'notifyTelegramChatId',
   'notifyOnDone',
   'notifyOnFailed',
-  'notifyOnAttention'
+  'notifyOnAttention',
+  // === 사용자 2026-10-02: "로그인한 PC 마다 설정이 다른 브라우저가 말이 되냐 — 모든 설정 다 동일하게" ===
+  // 화면 배치·확장 표시·추천 숨김도 따라간다. 남는 제외 대상은 그 PC 에만 맞는 값뿐이다:
+  // 실행 파일·폴더 경로(adbPath·scrcpyPath·captureDir·extensionPaths·extensionSources),
+  // 이 PC 의 CLI 로그인(aiConnections), 이 PC 의 하네스 연결(bridge*·harnessApiUrl), 동기화 접속 정보,
+  // 기기 키 기억(vaultRememberDevice), 마지막 주소·작업공간 번호·마이그레이션 표식
+  'panelWidth',
+  'sidebarWidth',
+  'sidebarCollapsed',
+  'panelCollapsed',
+  'extensionsPinned',
+  'disabledExtensionIds',
+  'extensionProfiles',
+  'dismissedRecommendations',
+  // 폰 연동 — 폰 목록·기본 폰·담당 계정·지운 폰(phone-registry.ts)
+  'defaultPhoneSerial',
+  'phoneIgnoredSerials',
+  'phoneRegistry',
+  'phoneAccountLinks',
+  'phoneRelayBrokerUrl',
+  // 키마스터 기준 선언 — 한 PC 의 키마스터로 나머지를 맞출 때 쓴다(sync/authority.ts)
+  'keymasterBaselineAt'
 ] as const
 
 /**
@@ -221,3 +242,23 @@ export type VaultKeyApplyResult =
 
 /** 로컬·원격의 마스터 키 재료가 다를 때 상태 표시줄에 올리는 표식 */
 export const VAULT_KEY_MISMATCH_ERROR = 'sync:vaultKeyMismatch'
+
+// --- 키마스터 기준 선언(main/sync/authority.ts)의 결과 -------------------------
+export interface BaselineCounts {
+  /** 이 PC 의 살아 있는 행 */
+  local: number
+  /** 서버의 살아 있는 행 */
+  remoteLive: number
+  /** 서버에만 살아 있어 삭제 표식을 올릴 행 */
+  remoteOnly: number
+  /** 이 PC 에만 있고 서버에 아직 없는 행(새로 올라간다) */
+  localOnly: number
+}
+
+export interface BaselineReport {
+  dryRun: boolean
+  /** 기준 시각(ms). dryRun 이면 0 */
+  at: number
+  accounts: BaselineCounts
+  vaultItems: BaselineCounts
+}

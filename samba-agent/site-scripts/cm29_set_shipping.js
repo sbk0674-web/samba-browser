@@ -35,12 +35,15 @@ function mismatch(f, e) {
 async function pickForm() {
   let c = (await tabs.list()).filter(x => /29cm\.co\.kr\/order\/checkout/.test(x.url || ''))
   if (args.tab) c = c.filter(x => x.id === String(args.tab))
+  // 계정 비교를 동시에 돌리면 계정마다 주문서 탭이 열린다 — 이 계정(프로필)의 탭만 본다
+  // (실기 2026-09-29: 'multiple checkout tabs' 로 원가를 못 읽었다)
+  if (args.profile) { const mine = c.filter(x => !x.profile || x.profile === args.profile); if (mine.length) c = mine }
   if (!c.length) return { err: 'no checkout tab' }
   const ok = []
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/총 결제금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
@@ -66,7 +69,8 @@ await page.click(idOf(ch))
 await page.waitFor(/배송지 추가/, 6000).catch(() => {})
 await page.click(idOf(await find(/\] button "배송지 추가"/)))
 let d = []
-for (let i = 0; i < 15 && !d.some(l => /수령인을 입력/.test(l)); i++) { await sleep(200); d = lines((await page.get({ selector: '[role=dialog]' })).tree) }
+// 배송지 추가 폼이 [role=dialog] 밖(페이지)에 그려지기도 한다(실기 2026-09-30) — 창에 없으면 페이지 전체에서
+for (let i = 0; i < 15 && !d.some(l => /수령인을 입력/.test(l)); i++) { await sleep(200); d = lines((await page.get({ selector: '[role=dialog]' })).tree); if (!d.some(l => /수령인을 입력/.test(l))) d = lines((await page.get({})).tree) }
 const ix = re => d.findIndex(l => re.test(l))
 const iName = ix(/textbox "최대 10자/), iRcv = ix(/textbox "수령인을 입력/), iSearch = ix(/\] button "주소 검색"/), iDet = ix(/textbox "상세 주소/)
 if (iRcv < 0 || iSearch < 0 || iDet < 0) throw new Error('배송지 추가 창 칸을 못 찾음')

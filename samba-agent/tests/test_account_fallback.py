@@ -101,16 +101,18 @@ def test_구매_한도에_걸린_계정은_빼고_다음으로_싼_계정으로_
             {
                 'buyer01': AgentFailure('fail', LIMIT, FailReason.OUT_OF_STOCK),
                 'buyer02': {'cost': 44390.0},
+                'buyer03': {'cost': 44390.0},
+                'buyer05': {'cost': 45550.0},
             },
             calls,
         ),
     )
     account, snap = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert account == 'buyer02'
-    assert calls == ['buyer01', 'buyer02']  # 한도 계정 다음으로 싼 계정(동률이면 앞 계정)
-    assert any(e.label == '계정 전환' and 'buyer02' in e.detail for e in buyer.evidence)
-    # 이긴 계정이 마지막으로 연 계정이라 다시 만들지 않는다
-    assert 'resnap' not in snap
+    assert account == 'buyer02'  # 한도 계정 다음으로 싼 계정(동률이면 앞 계정)
+    # 계정 전부를 주문서로 견적한다 — 빠른 값은 쿠폰·결제수단 적립·청구할인을 다 알지 못한다
+    assert calls == ACCOUNTS
+    # 이긴 계정이 마지막으로 연 계정이 아니라 주문서를 다시 만든다
+    assert snap.get('resnap') is True
 
 
 @respx.mock
@@ -140,16 +142,16 @@ def test_로그인_안_된_계정도_계정_사유라_다음_계정으로_잇는
 @respx.mock
 def test_상품_사유면_다른_계정을_돌지_않는다(buyer, monkeypatch) -> None:
     """품절은 계정과 무관하다 — 다음 계정으로 잇지 않는다."""
-    mock_quick({'buyer01': 40000, 'buyer02': 41000, 'buyer03': 42000, 'buyer05': 43000})
+    mock_quick({'buyer01': 40000, 'buyer02': 42000, 'buyer03': 44000, 'buyer05': 46000})
     calls: list[str] = []
     monkeypatch.setattr(
         BuyerAgent,
         '_quote',
-        fake_quote({'buyer01': f"{SOLD_OUT_LISTED_SKIP} ['FREE 품절'] (선택지 1개)"}, calls),
+        fake_quote({acc: f"{SOLD_OUT_LISTED_SKIP} ['FREE 품절'] (선택지 1개)" for acc in ACCOUNTS}, calls),
     )
     with pytest.raises(AgentFailure) as e:
         buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert calls == ['buyer01']
+    assert calls == ACCOUNTS  # 한 묶음으로 견적한다 — 묶음 뒤로 더 잇지는 않는다
     assert e.value.reason.startswith('확정 품절')
 
 
@@ -182,14 +184,14 @@ def test_한도_계정_말고_나머지가_품절_표시면_확정_품절이다(
         fake_quote(
             {
                 'buyer01': AgentFailure('fail', LIMIT, FailReason.OUT_OF_STOCK),
-                'buyer02': f"{SOLD_OUT_LISTED_SKIP} ['FREE 품절'] (선택지 1개)",
+                **{acc: f"{SOLD_OUT_LISTED_SKIP} ['FREE 품절'] (선택지 1개)" for acc in ACCOUNTS[1:]},
             },
             calls,
         ),
     )
     with pytest.raises(AgentFailure) as e:
         buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert calls == ['buyer01', 'buyer02']
+    assert calls == ACCOUNTS
     assert e.value.reason.startswith('확정 품절')
 
 
@@ -200,14 +202,22 @@ def test_결제_항목_없는_계정이_뽑히면_다음_계정으로_잇는다(
     monkeypatch.setattr(
         BuyerAgent,
         '_quote',
-        fake_quote({'buyer01': {'cost': 40000.0}, 'buyer02': {'cost': 41000.0}}, calls),
+        fake_quote(
+            {
+                'buyer01': {'cost': 40000.0},
+                'buyer02': {'cost': 41000.0},
+                'buyer03': {'cost': 42000.0},
+                'buyer05': {'cost': 43000.0},
+            },
+            calls,
+        ),
     )
     monkeypatch.setattr(
         BuyerAgent, '_payable_providers', lambda self, acc: set() if acc == 'buyer01' else None
     )
     account, _ = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert account == 'buyer02'
-    assert calls == ['buyer01', 'buyer02']
+    assert account == 'buyer02'  # 결제 항목 없는 최저 계정은 빠지고 그다음으로 싼 계정
+    assert calls == ACCOUNTS
 
 
 def test_계정_사유_판정() -> None:

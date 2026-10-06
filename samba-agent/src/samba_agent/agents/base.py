@@ -114,6 +114,8 @@ class AgentBase:
             # 항상 fail 로 던진다. 권한 부족·중복은 감독자의 NO_RETRY_REASONS 가
             # 재시도 없이 바로 needs_human 으로 넘긴다(스펙 §6) — 여기서 판단하지 않는다
             raise AgentFailure('fail', str(e), e.reason) from e
+        # 앱이 남긴 단계 기록(성공 여부 포함) — 실패 원인을 가를 때 호출부가 읽는다
+        self.last_steps = out.steps
         if not out.result.lstrip().startswith(_MARKER_EXEMPT_PREFIXES) and any(
             m in out.result for m in NEEDS_USER_MARKERS
         ):

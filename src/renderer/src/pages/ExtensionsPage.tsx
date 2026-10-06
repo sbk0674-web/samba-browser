@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Download, FolderOpen, Search, Store } from 'lucide-react'
 import { Switch } from '@renderer/components/ui/switch'
 import { ExtensionCard } from '@renderer/components/extensions/ExtensionCard'
+import { ExtensionProfileScope } from '@renderer/components/extensions/ExtensionProfileScope'
 import { ExtensionImportDialog } from '@renderer/components/extensions/ExtensionImportDialog'
 import { ExtensionWebstoreDialog } from '@renderer/components/extensions/ExtensionWebstoreDialog'
 import {
@@ -209,6 +210,9 @@ export function ExtensionsPage(): React.JSX.Element {
                   ))}
                 </div>
               )}
+
+              {/* 확장별로 올릴 프로필 */}
+              {items.length > 0 && <ExtensionProfileScope items={items} />}
 
               {/* 시작할 때 실패한 확장 — 개발자 모드에서만 자세히 보여 준다 */}
               {devMode && loadErrors.length > 0 && (

@@ -83,13 +83,30 @@ export function laneTabs(real: TabManager, state: LaneState): TabManager {
  * 다른 레인(사람이 따로 돌리는 수동 작업)의 주문서까지 닫았다(실기 2026-09-27 패션플러스·SMARKET).
  * 숨기지는 않는다 — 교차 비교가 레인에서 만든 주문서를 본 작업이 이어받는 흐름이 있다.
  * 하네스는 lane 이 붙은 탭을 정리 대상에서 뺀다(레인 탭은 레인이 스스로 닫는다).
+ * 사람이 직접 연 탭에는 lane 'user' 를 붙이고, 닫기 호출도 무시한다.
  */
-export function labelLaneTargets(real: TabManager, lanes: ReadonlyMap<string, LaneState>): TabManager {
+/** 사람이 직접 연 탭에 붙는 표시 — 하네스는 lane 이 붙은 탭을 정리하지 않는다 */
+export const USER_LANE = 'user'
+
+export function labelLaneTargets(
+  real: TabManager,
+  lanes: ReadonlyMap<string, LaneState>
+): TabManager {
+  // 시험용 대역에는 isUserTab 이 없을 수 있다
+  const isUser = (id: string): boolean => {
+    const fn = (real as Partial<TabManager>).isUserTab
+    return typeof fn === 'function' && fn.call(real, id)
+  }
   const laneOf = (t: AgentTarget): string | undefined => {
     for (const [name, st] of lanes) {
       if (st.owned.has(t.id)) return name
-      if (t.kind === 'popup' && typeof t.openerId === 'string' && st.owned.has(t.openerId)) return name
+      if (t.kind === 'popup' && typeof t.openerId === 'string' && st.owned.has(t.openerId))
+        return name
     }
+    // 사람이 연 탭과 그 탭에서 뜬 팝업 — 정리 대상에서 빠지게 lane 을 붙인다(실기 2026-10-02: 사용자가
+    // 쓰려고 띄운 탭·프로필 탭이 작업 정리 때 같이 닫혔다)
+    if (isUser(t.id)) return USER_LANE
+    if (t.kind === 'popup' && typeof t.openerId === 'string' && isUser(t.openerId)) return USER_LANE
     return undefined
   }
   const listTargets = (): AgentTarget[] =>
@@ -97,9 +114,24 @@ export function labelLaneTargets(real: TabManager, lanes: ReadonlyMap<string, La
       const lane = laneOf(t)
       return lane ? { ...t, lane } : t
     })
+  // 목록 표시만으로는 부족하다 — id 를 알고 닫으려는 호출도 막는다(사람 탭과 그 팝업)
+  const protectedId = (id: string): boolean => {
+    if (isUser(id)) return true
+    const t = real.listTargets().find((x) => x.id === id)
+    return !!t && t.kind === 'popup' && typeof t.openerId === 'string' && isUser(t.openerId)
+  }
+  const overrides: Partial<Record<keyof TabManager, unknown>> = {
+    listTargets,
+    close: (id: string): void => {
+      if (!protectedId(id)) real.close(id)
+    },
+    closeTarget: (id: string): void => {
+      if (!protectedId(id)) real.closeTarget(id)
+    }
+  }
   return new Proxy(real, {
     get(target, prop, receiver) {
-      if (prop === 'listTargets') return listTargets
+      if (typeof prop === 'string' && prop in overrides) return overrides[prop as keyof TabManager]
       const v: unknown = Reflect.get(target, prop, receiver)
       return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v
     }

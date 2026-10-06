@@ -78,6 +78,8 @@ class ScriptedAdb implements AdbRunner {
       return ok(xml)
     }
     if (key.includes('content://sms/inbox')) return ok(this.smsStdout)
+    // 결제 앱 설치 확인(pm path) — 이 가짜 폰에는 결제 앱이 다 깔려 있다
+    if (key.includes('pm path ')) return ok(`package:/data/app/${args[args.length - 1]}/base.apk`)
     return ok('')
   }
 

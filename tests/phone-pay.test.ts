@@ -29,6 +29,7 @@ import {
 } from '../src/main/phone/pay'
 import { createPayTool, PAY_TOOL_NAME, PHONE_TOOL_NAMES } from '../src/main/agent/tools-phone'
 import { SAMBA_TOOL_NAMES } from '../src/main/agent/tools'
+import { keypadFromUiTree } from '../src/main/phone/pay-secret'
 
 // 사용자가 설정에 적어 넣은 상한(테스트용 값). 기본값은 둘 다 없음(0)이다
 import type { PhoneElement, PhoneScreen } from '../src/shared/phone-snapshot'
@@ -83,6 +84,8 @@ interface Harness {
   deps: PayRunDeps
   screens: PhoneScreen[]
   taps: Array<[string, number, number]>
+  /** typeText 로 친 글자(숫자코드) */
+  typed: string[]
   /** 뒤로 키를 누른 폰 목록(시험 입력 취소) */
   backs: string[]
   confirm: ReturnType<typeof vi.fn>
@@ -108,6 +111,7 @@ function harness(
   const screens = opts.screens ?? [screen('viva.republica.toss')]
   const taps: Array<[string, number, number]> = []
   const backs: string[] = []
+  const typed: string[] = []
   const records: Array<{ kind: string; ok: boolean; dryRunDigits?: number }> = []
   const notices: Array<{ message: string; hasImage: boolean }> = []
   const steps: Array<{ label: string; ok: boolean }> = []
@@ -128,6 +132,10 @@ function harness(
           : { png: Buffer.from([1, 2, 3]), secret: false },
       back: async (serial) => {
         backs.push(serial)
+      },
+      typeText: async (_serial, text) => {
+        typed.push(text)
+        return 'ok'
       }
     },
     launchApp: vi.fn(async () => {}),
@@ -154,8 +162,67 @@ function harness(
     sleep: async () => {},
     tapPassword
   }
-  return { deps, screens, taps, backs, confirm, tapPassword, records, notices, steps }
+  return { deps, screens, taps, backs, typed, confirm, tapPassword, records, notices, steps }
 }
+
+describe('롯데카드 앱카드(lottecard)', () => {
+  const LC = PAY_PROVIDERS.lottecard
+  const APP = 'com.lcacApp'
+  // 로카페이 홈: 카드 캐러셀(LOCA 1832 를 골라야 한다) + [숫자 코드]
+  const home = screen(APP, [
+    el(1, '', { contentDesc: '선택됨, SKYPASS롯데 플래티넘 체크카드 7053, 버튼' }),
+    el(2, '', { contentDesc: '선택됨, LOCA Professional 1832, 버튼' }),
+    el(3, '숫자 코드')
+  ])
+  // 숫자코드 화면: 안내 문구 + 키패드 뷰(눌러야 키패드가 뜬다)
+  const codeIntro = screen(APP, [
+    el(4, '숫자코드 입력', { clickable: false }),
+    el(5, 'PC 화면의 숫자코드를 입력해주세요.', { clickable: false }),
+    el(6, '', { contentDesc: '숫자코드(7자리) 입력 키패드, 버튼' })
+  ])
+  // 섞인 보안 키패드(contentDesc 숫자) + [입력완료]
+  const digits = ['2', '8', '6', '9', '7', '3', '1', '4', '0', '5']
+  const codeKeypad = screen(APP, [
+    el(7, '숫자코드 입력', { clickable: false }),
+    ...digits.map((d, i) => el(10 + i, '', { contentDesc: d })),
+    el(30, '', { contentDesc: '입력완료' })
+  ])
+  const password = screen(APP, [el(8, '결제 비밀번호 6자리', { clickable: false }), el(9, '', { isSecret: true })])
+  const done = screen(APP, [el(10, '결제가 완료되었습니다', { clickable: false })])
+
+  it('LOCA 1832 → 숫자 코드 → 키패드 뷰 → 코드 자리 누르기 → 입력완료 → 결제 비밀번호 → 완료(appOnly)', async () => {
+    const h = harness({ screens: [home, home, codeIntro, codeKeypad, codeKeypad, password, done] })
+    // 코드 키패드는 화면에서 읽는다(안내 화면엔 키패드가 없다) — 비밀번호 키패드만 시험용 배치
+    h.deps.keypad.fromUiTree = (s) => (s.elements.some((e) => e.isSecret) ? fullLayout : keypadFromUiTree(s))
+    const r = await runPayApproval(h.deps, request({ provider: 'lottecard', code: '7826101' }))
+    expect(r).toEqual({ ok: true })
+    const ys = h.taps.map((t) => t[2])
+    // 경로: LOCA(2) → 숫자 코드(3) → 키패드 뷰(6)
+    expect(ys.slice(0, 3)).toEqual([230, 330, 630])
+    // 코드 7826101 자리를 키패드 배치대로: 7→id14, 8→11, 2→10, 6→12, 1→16, 0→18, 1→16
+    expect(ys.slice(3, 10)).toEqual([1430, 1130, 1030, 1230, 1630, 1830, 1630])
+    // 그다음 [입력완료](30)
+    expect(ys[10]).toBe(3030)
+    expect(h.typed).toEqual([])
+    expect(h.tapPassword).toHaveBeenCalledTimes(1)
+    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ provider: 'lottecard' })
+  })
+
+  it('코드 키패드가 떴는데 요청에 code 가 없으면 아무것도 누르지 않고 code-missing', async () => {
+    const h = harness({ screens: [codeKeypad] })
+    h.deps.keypad.fromUiTree = (s) => keypadFromUiTree(s)
+    const r = await runPayApproval(h.deps, request({ provider: 'lottecard' }))
+    expect(r.ok).toBe(false)
+    expect(r.reason).toBe('code-missing')
+    expect(h.taps).toEqual([])
+  })
+
+  it('매핑·계정 호스트가 있다', () => {
+    expect(LC.appOnly).toBe(true)
+    expect(LC.launchActivity).toContain('AppCardActivity')
+    expect(PAY_APP_TO_PAYMENT_PROVIDER.lottecard).toBe('lottecard')
+  })
+})
 
 describe('PAY_APP_TO_PAYMENT_PROVIDER', () => {
   it('결제앱 4종이 모두 금고 결제 수단으로 이어진다', () => {
@@ -163,7 +230,9 @@ describe('PAY_APP_TO_PAYMENT_PROVIDER', () => {
       toss: 'toss',
       payco: 'payco',
       kakaopay: 'kakao',
-      naverpay: 'naver'
+      naverpay: 'naver',
+      alipay: 'alipay',
+      lottecard: 'lottecard'
     })
     // 앱 목록과 매핑표가 어긋나면(새 앱 추가 후 매핑 누락) 여기서 걸린다
     expect(Object.keys(PAY_APP_TO_PAYMENT_PROVIDER).sort()).toEqual(
@@ -267,6 +336,25 @@ describe('runPayApproval', () => {
 
     expect(r).toEqual({ ok: false, reason: 'vault-locked' })
     expect(h.tapPassword).not.toHaveBeenCalled()
+  })
+
+  it('알리페이 결제창이 이미 떠 있으면 앱을 다시 열지 않고 웹 확인 없이 끝낸다', async () => {
+    // 실기 2026-10-01: 得物 앱이 띄운 알리페이 결제창 — 제목은 'CVV를 입력하세요'지만 6자리 결제 비밀번호다
+    const ali = 'com.eg.android.AlipayGphone'
+    const h = harness({
+      screens: [
+        screen(ali, [el(2, 'CVV를 입력하세요', { clickable: false })]),
+        screen(ali, [el(2, 'CVV를 입력하세요', { clickable: false })]),
+        screen(ali, [el(3, '결제 성공', { clickable: false })]),
+        screen(ali, [el(3, '결제 성공', { clickable: false })])
+      ],
+      webSuccess: false
+    })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+
+    expect(r).toEqual({ ok: true })
+    expect(h.deps.launchApp).not.toHaveBeenCalled()
+    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ provider: 'alipay' })
   })
 
   it('결제앱에 맞는 금고 결제 수단을 비밀번호 입력기에 넘긴다', async () => {
@@ -867,6 +955,24 @@ describe('토스 결제 화면(실기 구조) — 글자와 눌리는 영역이 
     )
     expect(selectedCardOf(screen(TOSS.packageName, [el(1, '홈')]), TOSS)).toBe('')
   })
+
+  it('selectedCardOf: 카드 줄과 [결제수단 변경] 사이에 글자 없는 클릭 요소가 끼어 있어도 카드 이름을 읽는다', () => {
+    // 실기 2026-10-06 토스: 체크 원·행 틀 같은 빈 요소가 사이에 있어 '넥슨현대UNLIMITED' 가 범위 밖으로 밀렸다
+    const s = screen(TOSS.packageName, [
+      el(1, '토스페이머니 충전'),
+      el(2, '넥슨현대UNLIMITED'),
+      el(3, '', { className: 'android.widget.ImageView' }),
+      el(4, '', { className: 'android.view.ViewGroup' }),
+      el(5, '', { className: 'android.view.ViewGroup' }),
+      el(6, '할부 선택 ・ 일시불'),
+      el(7, '', { className: 'android.view.ViewGroup' }),
+      el(8, '결제수단 변경 ・ 설정')
+    ])
+    expect(selectedCardOf(s, TOSS)).toContain('넥슨현대UNLIMITED')
+    expect(cardPatternOf('현대카드').test(selectedCardOf(s, TOSS))).toBe(true)
+    // 다른 카드를 지정하면 이미 선택됨으로 보지 않는다
+    expect(cardPatternOf('롯데카드').test(selectedCardOf(s, TOSS))).toBe(false)
+  })
 })
 
 describe('결제 화면이 아닌 곳에서는 아무것도 누르지 않는다(실기: 토스 홈의 버튼을 눌러 용돈 화면으로 들어감)', () => {
@@ -888,5 +994,68 @@ describe('결제 화면이 아닌 곳에서는 아무것도 누르지 않는다(
     expect(cardPatternOf('현대').test('LOCA Professional')).toBe(false)
     expect(cardPatternOf('롯데카드').test('LOCA Professional')).toBe(true)
     expect(cardPatternOf('KB국민카드').test('KB국민 톡톡')).toBe(true)
+  })
+})
+
+describe('runPayApproval — 알리페이 국제카드(唯品会) 다단계', () => {
+  const ali = 'com.eg.android.AlipayGphone'
+  // 실기 2026-10-03: 결제 비밀번호 → 현대카드 인증 안내(앱카드/PIN 고르기) → PIN 보안 키패드 → 결제 완료
+  const cvv = screen(ali, [
+    el(1, 'CVV를 입력하세요', { clickable: false }),
+    el(2, '주문금액: ¥ 427.00', { clickable: false })
+  ])
+  const pw = screen(ali, [el(2, '주문금액: ¥ 427.00', { clickable: false })])
+  const stepUp = screen(ali, [
+    el(3, 'Cruise API - Step Up', { clickable: false }),
+    el(4, '앱카드 결제'),
+    el(5, 'PIN번호 결제')
+  ])
+  const pinPad = screen(ali, [
+    el(6, 'Cruise API - Step Up', { clickable: false }),
+    el(7, '', { isSecret: true, clickable: false })
+  ])
+  const done = screen(ali, [el(8, '결제 완료', { clickable: false })])
+
+  it('비밀번호 뒤 카드사 인증 안내에서 PIN번호 결제를 누르고, PIN 키패드에 결제 비밀번호를 한 번 더 넣는다', async () => {
+    const h = harness({
+      screens: [cvv, cvv, stepUp, stepUp, pinPad, pinPad, done, done],
+      webSuccess: false
+    })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+
+    expect(r).toEqual({ ok: true })
+    // 'CVV를 입력하세요' 화면 = 결제 비밀번호 → 카드사 PIN(결제 비밀번호). CVC 는 넣지 않는다
+    expect(h.tapPassword).toHaveBeenCalledTimes(2)
+    expect(h.tapPassword.mock.calls[0][0].secret).not.toBe('card-cvc')
+    expect(h.tapPassword.mock.calls[1][0]).toMatchObject({ provider: 'alipay', secret: 'payment' })
+    // 'PIN번호 결제' 버튼(5) 을 눌렀다
+    expect(h.taps.some(([, x, y]) => x === 100 && y === 530)).toBe(true)
+  })
+
+  it('안내 화면(PIN번호 결제 고르기)은 비밀번호 화면이 아니다 — 버튼을 누른다', () => {
+    const next = nextPayState('verify', stepUp, PAY_PROVIDERS.alipay)
+    expect(next).toEqual({ state: 'app_steps', tapElementId: 5 })
+  })
+
+  it('알리페이가 시스템 바쁨 오류를 띄우면 누르지 않고 blocked-by-app 으로 멈춘다', async () => {
+    const blocked = screen(ali, [el(9, '身份验证 系统正忙，稍后再试', { clickable: false })])
+    const h = harness({ screens: [pw, pw, blocked, blocked], webSuccess: false })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+    expect(r).toMatchObject({ ok: false, reason: 'blocked-by-app' })
+    expect(h.tapPassword).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('runPayApproval — 알리페이 CVV 는 금고 카드 항목에서', () => {
+  it("'CVV를 입력하세요' 제목이어도 알리페이는 결제 비밀번호를 넣는다(카드 CVC 가 아니다)", async () => {
+    const ali = 'com.eg.android.AlipayGphone'
+    const cvv = screen(ali, [
+      el(1, 'CVV를 입력하세요', { clickable: false }),
+      el(2, '주문금액: ¥ 427.00', { clickable: false })
+    ])
+    const h = harness({ screens: [cvv, cvv, cvv], password: 'not-found', webSuccess: false })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+    expect(r).toMatchObject({ ok: false, reason: 'password-failed' })
+    expect(h.tapPassword.mock.calls[0][0].secret).not.toBe('card-cvc')
   })
 })

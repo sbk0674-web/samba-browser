@@ -71,7 +71,7 @@ def _handoff(state: RunState) -> dict[str, object]:
             out.update({f: r.payload.get(f) for f in BUYER_HANDOFF_FIELDS})
         if name == 'payer':
             # 결제가 성공 화면에서 뽑은 소싱 주문번호 — 기록·검증이 이걸 쓴다
-            out.update({f: r.payload.get(f) for f in ('card', 'source_order_no')})
+            out.update({f: r.payload.get(f) for f in ('card', 'source_order_no', 'arrival_memo')})
     return {k: v for k, v in out.items() if v is not None}
 
 

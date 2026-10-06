@@ -32,16 +32,25 @@ const lastActive = new WeakMap<WebContents, number>()
 const lastHumanWindow = new WeakMap<object, number>()
 const automationDepth = new WeakMap<WebContents, number>()
 const automationUntil = new WeakMap<WebContents, number>()
-const automationScope = new AsyncLocalStorage<true>()
+// 'ui' = 앱 안 AI 채팅(사람이 지켜보는 작업), 'background' = 브릿지(하네스) — 보이는 탭을 절대 바꾸지 않는다
+const automationScope = new AsyncLocalStorage<'ui' | 'background'>()
 
 /** 자동화(AI 도구·브릿지 호출) 안에서 fn 을 돌린다 — 그 안의 입력은 '사람이 쓰는 탭' 검사를 받는다 */
-export function runAsAutomation<T>(fn: () => Promise<T>): Promise<T> {
-  return automationScope.run(true, fn)
+export function runAsAutomation<T>(fn: () => Promise<T>, background = false): Promise<T> {
+  return automationScope.run(background ? 'background' : 'ui', fn)
 }
 
 /** 지금 자동화 흐름 안인가(사용자가 누른 자동완성이면 false) */
 export function isAutomation(): boolean {
-  return automationScope.getStore() === true
+  return automationScope.getStore() !== undefined
+}
+
+/**
+ * 뒤에서만 도는 자동화(브릿지·하네스)인가. 사람이 방금 입력했는지와 상관없이 보이는 탭·창 포커스를 가져가지 않는다
+ * (사용자 2026-09-29: 하네스가 돌 때 탭 포커스를 계속 빼앗는다 — 읽기만 하고 있어도 60초 뒤엔 다시 빼앗겼다)
+ */
+export function isBackgroundAutomation(): boolean {
+  return automationScope.getStore() === 'background'
 }
 
 /**

@@ -11,6 +11,8 @@ export class SettingsStore {
   private cache: Settings
   // 동기화 변경 로그 훅. 주입하지 않으면 아무 일도 하지 않는다(동기화를 끈 상태)
   private outbox: OutboxRecorder | null = null
+  // 동기화로 내려받아 실제로 값이 바뀐 키를 듣는 쪽(폰 목록 반영 등)
+  private syncedListeners: Array<(keys: string[]) => void> = []
 
   constructor() {
     this.cache = this.load()
@@ -62,7 +64,26 @@ export class SettingsStore {
    * 받은 값을 곧바로 되돌려 보내는 왕복(에코)이 생기지 않는다
    */
   setFromSync(patch: Partial<Settings>): Settings {
-    return this.apply(patch, false)
+    const before = this.cache
+    const after = this.apply(patch, false)
+    const changed = (Object.keys(patch) as Array<keyof Settings>).filter(
+      (k) => JSON.stringify(before[k]) !== JSON.stringify(after[k])
+    )
+    if (changed.length > 0) {
+      for (const cb of this.syncedListeners) {
+        try {
+          cb(changed)
+        } catch (e) {
+          console.error('동기화 설정 반영 실패', e)
+        }
+      }
+    }
+    return after
+  }
+
+  /** 동기화로 내려받은 설정이 실제로 바뀌었을 때 불린다(바뀐 키 목록) */
+  onSynced(cb: (keys: string[]) => void): void {
+    this.syncedListeners.push(cb)
   }
 
   private apply(patch: Partial<Settings>, record: boolean): Settings {

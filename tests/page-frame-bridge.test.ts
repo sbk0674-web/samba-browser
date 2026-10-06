@@ -317,10 +317,23 @@ describe('pageBridge.typeLogin — 로그인 칸 진짜 키 입력', () => {
     return { tab: { view: { webContents } } as unknown as Tab, mainCalls, inputEvents }
   }
 
+  it('클릭 뒤 그 칸에 포커스가 없으면 키를 하나도 보내지 않는다(다른 칸에 쳐지는 사고 방지)', async () => {
+    // 포커스 확인 3번(처음 + 다시 누르기 2번)과 직접 포커스까지 모두 실패
+    const { tab, inputEvents } = typingTab([{ x: 10, y: 20 }, false, false, false, false, false, 'ok'])
+    await pageBridge.typeLogin(tab, 5, 'a@1')
+    // Tab 으로 칸을 옮겨 보는 것 말고는 글자 키를 보내지 않는다
+    expect(inputEvents.some((e) => e.type === 'char')).toBe(false)
+    expect(inputEvents.filter((e) => e.type === 'keyDown').map((e) => e.keyCode)).toEqual(['Tab'])
+  })
+
   it('요소를 실제 클릭해 포커스한 뒤 전체 선택하고 글자별 char 이벤트로 친다', async () => {
-    const { tab, mainCalls, inputEvents } = typingTab([{ x: 10, y: 20 }, 3])
+    const { tab, mainCalls, inputEvents } = typingTab([{ x: 10, y: 20 }, true, 3])
     expect(await pageBridge.typeLogin(tab, 5, 'a@1')).toBe('ok')
-    expect(mainCalls).toEqual(['__samba.rectOf(5)', '__samba.valueLength(5)'])
+    expect(mainCalls).toEqual([
+      '__samba.rectOf(5)',
+      '__samba.hasFocus(5)',
+      '__samba.valueLength(5)'
+    ])
     // 사람처럼 보이려 넣는 마우스 이동은 순서 검증에서 뺀다
     const types = inputEvents
       .filter((e) => e.type !== 'mouseMove')
@@ -351,8 +364,8 @@ describe('pageBridge.typeLogin — 로그인 칸 진짜 키 입력', () => {
   })
 
   it('친 뒤 글자 수가 다르면(포커스 실패) fillValue 로 돌아간다', async () => {
-    const { tab, mainCalls } = typingTab([{ x: 10, y: 20 }, 0, 'ok'])
+    const { tab, mainCalls } = typingTab([{ x: 10, y: 20 }, true, 0, 'ok'])
     expect(await pageBridge.typeLogin(tab, 5, 'pw')).toBe('ok')
-    expect(mainCalls[2]).toContain('__samba.fillValue(5,')
+    expect(mainCalls[3]).toContain('__samba.fillValue(5,')
   })
 })

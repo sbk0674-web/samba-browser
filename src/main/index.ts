@@ -3,6 +3,7 @@ import { app, BrowserWindow, crashReporter } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { createMainWindow } from './window'
 import { TabManager } from './browser/tab-manager'
+import { loadSavedTabs, savedTabsOf, writeSavedTabs } from './browser/user-tabs-store'
 import { setExtensionTabsProvider } from './extensions/tabs-bridge'
 import { installExtensionPageApi } from './extensions/page-api'
 import { markQuitting } from './browser/popups'
@@ -37,7 +38,12 @@ app.setName('SAMBA Browser')
 
 // 창이 다른 창에 가려지면 Windows 가림 감지가 렌더링을 멈춰 capturePage(키패드 OCR)가
 // "Current display surface not available for capture" 로 실패한다(실기 2026-09-28) — 가림 감지를 끈다
-app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+// WebAuthenticationConditionalUI: 구글 로그인 화면이 열릴 때마다 윈도우 '암호 키 선택' 창이 저절로 뜨는 것을 막는다
+// (크롬은 자동완성 목록으로 띄우지만 Electron 은 윈도우 보안 창을 띄운다 — 실기 2026-10-06). 사람이 누르는 패스키 로그인은 그대로 된다
+app.commandLine.appendSwitch(
+  'disable-features',
+  'CalculateNativeWinOcclusion,WebAuthenticationConditionalUI'
+)
 
 // 모든 사이트에 순수 크롬 UA 를 보낸다 — Electron 기본 UA 의 `SAMBABrowser/1.0.0 … Electron/39` 토큰은
 // reCAPTCHA Enterprise 같은 점수형 봇 판정에서 점수를 깎아 로그인이 조용히 거부된다(GS샵 실기).
@@ -157,8 +163,46 @@ app
       app.quit()
       return
     }
+    // 지난번에 사람이 열어 둔 탭을 되살린다(프로필·순서·보던 탭 그대로). 없으면 기본 탭 하나.
     // url 을 주지 않으면 설정에서 계산된 기본 주소(새 탭 페이지/홈/빈 페이지)로 연다
-    tabs.create()
+    const savedTabsFile = join(app.getPath('userData'), 'user-tabs.json')
+    let restored = 0
+    let activeId: string | null = null
+    for (const t of loadSavedTabs(savedTabsFile)) {
+      try {
+        const info = tabs.create({
+          url: t.url,
+          profile: t.profile,
+          mobile: t.mobile,
+          user: true,
+          background: restored > 0
+        })
+        if (t.active) activeId = info.id
+        restored += 1
+      } catch (e: unknown) {
+        console.warn('탭 되살리기 실패', t.url, e instanceof Error ? e.message : String(e))
+      }
+    }
+    if (restored === 0) tabs.create({ user: true })
+    else if (activeId) tabs.activate(activeId)
+    // 사람 탭이 바뀔 때마다(열기·닫기·이동·자리 바꿈) 잠깐 모았다가 저장한다.
+    // 창을 닫기 시작한 뒤에는 저장하지 않는다 — 종료 중 탭이 하나씩 사라지는 목록을 저장하면 다음에 빈 창이 뜬다
+    let savingStopped = false
+    let saveTimer: NodeJS.Timeout | null = null
+    const stopSaving = (): void => {
+      savingStopped = true
+      if (saveTimer) clearTimeout(saveTimer)
+    }
+    win.on('close', stopSaving)
+    app.on('before-quit', stopSaving)
+    tabs.onChange((list) => {
+      if (savingStopped) return
+      const toSave = savedTabsOf(list, (id) => tabs.isUserTab(id))
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        if (!savingStopped) writeSavedTabs(savedTabsFile, toSave)
+      }, 800)
+    })
     // macOS 의 activate 재생성은 1단계(Windows 전용) 범위 밖이라 배선하지 않는다
   })
   .catch((e: unknown) => {

@@ -17,21 +17,20 @@ import {
 } from '../../shared/sync'
 import { AuthExpiredError, type RemoteKeyedRow, type RemoteRow, type SyncBackend } from './backend'
 import { assertNoPlaintext, PlaintextLeakError } from './guard'
-import { SyncLocal } from './local'
+import { accountNaturalKey, SyncLocal, vaultItemNaturalKey } from './local'
 import {
   accountToRemote,
   bookmarkToRemote,
   chatMessageToRemote,
   chatToRemote,
+  fromIsoOrNull,
   remoteTableOf,
   settingToRemote,
   vaultItemToRemote,
-  type AccountSyncRow,
   type BookmarkSyncRow,
   type ChatMessageSyncRow,
   type ChatSyncRow,
-  type MapCtx,
-  type VaultItemSyncRow
+  type MapCtx
 } from './mappers'
 import { settingUpdatedAtKey, type OutboxRow, type SyncOutbox } from './outbox'
 import { storedWorkspaceRemoteId } from './workspace-id'
@@ -176,9 +175,24 @@ async function pushTable(
   // 로컬 행이 사라졌고 삭제 스냅샷도 없는 건 — 보낼 것이 없으니 로그에서 지운다
   const droppable: number[] = []
 
+  // 최초 업로드할 계정·금고 항목이 있으면 서버의 삭제 표식을 먼저 받아 둔다(작업공간별)
+  let tombstones: TombstoneIndexes
+  try {
+    tombstones = await loadTombstones(deps, local, ctxOf, table, entries)
+  } catch (e: unknown) {
+    if (e instanceof AuthExpiredError) throw e
+    const message = e instanceof Error ? e.message : String(e)
+    deps.outbox.markFailed(
+      entries.map((r) => r.id),
+      message
+    )
+    result.failed += entries.length
+    return
+  }
+
   try {
     for (const entry of entries) {
-      const built = buildRemote(deps, local, ctxOf(entry), table, entry)
+      const built = buildRemote(deps, local, ctxOf(entry), table, entry, tombstones)
       if (built === 'skip') {
         result.skipped += 1
         continue
@@ -235,9 +249,102 @@ async function pushTable(
   result.sent += prepared.length
 }
 
+/** 서버 삭제 표식의 자연 키 → 가장 늦은 삭제. 작업공간 원격 uuid 별로 따로 든다 */
+interface RemoteTombstone {
+  id: string
+  deletedAt: number
+}
+type TombstoneIndex = Map<string, RemoteTombstone>
+type TombstoneIndexes = Map<string, TombstoneIndex>
+
+/**
+ * 이 표의 대기 건 중 최초 업로드(원격 id 없음·살아 있음)가 있으면, 그 작업공간의 서버 삭제 표식을
+ * 자연 키로 모아 둔다. 계정·금고 항목만 본다(삭제가 권위를 가져야 하는 표)
+ */
+async function loadTombstones(
+  deps: PushDeps,
+  local: SyncLocal,
+  ctxOf: CtxOf,
+  table: Exclude<SyncTable, 'settings'>,
+  entries: OutboxRow[]
+): Promise<TombstoneIndexes> {
+  const indexes: TombstoneIndexes = new Map()
+  if (table !== 'accounts' && table !== 'vault_items') return indexes
+  const workspaces = new Set<string>()
+  for (const entry of entries) {
+    if (entry.op !== 'upsert') continue
+    const id = Number(entry.rowId)
+    if (!Number.isInteger(id)) continue
+    const row = table === 'accounts' ? local.accountForSync(id) : local.vaultItemForSync(id)
+    if (row && row.remoteId === null && row.deletedAt === null) {
+      workspaces.add(ctxOf(entry).workspaceRemoteId)
+    }
+  }
+  for (const workspace of workspaces) {
+    const columns =
+      table === 'accounts'
+        ? 'id,host,username,updated_at,deleted_at'
+        : 'id,account_id,type,label,updated_at,deleted_at'
+    const rows = await deps.backend.selectDeleted(remoteTableOf(table), workspace, columns)
+    const index: TombstoneIndex = new Map()
+    for (const r of rows) {
+      const deletedAt = fromIsoOrNull(r.deleted_at)
+      if (deletedAt === null) continue
+      const key =
+        table === 'accounts'
+          ? accountNaturalKey(String(r.host ?? ''), String(r.username ?? ''))
+          : vaultItemNaturalKey(
+              typeof r.account_id === 'string' ? r.account_id : null,
+              String(r.type ?? ''),
+              String(r.label ?? '')
+            )
+      const prev = index.get(key)
+      if (!prev || deletedAt > prev.deletedAt) index.set(key, { id: r.id, deletedAt })
+    }
+    indexes.set(workspace, index)
+  }
+  return indexes
+}
+
+/**
+ * 최초 업로드하려는 행이 서버에서 이미 지워진 같은 자연 키보다 옛것인가(= 되살리면 안 되는가).
+ * 행의 **원래** 수정 시각과 비교한다 — 삭제 뒤에 고친 행이면 사용자가 다시 만든 것이라 올린다
+ */
+function deletedOnServer(
+  indexes: TombstoneIndexes,
+  ctx: MapCtx,
+  key: string,
+  updatedAt: number
+): RemoteTombstone | null {
+  const hit = indexes.get(ctx.workspaceRemoteId)?.get(key)
+  return hit && hit.deletedAt >= updatedAt ? hit : null
+}
+
+/**
+ * 지운 계정·항목의 삭제 표식 행. 로컬 행이 삭제 표식으로 남아 있으면(soft delete) 그 행을 쓰고
+ * localId 를 돌려준다 — 원격 id 가 없던 행도 전송 뒤 새 원격 id 를 로컬에 적을 수 있다.
+ * 행이 없으면(옛 하드 삭제·되돌리기의 옛 원격 id) 변경 로그의 스냅샷으로 만든다
+ */
+function deletedRowOf<
+  T extends { remoteId: string | null; updatedAt: number; deletedAt: number | null }
+>(entry: OutboxRow, read: (id: number) => T | null): { row: T; localId: number | null } | null {
+  const id = Number(entry.rowId)
+  if (Number.isInteger(id)) {
+    const current = read(id)
+    if (current && current.deletedAt !== null) {
+      return {
+        row: { ...current, updatedAt: Math.max(current.updatedAt, current.deletedAt) },
+        localId: id
+      }
+    }
+  }
+  const snap = tombstone<T>(entry)
+  return snap ? { row: snap, localId: null } : null
+}
+
 /**
  * 변경 로그 한 줄을 원격 행으로 바꾼다.
- * - 'skip': 지금은 보낼 수 없다(금고 잠김) — outbox 에 남긴다
+ * - 'skip': 지금은 보낼 수 없다(금고 잠김·계정 먼저) — outbox 에 남긴다
  * - null: 보낼 것이 없다 — outbox 에서 지운다
  */
 function buildRemote(
@@ -245,26 +352,39 @@ function buildRemote(
   local: SyncLocal,
   ctx: MapCtx,
   table: Exclude<SyncTable, 'settings'>,
-  entry: OutboxRow
+  entry: OutboxRow,
+  tombstones: TombstoneIndexes
 ): Prepared | 'skip' | null {
   const rowId = Number(entry.rowId)
   if (table === 'accounts') {
-    const row =
-      entry.op === 'delete' ? tombstone<AccountSyncRow>(entry) : local.accountForSync(rowId)
-    if (!row) return null
-    const bumpedAt = bumpForFirstUpload(row, entry)
-    return {
-      entry,
-      row: accountToRemote(row, ctx),
-      localId: entry.op === 'delete' ? null : rowId,
-      bumpedAt
+    if (entry.op === 'delete') {
+      const del = deletedRowOf(entry, (id) => local.accountForSync(id))
+      if (!del) return null
+      return { entry, row: accountToRemote(del.row, ctx), localId: del.localId, bumpedAt: null }
     }
+    const row = local.accountForSync(rowId)
+    if (!row) return null
+    // 서버에 없던 행을 지운 것이면 올릴 것이 없다(삭제 표식은 delete 줄이 올린다)
+    if (row.remoteId === null && row.deletedAt !== null) return null
+    if (row.remoteId === null) {
+      // 최초 업로드 — 서버에서 이미 지운 같은 계정이면 올리지 않고 로컬도 지운다(되살아남 방지)
+      const key = accountNaturalKey(row.host, row.username)
+      const hit = deletedOnServer(tombstones, ctx, key, row.updatedAt)
+      if (hit) {
+        for (const itemId of local.markAccountDeleted(rowId, hit.deletedAt)) {
+          deps.outbox.record('vault_items', String(itemId), 'delete', undefined, entry.workspaceId)
+        }
+        return null
+      }
+    }
+    const bumpedAt = bumpForFirstUpload(row, entry, table)
+    return { entry, row: accountToRemote(row, ctx), localId: rowId, bumpedAt }
   }
   if (table === 'bookmarks') {
     const row =
       entry.op === 'delete' ? tombstone<BookmarkSyncRow>(entry) : local.bookmarkForSync(rowId)
     if (!row) return null
-    const bumpedAt = bumpForFirstUpload(row, entry)
+    const bumpedAt = bumpForFirstUpload(row, entry, table)
     return {
       entry,
       row: bookmarkToRemote(row, ctx),
@@ -275,7 +395,7 @@ function buildRemote(
   if (table === 'chats') {
     const row = entry.op === 'delete' ? tombstone<ChatSyncRow>(entry) : local.chatForSync(rowId)
     if (!row) return null
-    const bumpedAt = bumpForFirstUpload(row, entry)
+    const bumpedAt = bumpForFirstUpload(row, entry, table)
     return {
       entry,
       row: chatToRemote(row, ctx),
@@ -294,7 +414,7 @@ function buildRemote(
       row.chatRemoteId = chatRemoteId
       deps.outbox.record('chats', String(row.chatId), 'upsert', undefined, entry.workspaceId)
     }
-    const bumpedAt = bumpForFirstUpload(row, entry)
+    const bumpedAt = bumpForFirstUpload(row, entry, table)
     return {
       entry,
       row: chatMessageToRemote(row, ctx),
@@ -303,23 +423,51 @@ function buildRemote(
     }
   }
 
-  const item =
-    entry.op === 'delete' ? tombstone<VaultItemSyncRow>(entry) : local.vaultItemForSync(rowId)
+  if (entry.op === 'delete') {
+    const del = deletedRowOf(entry, (id) => local.vaultItemForSync(id))
+    if (!del) return null
+    const deleted = del.row
+    const row = deps.vault.useMasterKey((key) => vaultItemToRemote(deleted, { ...ctx, key }))
+    if (row === null) return 'skip'
+    return { entry, row, localId: del.localId, bumpedAt: null }
+  }
+  const item = local.vaultItemForSync(rowId)
   if (!item) return null
-  // 계정에 딸린 항목인데 그 계정이 한 번도 올라간 적이 없다면(동기화를 켜기 전에 만든 계정),
-  // 원격 id 만 먼저 붙이고 계정 자체도 다음 주기에 올라가도록 변경 로그에 넣는다
-  if (item.accountId !== null && item.accountRemoteId === null) {
-    const accountRemoteId = ensureAccountRemoteId(local, item.accountId)
-    if (accountRemoteId !== null) {
-      item.accountRemoteId = accountRemoteId
-      // 계정도 같은 작업공간으로 올라가야 한다 — 변경 로그 행의 작업공간을 그대로 물려준다
-      deps.outbox.record('accounts', String(item.accountId), 'upsert', undefined, entry.workspaceId)
+  if (item.remoteId === null && item.deletedAt !== null) return null
+  if (item.remoteId === null) {
+    // 최초 업로드 — 딸린 계정이 지워졌으면 항목도 지운다(지운 계정의 항목이 새로 올라가 되살아나지 않게)
+    const accountDeletedAt = item.accountId === null ? null : local.accountDeletedAt(item.accountId)
+    if (accountDeletedAt !== null) {
+      local.markVaultItemDeleted(rowId, accountDeletedAt)
+      return null
+    }
+    // 서버에서 이미 지운 같은 항목(계정·종류·라벨)이면 올리지 않고 로컬도 지운다
+    if (item.accountId === null || item.accountRemoteId !== null) {
+      const key = vaultItemNaturalKey(item.accountRemoteId, item.type, item.label)
+      const hit = deletedOnServer(tombstones, ctx, key, item.updatedAt)
+      if (hit) {
+        local.markVaultItemDeleted(rowId, hit.deletedAt)
+        return null
+      }
     }
   }
-  const bumpedAt = bumpForFirstUpload(item, entry)
+  // 계정에 딸린 항목인데 그 계정이 아직 서버에 없다면 이번에는 보류하고 계정부터 올린다.
+  // 계정은 다음 주기의 계정 단계에서 "서버에서 지운 같은 계정인가" 검사를 거친 뒤 원격 id 를 받는다 —
+  // 여기서 원격 id 를 먼저 붙이면 그 검사를 건너뛰어 지운 계정이 되살아났다
+  if (
+    item.accountId !== null &&
+    item.accountRemoteId === null &&
+    local.accountForSync(item.accountId) !== null &&
+    local.accountDeletedAt(item.accountId) === null
+  ) {
+    // 계정도 같은 작업공간으로 올라가야 한다 — 변경 로그 행의 작업공간을 그대로 물려준다
+    deps.outbox.record('accounts', String(item.accountId), 'upsert', undefined, entry.workspaceId)
+    return 'skip'
+  }
+  const bumpedAt = bumpForFirstUpload(item, entry, table)
   const row = deps.vault.useMasterKey((key) => vaultItemToRemote(item, { ...ctx, key }))
   if (row === null) return 'skip'
-  return { entry, row, localId: entry.op === 'delete' ? null : rowId, bumpedAt }
+  return { entry, row, localId: rowId, bumpedAt }
 }
 
 /**
@@ -328,12 +476,17 @@ function buildRemote(
  * 로그인 전에 쌓인 행은 옛 updated_at 을 그대로 달고 있어, 커서가 이미 그보다 앞으로 가 있던
  * 다른 PC 의 풀(updated_at > cursor)에 영영 걸리지 않는다(2PC 실검수에서 발견).
  * 서버에 없던 행이라 시각을 올려도 LWW 로 남의 최신 값을 덮지 않는다.
- * 삭제 표식은 tombstone() 이 이미 삭제 시각으로 올려 둔다
+ * 삭제 표식은 tombstone() 이 이미 삭제 시각으로 올려 둔다.
+ *
+ * **계정·금고 항목은 올리지 않는다(원래 수정 시각 유지).** 옛 사본의 계정이 "지금" 시각을 달고
+ * 올라가면 다른 기기의 삭제보다 늦은 것으로 보여 삭제를 이기고 되살아났다(9/30 계정 약 550개)
  */
 function bumpForFirstUpload<T extends { remoteId: string | null; updatedAt: number }>(
   row: T,
-  entry: OutboxRow
+  entry: OutboxRow,
+  table: Exclude<SyncTable, 'settings'>
 ): number | null {
+  if (table === 'accounts' || table === 'vault_items') return null
   if (entry.op === 'delete' || row.remoteId !== null) return null
   const next = Math.max(row.updatedAt, Date.now())
   row.updatedAt = next

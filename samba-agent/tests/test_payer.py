@@ -86,6 +86,8 @@ TOSS_POPUP_URL = 'https://pay.toss.im/checkout'
 @respx.mock
 def test_dry_run_이면_결제하지_않는다(reg):
     respx.post(f'{URL}/tool/run_script').mock(return_value=page(ENTER_OK))
+    # 토스 알림 단계가 같은 사이트의 계정 라벨을 읽는다
+    respx.post(f'{URL}/tool/list_accounts').mock(return_value=page('[]'))
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
     pay = respx.post(f'{URL}/tool/phone_approve_payment')
@@ -434,7 +436,7 @@ def _args(route) -> dict:
     return json.loads(route.calls.last.request.content.decode('utf-8'))['args']
 
 
-def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL):
+def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL, toss_front: bool = False):
     respx.post(f'{URL}/tool/run_script').mock(return_value=page(ENTER_OK))
     respx.post(f'{URL}/tool/list_tabs').mock(return_value=list_tabs_page(popup_url))
     # 팝업이 0개일 때만 실제로 불린다(리뷰 지적 — Minor 4) — 다른 시나리오에서는 그냥 등록만 해 둔다
@@ -442,12 +444,15 @@ def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL):
     respx.post(f'{URL}/tool/find_elements').mock(
         return_value=page('INTERACTIVE ELEMENTS:\n[12] textbox "주문자 이름"')
     )
+    # 토스페이면 폰 승인 직전에 PC 결제창을 한 번 더 읽는다(알림 전송 단계) — 로그인 화면이 아니면 아무것도 안 한다
+    first = [page('URL: https://pay.toss.im/payfront/web/app-payment/push')] if toss_front else []
     respx.post(f'{URL}/tool/get_page').mock(
-        side_effect=[page('결제 진행 중'), page('결제 완료 주문번호 M-1')]
+        side_effect=[*first, page('결제 진행 중'), page('결제 완료 주문번호 M-1')]
     )
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/find_elements').mock(return_value=page('[12] textbox "주문자 이름"'))
+    respx.post(f'{URL}/tool/list_accounts').mock(return_value=page('[]'))
     fill = respx.post(f'{URL}/tool/fill_secret').mock(return_value=page('filled'))
     pay = respx.post(f'{URL}/tool/phone_approve_payment').mock(return_value=page('ok'))
     return fill, pay
@@ -471,7 +476,7 @@ def test_fill_secret_인자가_앱_스키마와_맞는다(reg):
 def test_phone_approve_payment_인자가_앱_스키마와_맞는다(reg):
     # 리뷰 지적 — I7: provider enum · 양의 정수 amountKrw · merchant · methodLabel 이 필수다.
     # 카드 이름 자체가 결제 앱을 가리키면(토스페이) 결제창을 보지 않고 바로 정한다
-    _fill, pay = _full_pay_mocks(popup_url=None)
+    _fill, pay = _full_pay_mocks(popup_url=None, toss_front=True)
     out = agent(reg)(assignment(reg, dry_run=False, card='토스페이', handoff={'cost': 89000}))
     assert out.status == 'ok'
     args = _args(pay)
@@ -513,7 +518,7 @@ def test_카드_이름이_네이버페이면_폰_승인이_아니라_PC_결제�
 def test_토스여도_handoff에_pay_account가_있어도_넘기지_않는다(reg):
     # payAccount 는 앱 스키마상 네이버페이 전용이지만, 어떤 provider 에도 넘기지 않는 게
     # 사용자 결정이다(리뷰 지적 — Critical 1) — 토스에서도 죽은 값이 새 나가지 않는지 본다
-    _fill, pay = _full_pay_mocks(popup_url=None)
+    _fill, pay = _full_pay_mocks(popup_url=None, toss_front=True)
     out = agent(reg)(
         assignment(
             reg, dry_run=False, card='토스페이', handoff={'cost': 89000, 'pay_account': 'acc-b'}
@@ -1516,3 +1521,176 @@ def test_완료_문구만_있고_주문내역도_오래된_주문이면_번호_�
     out = agent(reg)._confirm_paid(a, '네이버페이')
     assert out.status == 'ok'
     assert 'source_order_no' not in out.payload
+
+
+def test_order_form_mismatch_띄어쓰기만_다른_고유_단어는_같은_상품():
+    from samba_agent.agents.payer import order_form_mismatch
+
+    # 실기 2026-09-30 롯데온 포이즌: 주문 '트래퍼햇' ↔ 주문서 '트래퍼 햇'
+    page = '주문상품 노스페이스키즈 NE3CR52T 키즈 트래퍼 햇 BRW M 1개'
+    assert order_form_mismatch(page, '노스페이스 폴리에스터 섬유 트래퍼햇 남녀공용', '브라운 M') is None
+    # 다른 상품은 여전히 막는다
+    assert order_form_mismatch('주문상품 아디다스 아디스타 1개', '나이키 코르테즈 운동화', None) is not None
+
+
+def test_도착예정일이_3일을_넘으면_메모_한_줄():
+    from datetime import date
+
+    from samba_agent.agents.payer import arrival_eta, arrival_memo
+
+    today = date(2026, 9, 30)
+    assert arrival_eta('배송 10/03(토) 도착 예정', today) == (date(2026, 10, 3), 3)
+    assert arrival_memo('배송 10/03(토) 도착 예정', today) is None
+    assert arrival_memo('10월 6일(화) 도착 확률 83%', today) == '[도착예정] 10/06(화) — 결제일 기준 6일'
+    assert arrival_memo('도착 정보 없음 1,000원', today) is None
+    # 롯데온 표기 '10/6(화) 이내 도착확률 80%'
+    assert arrival_memo('M 옵션변경 10/6(화) 이내 도착확률 80%', today) == '[도착예정] 10/06(화) — 결제일 기준 6일'
+    # 연말에 본 1월 날짜는 다음 해다
+    assert arrival_eta('01.04(월) 도착', date(2026, 12, 30)) == (date(2027, 1, 4), 5)
+
+
+def test_같은_탭_로그인_화면도_결제창_로그인으로_본다():
+    import json as _json
+
+    from samba_agent.agents.base import AgentFailure as _AF
+    from samba_agent.agents.payer import PayerAgent
+
+    agent = PayerAgent.__new__(PayerAgent)
+    agent._popup_login_tried = True  # 로그인 시도는 이미 했다 — 바로 멈춰야 한다
+    agent._last_listed = _json.dumps([
+        {'id': 't1', 'kind': 'tab', 'active': True, 'url': 'https://nid.naver.com/nidlogin.login?url=x'}
+    ])
+    agent.notes = []
+    agent.note = lambda *a, **k: None
+
+    class _A:
+        handoff = {'account': 'acc'}
+
+        class order:
+            account = 'acc'
+
+    try:
+        agent._stop_if_login_popup([], _A())
+    except _AF as e:
+        assert '로그인 화면' in e.reason
+    else:
+        raise AssertionError('같은 탭 로그인 화면을 못 봤다')
+
+
+def test_element_id_of_finds_kakao_fields():
+    from samba_agent.agents.payer import _element_id_of
+
+    page = (
+        'URL: https://online-payment.kakaopay.com/bridge/pc/pg/one-time/payment/x\n'
+        '[3] tab "카톡결제"\n'
+        '[6] textbox "휴대폰번호" name=phoneNumber value=""\n'
+        '[8] textbox "생년월일 (6자리)" name=dateOfBirth value=""\n'
+        '[9] button "결제요청"\n'
+    )
+    assert _element_id_of(page, r'tab "카톡결제"') == 3
+    assert _element_id_of(page, r'textbox "휴대폰번호"') == 6
+    assert _element_id_of(page, r'textbox "생년월일') == 8
+    assert _element_id_of(page, r'button "결제요청"') == 9
+    assert _element_id_of(page, r'button "없음"') is None
+
+
+def test_order_done_url_detects_completed_order_pages():
+    from samba_agent.agents.payer import ORDER_DONE_URL_RE
+
+    assert ORDER_DONE_URL_RE.search('https://www.musinsa.com/order/result/202609302054580001')
+    assert ORDER_DONE_URL_RE.search('https://www.lotteon.com/p/order/complete/2026093016657652')
+    assert not ORDER_DONE_URL_RE.search('https://www.musinsa.com/order/order-form')
+    assert not ORDER_DONE_URL_RE.search('https://money.musinsapayments.com/pay')
+
+
+# ---- 토스페이 PC 결제창: 휴대폰·생년월일을 채워 폰으로 알림을 보낸다(실기 2026-10-06) ----
+TOSS_LOGIN = (
+    'URL: https://pay.toss.im/payfront/web/login\n'
+    'TITLE: 토스페이\n\nINTERACTIVE ELEMENTS:\n'
+    '[4] clickable "휴대폰번호"\n[6] clickable "QR코드"\n'
+    '[8] textbox "휴대폰번호" value=""\n[9] textbox "생년월일 6자리" value=""\n'
+)
+TOSS_PUSH = 'URL: https://pay.toss.im/payfront/web/app-payment/push\nTITLE: 토스페이\n'
+
+
+# 주문서 탭(앞)과 토스 결제 팝업(별개 탭) — 하네스에서는 이렇게 뜬다
+TOSS_TABS = json.dumps(
+    [
+        {'id': 'order-tab', 'kind': 'tab', 'url': 'https://www.musinsa.com/order', 'active': True},
+        {
+            'id': 'toss-pop',
+            'kind': 'popup',
+            'url': 'https://pay.toss.im/payfront/web/login',
+            'openerId': 'order-tab',
+        },
+    ]
+)
+
+
+def _toss_tools(agent_, pages, fill_results):
+    calls: list[tuple[str, dict]] = []
+    queue = list(pages)
+
+    def tool(name, **kwargs):
+        calls.append((name, kwargs))
+        if name == 'list_tabs':
+            return TOSS_TABS
+        if name == 'list_accounts':
+            return '[{"label":"hwangnol06"},{"label":"edelvise06"}]'
+        if name == 'get_page':
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+        if name == 'fill_secret':
+            return fill_results(kwargs)
+        return 'ok'
+
+    agent_.tool = tool  # type: ignore[method-assign]
+    agent_.step = lambda *_a, **_k: None  # type: ignore[method-assign]
+    return calls
+
+
+def test_토스_결제창이면_휴대폰과_생년월일을_채워_알림을_보낸다(reg):
+    a = agent(reg)
+    calls = _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_PUSH], lambda kw: 'ok')
+    assert a._toss_phone_request(assignment(reg, dry_run=False)) is True
+    fills = [kw for n, kw in calls if n == 'fill_secret']
+    assert [(f['elementId'], f['field'], f['provider']) for f in fills] == [
+        (8, 'payment.phone', 'toss'),
+        (9, 'payment.birth', 'toss'),
+    ]
+    assert [f['format'] for f in fills] == ['digits', 'yymmdd']
+    switches = [kw['id'] for n, kw in calls if n == 'switch_tab']
+    assert switches == ['toss-pop', 'order-tab']  # 토스 팝업으로 가서 알림을 보내고 주문서 탭으로 돌아온다
+
+
+def test_토스_항목에_값이_없으면_같은_사람의_카카오페이_항목_값을_쓴다(reg):
+    a = agent(reg)
+
+    def fill(kw):
+        return 'ok' if kw['provider'] == 'kakao' else 'not found: no payment.phone saved in the toss payment item'
+
+    calls = _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_PUSH], fill)
+    assert a._toss_phone_request(assignment(reg, dry_run=False)) is True
+    providers = [kw['provider'] for n, kw in calls if n == 'fill_secret']
+    # 이 계정 토스 → 같은 사이트의 다른 계정 토스 → 카카오페이 항목 순서로 찾는다(휴대폰·생년월일은 같은 사람)
+    assert providers == ['toss', 'toss', 'toss', 'kakao', 'toss', 'toss', 'toss', 'kakao']
+
+
+def test_토스_로그인_화면이_아니면_아무것도_하지_않는다(reg):
+    a = agent(reg)
+    calls = _toss_tools(a, [TOSS_PUSH], lambda kw: 'ok')
+    assert a._toss_phone_request(assignment(reg, dry_run=False)) is False
+    assert not any(n == 'fill_secret' for n, _ in calls)
+
+
+def test_토스_번호가_어느_항목에도_없으면_사람에게_넘긴다(reg):
+    a = agent(reg)
+    _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN], lambda kw: 'not found: no payment.phone saved')
+    with pytest.raises(AgentFailure, match='입력 실패'):
+        a._toss_phone_request(assignment(reg, dry_run=False))
+
+
+def test_알림_대기_화면으로_안_넘어가면_사람에게_넘긴다(reg):
+    a = agent(reg)
+    _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_LOGIN], lambda kw: 'ok')
+    with pytest.raises(AgentFailure, match='알림 대기 화면'):
+        a._toss_phone_request(assignment(reg, dry_run=False))

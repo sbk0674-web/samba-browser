@@ -275,7 +275,13 @@
     "empty": "No open tabs",
     "untitled": "Untitled",
     "popup": "Popup",
-    "profileOf": "Account profile: {{profile}} (this tab has its own login session)"
+    "profileOf": "Account profile: {{profile}} (this tab has its own login session)",
+    "profiles": "Open a tab in a profile",
+    "profileHint": "Each profile keeps its own logins and cookies",
+    "profileDefault": "Default profile",
+    "profileNamePlaceholder": "New profile name",
+    "profileCreate": "Open in new profile",
+    "profileInvalid": "Use letters, digits, Korean and . _ @ - only, up to {{max}} characters"
   },
   "newtab": {
     "title": "New Tab",
@@ -452,7 +458,18 @@
     "delete": "Delete",
     "deleteFolder": "Delete folder",
     "emptyAll": "No bookmarks saved yet",
-    "manage": "Manage"
+    "manage": "Manage",
+    "dropInto": "Move into {{name}}",
+    "popover": {
+      "addedTitle": "Bookmark added",
+      "editTitle": "Edit bookmark",
+      "name": "Name",
+      "folder": "Folder",
+      "otherFolder": "Other bookmarks",
+      "more": "More",
+      "done": "Done",
+      "delete": "Remove"
+    }
   },
   "bookmarksPage": {
     "title": "Bookmarks",
@@ -794,6 +811,8 @@
       "phone": "Phone",
       "passport": "Passport number",
       "idCard": "ID card number",
+      "bizName": "Business name",
+      "bizNo": "Business registration number",
       "note": "Note",
       "paymentProvider": "Payment method",
       "paymentAccount": "Pay-app account"
@@ -805,6 +824,8 @@
       "kakao": "KakaoPay",
       "naver": "Naver Pay",
       "payco": "PAYCO",
+      "alipay": "Alipay",
+      "lottecard": "Lotte Card app card (LOCA Pay)",
       "samsung": "Samsung Pay",
       "apple": "Apple Pay",
       "other": "Other"
@@ -1176,6 +1197,7 @@
     },
     "transport": {
       "usb": "USB",
+      "relay": "Relayed (other PC)",
       "wifi": "Wi-Fi"
     },
     "badge": {
@@ -1233,6 +1255,10 @@
       "fps": "Frames per second",
       "autoReconnect": "Auto reconnect",
       "autoReconnectDesc": "Try to reattach once when the connection drops.",
+      "relay": "Relay this PC's phones to other PCs",
+      "relayDesc": "Lets other PCs on this account use phones plugged into this PC. With a broker URL below it works over the internet; without one, same network only (adb 5037)",
+      "relayBroker": "Relay broker URL",
+      "relayBrokerDesc": "Phone-relay WebSocket of the samba-wave API. Shared with every PC on the account",
       "settingsOpen": "Phone settings",
       "settingsClose": "Close phone settings"
     },
@@ -1299,6 +1325,13 @@
     "limitNoAutoUpdate": "Extensions are never auto-updated. Install again or reload the folder to pick up a new version",
     "limitMv2": "Manifest V2 extensions cannot be installed from the Web Store",
     "limitPartition": "Per-profile separation happens only per workspace (session partition)",
+    "scopeTitle": "Use per profile",
+    "scopeDesc": "Choose which profile tabs use each extension. Restart the app to apply changes",
+    "scopeAll": "All profiles",
+    "scopeDefault": "Regular tabs only",
+    "scopeList": "Regular tabs + chosen profiles",
+    "scopePlaceholder": "Profile names (comma separated)",
+    "scopeSaved": "Saved. Restart the app to apply",
     "pageTitle": "Extensions",
     "searchPlaceholder": "Search extensions",
     "devMode": "Developer mode",

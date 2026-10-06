@@ -19,8 +19,10 @@ from samba_agent.agents.source_detail import (
     detail_goal,
     detail_script,
     site_of,
+    with_pay_card,
 )
 from samba_agent.failures import FailReason
+from samba_agent.ops.crosscheck import note_recorded
 from samba_agent.ops.masking import mask_text
 from samba_agent.wave.client import WaveClient, WaveError, wave_fields
 
@@ -73,6 +75,15 @@ def wave_notes(a: Assignment, values: dict[str, object]) -> str:
     )
 
 
+def _arrival_memo(a: Assignment, values: dict[str, object]) -> str | None:
+    """결제 단계가 읽은 도착예정 메모(3일 초과만). 외부 기입(샵마인 추가메모)도 values 에서 읽는다."""
+    memo = str(a.handoff.get('arrival_memo') or '').strip()
+    if not memo:
+        return None
+    values['arrival_memo'] = memo
+    return memo
+
+
 def _normalize(field: str, value: object) -> object:
     """되읽기 비교용 타입 정규화 — 숫자 필드는 숫자로, 문자열은 strip 해서 비교한다."""
     if value is None:
@@ -118,10 +129,17 @@ class RecorderAgent(AgentBase):
             # 산 주문이 주문접수로 남아 재주문된다(실기 2026-09-25: 포이즌 −0.7% 건을 기록하지 않았다). 근거만 남긴다
             self.note('마진', f'{margin}% — 결제된 주문이라 기록한다')
         self.step('recorder: 저장할 값 정리')
-        memo = self.decide_once(
-            f'{a.rules}\n\n주문 {a.order.order_no}({a.order.source})의 메모 한 문장을 쓰라.',
-            Decision,
-        )
+        try:
+            memo_text = self.decide_once(
+                f'{a.rules}\n\n주문 {a.order.order_no}({a.order.source})의 메모 한 문장을 쓰라.',
+                Decision,
+            ).choice
+        except AgentFailure as e:
+            # 메모 한 문장 때문에 결제된 주문의 기록이 멈추면 안 된다(실기 2026-09-30: AI 접근이 막혀 결제 2건이
+            # 주문접수로 남았다 — 재주문 위험). AI 가 안 되면 정해진 문장으로 기록한다
+            self.note('메모', mask_text(f'AI 메모 실패 — 기본 문장 사용({e.reason[:60]})'))
+            memo_text = f'{a.order.source} 자동 이행'
+        memo = Decision(choice=memo_text, reason='기록 메모')
         # account 는 내부 판매 계정 식별자다. 요청자가 지정했으면 그 값을, 아니면 구매
         # 에이전트가 고른 계정을 인계값에서 받는다 — 둘 다 없으면 빈 계정으로 저장된다
         # (리뷰 지적 — I1)
@@ -246,7 +264,7 @@ class RecorderAgent(AgentBase):
             try:
                 status = str(
                     self._wave.get_order(
-                        a.order.order_no, sourcing_order_number=sourcing_no
+                        a.order.wave_key, sourcing_order_number=sourcing_no
                     ).status
                     or ''
                 )
@@ -306,6 +324,7 @@ class RecorderAgent(AgentBase):
             # (실기 2026-09-25 HQ2414: 적립 1,640원이 빠져 원가 59,200 기록, 맞는 값 57,560)
             detail = {**detail, 'reward': float(quoted_reward)}
         # 애드픽·샵백 적립은 원가에 넣지 않는다(사용자 2026-09-27) — 주문 상세·견적의 사이트 적립만 쓴다
+        detail = with_pay_card(detail, a.handoff)
         cost = actual_cost(detail)
         if cost is None:
             self.note('실제 원가', '결제액을 못 읽어 견적 원가로 기록')
@@ -376,23 +395,25 @@ class RecorderAgent(AgentBase):
         self.step('recorder: 삼바웨이브 기입')
         try:
             self._wave.record_sourcing(  # type: ignore[union-attr]
-                a.order.order_no,
+                # 행 id 로 기입한다 — 같은 상품주문번호의 다른 행(다른 사이즈)에 적히지 않게
+                a.order.wave_key,
                 sourcing_order_number=sourcing_no,
                 cost=float(values.get('real_price') or 0),
                 shipping_fee=float(values.get('shipping_fee') or 0),
                 # 주문계정은 실제로 산 계정이다 — 주문에 미리 잡힌 계정과 다를 수 있다(실기: buyer05 주문을
                 # 플레이북대로 buyer01 으로 삼). 못 찾으면 주문이 들고 온 값
                 sourcing_account_id=self._bought_account_id(a),
-                # 간단메모는 정해진 한 줄(계정·수단·실결제·원가) — LLM 문장을 싣지 않는다
-                notes=wave_notes(a, values),
+                # 간단메모는 정해진 한 줄(계정·수단·실결제·원가) — LLM 문장을 싣지 않는다.
+                # 도착예정일이 3일을 넘으면 그 줄을 하나 더 붙인다(사용자 2026-09-30)
+                notes=wave_notes(a, values) + (f'\n{memo}' if (memo := _arrival_memo(a, values)) else ''),
                 order_type=_order_type_value(a.expected.get('order_type')),
                 # 재구매(작업 옵션 rebuy_of) — 취소한 소싱주문번호를 새 번호로 덮어쓴다
                 replace=bool(str(a.options.get('rebuy_of') or '').strip()),
             )
             self.step('recorder: 기입 확인')
-            # 행이 여럿인 주문은 방금 적은 행을 되읽는다(삼바웨이브 기본은 아직 안 산 행)
+            # 되읽기도 행 id 로 — 행 id 가 없는 옛 접수는 소싱주문번호로 방금 적은 행을 고른다
             saved = self._wave.get_order(  # type: ignore[union-attr]
-                a.order.order_no, sourcing_order_number=sourcing_no
+                a.order.wave_key, sourcing_order_number=sourcing_no
             )
         except WaveError as e:
             status = 'needs_human' if e.reason is FailReason.DUPLICATE else 'fail'
@@ -417,6 +438,16 @@ class RecorderAgent(AgentBase):
             json.dumps(checked, ensure_ascii=False)
             if checked
             else '삼바웨이브 응답에 대조할 필드가 없다 — 기입 자체는 200 으로 확인',
+        )
+        # 교차 검증 장부 — 이 뒤로 삼바웨이브 값이 바뀌면(외부 덮어쓰기) 주기 점검이 잡는다
+        note_recorded(
+            a.order.order_no,
+            sourcing_no,
+            float(values.get('real_price') or 0),
+            float(values.get('shipping_fee') or 0),
+            str(a.handoff.get('account') or a.order.account or ''),
+            _source_site(str(a.handoff.get('buy_source') or a.order.source)),
+            wave_id=a.order.wave_id or '',
         )
         if self.mark_status:
             self._mark_waiting_ship(a, sourcing_no)

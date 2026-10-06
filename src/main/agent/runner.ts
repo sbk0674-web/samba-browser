@@ -29,6 +29,8 @@ import {
   agentBackend,
   classifyAuthError,
   isFatalApiError,
+  advanceSubscriptionFallback,
+  subscriptionFallbackIndex,
   NOT_CONNECTED_ERROR
 } from './provider'
 import { resolveModel } from '../ai/models'
@@ -126,6 +128,9 @@ interface PendingConfirm {
 // 작업 1건 실행: SDK 스트림을 읽어 UI 이벤트로 변환
 // 실행·세션 종료 뒤 페이지 대화상자를 계속 자동 처리하는 유예 시간
 export const AUTOMATION_GRACE_MS = 5_000
+
+/** 바깥 자동화(주문 하네스)가 브릿지로 브라우저를 쓰는 중이라 채팅 지시를 받을 수 없을 때의 오류 글 */
+export const BRIDGE_BUSY_ERROR = '브릿지 세션 사용 중'
 
 export class AgentRunner {
   private abort: AbortController | null = null
@@ -422,8 +427,12 @@ export class AgentRunner {
   }
 
   stop(): void {
-    // 실행 중이 아니면 아무것도 하지 않는다(중복 stopped 방지)
-    if (!this.abort) return
+    // 실행 중이 아니어도 화면에는 '멈춤'을 알린다 — 시작도 못 한 지시(자동 작업이 브라우저를 쓰는 중 등) 때문에
+    // 화면만 '생각 중'으로 남으면 중단 버튼이 아무 반응도 없었다(실기 2026-10-02)
+    if (!this.abort) {
+      this.emit({ type: 'status', state: 'stopped' })
+      return
+    }
     const abort = this.abort
     // 곧바로 새 작업을 받을 수 있도록 abort 를 동기적으로 비운다.
     // (SDK 스트림은 재시도 백오프 중이면 수십 초 뒤에야 끝나므로 finally 를 기다릴 수 없다)
@@ -439,6 +448,15 @@ export class AgentRunner {
   }
 
   /**
+   * 지시가 시작도 못 하고 거절됐음을 화면에 알린다(run 이 시작 전에 던졌을 때 핸들러가 부른다).
+   * 이미 다른 실행이 돌고 있으면 그 실행의 화면 상태를 덮지 않도록 아무것도 보내지 않는다
+   */
+  notifyNotStarted(message: string): void {
+    if (this.abort) return
+    this.emit({ type: 'status', state: 'failed', message, toolCalls: 0 })
+  }
+
+  /**
    * chatId 를 주면 이 실행의 대화 기록을 그 대화에 저장한다(완료·실패·중단 모두).
    * overrides 는 예약 실행이 넘기는 이번 실행만의 모델·권한 모드다 —
    * 주지 않으면(사용자가 직접 친 문장) 전역 설정을 그대로 쓴다
@@ -450,7 +468,7 @@ export class AgentRunner {
     // AI 창에 붙여 넣은 이미지. 모델에만 실어 주고 대화 기록에는 남기지 않는다
     images?: AgentImage[]
   ): Promise<void> {
-    if (this.session || this.laneSessions > 0) throw new Error('브릿지 세션 사용 중')
+    if (this.session || this.laneSessions > 0) throw new Error(BRIDGE_BUSY_ERROR)
     // 이미 실행 중이면 세대 가드 없이 status 를 emit 하면 진행 중인 실행의 UI 를 덮어쓸 수 있다.
     // 핸들러가 throw 를 { ok: false, error } 로 ack 하므로 에러만 던진다.
     if (this.abort) {
@@ -494,6 +512,18 @@ export class AgentRunner {
     const runJsLog: LearnedRunJs[] = []
     // 이 실행이 끝난 뒤 이어서 돌릴 지시문(자동 이어가기·자동 학습). finally 에서 실행 상태를 비운 다음에 시작한다
     let followUp: string | null = null
+    // Claude 구독 계정이 막히면(만료·차단·한도) 예비 계정으로 넘긴다. 도구를 아직 하나도 안 불렀을 때만
+    // 같은 지시로 다시 돈다(이미 화면을 건드렸으면 중복 실행 위험 — 다음 지시부터 예비 계정을 쓴다)
+    const retryOnFallbackAccount = (): boolean => {
+      if (!advanceSubscriptionFallback()) return false
+      if (counter.count() !== 0) return false
+      emit({
+        type: 'text',
+        text: `(Claude 구독 계정이 막혀 예비 계정 ${subscriptionFallbackIndex()}번으로 다시 시작합니다)`
+      })
+      followUp = prompt
+      return true
+    }
     // 이 실행의 SDK 세션 id(init 메시지) · 이어받은 세션 id · 이어받기 실패 여부
     let sessionId: string | null = null
     let resume: string | undefined
@@ -665,6 +695,8 @@ ${CODEX_NO_IMAGE_NOTE}`
           if (isFatalApiError(msg.error)) {
             const kind = classifyAuthError(apiError)
             settled = true
+            // abort 하면 finally 가 이어 돌기(followUp)를 막는다 — 스트림만 닫고 빠져나간다
+            if (retryOnFallbackAccount()) break
             emit({
               type: 'status',
               state: 'failed',
@@ -708,6 +740,7 @@ ${CODEX_NO_IMAGE_NOTE}`
             !entry.steps.some((st) => /넘김|handoff|확인 대기/.test(st.label)) &&
             this.autoContinueLeft > 0
           settled = true
+          if (failed && kind && retryOnFallbackAccount()) continue
           emit({
             type: 'status',
             state: failed ? 'failed' : 'done',
@@ -765,6 +798,7 @@ ${CODEX_NO_IMAGE_NOTE}`
           return
         }
         const kind = classifyAuthError(`${message} ${apiError}`)
+        if (kind && retryOnFallbackAccount()) return
         emit({
           type: 'status',
           state: 'failed',
@@ -923,28 +957,29 @@ ${CODEX_NO_IMAGE_NOTE}`
     })
     const laneState = opts.lane ? this.laneStateOf(opts.lane) : null
     const baseCtx = this.buildToolContext({
-        s: { ...s, permissionMode: 'full', finalConfirm: false },
-        jobId,
-        tick: () => null,
-        emit,
-        confirm: async () => true,
-        handoff: async (req) => ({ outcome: 'skipped', url: req.currentUrl() }),
-        onCall: () => {},
-        onRunJs: () => {},
-        scripts: this.siteScripts,
-        phoneCtx,
-        waitSms: (host) =>
-          phones?.waitForSmsCode
-            ? phones.waitForSmsCode(phoneCtx(), host)
-            : Promise.resolve({ filled: false, digits: 0 }),
-        runPay: (req) =>
-          phones?.approvePayment
-            ? phones.approvePayment(phoneCtx(), req)
-            : Promise.resolve({ ok: false, reason: 'declined' as const }),
-        prompt: ''
-      })
+      s: { ...s, permissionMode: 'full', finalConfirm: false },
+      jobId,
+      tick: () => null,
+      emit,
+      confirm: async () => true,
+      handoff: async (req) => ({ outcome: 'skipped', url: req.currentUrl() }),
+      onCall: () => {},
+      onRunJs: () => {},
+      scripts: this.siteScripts,
+      phoneCtx,
+      waitSms: (host) =>
+        phones?.waitForSmsCode
+          ? phones.waitForSmsCode(phoneCtx(), host)
+          : Promise.resolve({ filled: false, digits: 0 }),
+      runPay: (req) =>
+        phones?.approvePayment
+          ? phones.approvePayment(phoneCtx(), req)
+          : Promise.resolve({ ok: false, reason: 'declined' as const }),
+      prompt: ''
+    })
     // 키패드 입력 기록은 브릿지 세션(요청 1건)을 넘어 공유한다 — 같은 결제창에 두 번 넣지 않는다
-    const bridgeCtx = { ...baseCtx, keypadEntered: this.bridgeKeypadEntered }
+    // 브릿지 작업은 늘 뒤에서 — 사람이 보는 탭을 바꾸지 않는다
+    const bridgeCtx = { ...baseCtx, keypadEntered: this.bridgeKeypadEntered, background: true }
     const server = createSambaTools(
       laneState
         ? { ...bridgeCtx, tabs: laneTabs(this.tabs, laneState) }

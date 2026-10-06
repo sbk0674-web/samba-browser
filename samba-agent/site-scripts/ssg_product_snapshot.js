@@ -1,8 +1,6 @@
 // SSG 상품 스냅샷: 진입 경로로 상품을 열어 옵션을 고르고 바로구매로 주문서까지(결제 없음).
-// 로그아웃 → login_required. 옵션 못 고르면 바로구매 안 누름.
 // 신세계몰(6004)·신세계백화점(6009)만 — 아니면 'not_shinsegaemall'(6009는 allow_department:true 때만). 쿠폰받기 먼저.
 // 인자 {sku: 상품 주소, size?: 주문 옵션('옵션:285'), qty?, account?, profile?, route?: 'direct'|'danawa'|'enuri'|'adpick', entry_url?, adpick_percent?}
-// 반환 {options, selected, cost, pay_amount, adpick_rate, adpick_reward, methods, coupons, product_*, order_tab, mall_ok, note, error?}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const pf = args.profile ? { profile: args.profile } : {}
@@ -27,7 +25,7 @@ const url0 = args.entry_url || args.sku
 if (!/^https:\/\//.test(String(url0 || ''))) return { ...R, error: 'bad-sku', note: 'sku/entry_url 은 https 주소' }
 const tabId = (String(await tabs.open({ ...pf, url: url0 })).match(/tab (\S+)/) || [])[1]
 if (tabId) await tabs.switch(tabId)
-try { await page.waitFor(/바로구매|품절|입고알림/, 12000) } catch (e) {}
+try { await page.waitFor(/바로구매|품절|입고알림/, 25000) } catch (e) {}
 R.product_url = await page.url()
 R.product_no = (R.product_url.match(/itemId=(\d+)/) || [])[1] || null
 R.ckwhere = (R.product_url.match(/[?&]ckwhere=([^&]+)/) || [])[1] || null
@@ -44,16 +42,18 @@ if ((await page.idOf('바로구매', 0)) < 0 && ((await page.idOf('입고알림'
   return { ...R, sold_out: true, options: [], note: 'item sold out', product_tab: tabId }
 }
 
+const KE = '블랙black,화이트white,레드red,블루blue,네이비navy,그레이gr,그린green,베이지beige,핑크pink'.split(',').map(x => x.match(/(\W+)(\w+)/))
 const picked = []
 for (let step = 0; step < 3; step++) {
   const before = new Set(els(await tree({ interactive: true })).map(e => e.id))
-  const opener = await page.idOf('선택하세요.', 0)
+  // '사이즈 선택하세요.'처럼 이름 붙은 칸 먼저(맨 앞 '선택하세요.'는 숨은 칸일 수 있다, 09-30 백화점)
+  const oc = els(await tree({ query: '선택하세요' })).filter(e => e.role === 'link' && /선택하세요\.?$/.test(e.text) && !picked.includes(e.text))
+  const opener = (oc.find(e => e.text !== '선택하세요.') || oc[0] || { id: -1 }).id
   if (opener < 0) break
   await page.click(opener)
   await sleep(700)
   const after = els(await tree({ interactive: true }))
-  const live = after.filter(e => !before.has(e.id) && e.role === 'link' && /href=#/.test(e.rest) && e.text && e.text.length <= 40 && !/배너|이전|다음|닫기|선택하세요|매진|품절/.test(e.text))
-  // 품절 표시는 옵션 구간의 실제 '(매진)'만
+  const live = after.filter(e => !before.has(e.id) && e.role === 'link' && /href=#/.test(e.rest) && e.text && e.text.length <= 40 && !/배너|이전|다음|닫기|선택하세요|매진|품절|Q&A|추천 상품|교환\/반품/.test(e.text))
   t = await text()
   const oseg = t.slice(Math.max(t.indexOf('선택하세요.'), 0), t.indexOf('총 금액') > 0 ? t.indexOf('총 금액') : undefined)
   const sold = [...oseg.matchAll(/(\S+)\(매진\)/g)].map(m => m[1] + ' 품절')
@@ -61,9 +61,8 @@ for (let step = 0; step < 3; step++) {
   if (!live.length) { R.note = 'no live option'; break }
   let best = null, top = 0
   for (const o of live) { const s = score(o.text); if (s > top) { top = s; best = o } }
-  // 선택지 하나: FREE 류이거나 주문 옵션에 색상이 없을 때만(Black 주문에 Red 뿐인 판매처 실측)
   const COLOR = /black|white|red|blue|navy|gr[ae]y|green|beige|pink|ivory|블랙|화이트|레드|블루|네이비|그레이|그린|베이지|핑크|아이보리/i
-  if (!best && live.length === 1 && (/^(free|f|one ?size|os|프리)$/i.test(live[0].text) || !COLOR.test(want) || COLOR.test(live[0].text) && nm(want).includes(nm(live[0].text)))) best = live[0]
+  if (!best && live.length === 1 && (/^(free|f|one ?size|os|프리)$/i.test(live[0].text) || !COLOR.test(want) || COLOR.test(live[0].text) && nm(want).includes(nm(live[0].text)) || KE.some(m => want.includes(m[1]) && live[0].text.toLowerCase().includes(m[2])))) best = live[0]
   if (!best) { R.note = want ? 'size not available' : 'option needs choice'; R.coupons[acct] = 0; return { ...R, product_tab: tabId } }
   await page.click(best.id)
   picked.push(best.text)
@@ -77,7 +76,8 @@ if (!picked.length && chosen.length) R.options = chosen
 if (!chosen.length && !picked.length && /선택하세요\./.test(sec)) { R.coupons[acct] = 0; return { ...R, note: 'option not chosen', product_tab: tabId } }
 
 const beforeTabs = new Set((await tabs.list()).map(x => x.id))
-const buy = await page.idOf('바로구매', 0)
+let buy = await page.idOf('바로구매', 0)
+for (let i = 0; i < 10 && buy < 0; i++) { await sleep(1000); buy = await page.idOf('바로구매', 0) }
 if (buy < 0) return { ...R, error: 'buy-button-not-found', product_tab: tabId }
 await page.click(buy)
 let form = null
@@ -101,7 +101,6 @@ await sleep(800)
 t = await text()
 let total = num((t.match(/(최종\s*결제\s*금액|총\s*결제\s*금액|결제\s*예정\s*금액)\s*([\d,]{3,})\s*원/) || [])[2])
 if (!total) total = num(els(await tree({ selector: '#totalPayAmt, [id*="totalPay"]' })).map(e => e.text).join(' '))
-// cost=결제액. 애드픽 적립은 adpick_rate·adpick_reward 로 따로(하네스가 한 번만 뺀다)
 R.pay_amount = total || null
 R.cost = total || null
 R.adpick_rate = R.route === 'adpick' ? (parseFloat(args.adpick_percent) || 0) : 0

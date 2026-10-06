@@ -52,9 +52,11 @@ for (const m of [...new Set(want)]) {
     if (!cards.length) { q.registered = false; q.available = false }
   }
   if (m === '무신사머니') {
-    // 머니가 모자라면 연결 계좌에서 자동 충전된다. 계좌가 없다는 문구가 있고 잔액이 모자라면 낼 수 없다
+    // 머니가 모자라면 연결 계좌에서 자동 충전된다(혜택 없는 은행 충전) — 보유 머니가 결제액보다 적은 계정은 머니로 내지 않는다
+    // (사용자 2026-10-05: 머니 있는 edelvise06 두고 다른 계정이 은행 충전으로 결제했다)
     const bal = num((sec.match(/현재 보유 머니\s*([\d,]+)\s*원/) || [])[1])
-    if (bal < r.cost && /계좌[^.]{0,8}(등록|연결)해|연결된 계좌가 없/.test(sec)) q.available = false
+    q.balance = bal
+    if (bal < r.cost) { q.available = false; q.note = `보유 머니 ${bal} < ${r.cost} — 충전결제 금지` }
   }
   quotes.push(q)
 }

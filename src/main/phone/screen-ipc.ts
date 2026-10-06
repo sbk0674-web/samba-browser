@@ -4,7 +4,7 @@
 import { IPC } from '../../shared/ipc'
 import type { Settings } from '../../shared/settings'
 import type { ScreenMode } from '../../shared/phone'
-import { isPhoneKey, pressKey, swipe, tap, toDeviceCoord } from './input'
+import { isPhoneKey, pressKey, swipe, tap, toDeviceCoord, wakeIfAsleep } from './input'
 import {
   DISPLAY_DUMP_ARGS,
   parseDisplayCurrentSize,
@@ -134,13 +134,16 @@ export function registerPhoneScreenIpc(deps: PhoneScreenIpcDeps): PhoneScreenIpc
     const size = await deviceSize(serial)
     return toDeviceCoord({ x: rx, y: ry }, { width: 1, height: 1 }, size)
   }
+  // 폰이 잠들어 검은 화면일 때 누르면 깨우기만 하고 그 입력은 버린다(사용자 요청 2026-09-30)
   deps.handle(IPC.phoneTap, async (serial: string, rx: number, ry: number) => {
+    if (await wakeIfAsleep(adb, serial)) return
     const p = await ratioToDevice(serial, rx, ry)
     await tap(adb, serial, p.x, p.y)
   })
   deps.handle(
     IPC.phoneSwipe,
     async (serial: string, rx1: number, ry1: number, rx2: number, ry2: number, ms?: number) => {
+      if (await wakeIfAsleep(adb, serial)) return
       const a = await ratioToDevice(serial, rx1, ry1)
       const b = await ratioToDevice(serial, rx2, ry2)
       await swipe(adb, serial, a, b, assertSwipeMs(ms))
@@ -148,6 +151,7 @@ export function registerPhoneScreenIpc(deps: PhoneScreenIpcDeps): PhoneScreenIpc
   )
   deps.handle(IPC.phoneKey, async (serial: string, key: string) => {
     if (!isPhoneKey(key)) throw new Error(tr('phone.unknownKey', { key }))
+    if (await wakeIfAsleep(adb, serial)) return
     await pressKey(adb, serial, key)
   })
 

@@ -11,6 +11,8 @@ class ExportFail(StrEnum):
     BUSY = 'busy'  # 사람이 그 창을 쓰는 중이다
     TIMEOUT = 'timeout'  # 화면이 제때 반응하지 않았다
     BLOCKED = 'blocked'  # 인증·오류 대화상자가 떠 있다(건드리지 않는다)
+    # 사람이 인증해야 한다(추가인증·로그인 창) — 건드리지 않고 알린 뒤 기다린다. 시도 횟수에 넣지 않는다
+    AUTH_REQUIRED = 'auth_required'
     # 다시 해도 같은 답이 나오는 사유 — 사람이 본다
     NOT_FOUND = 'not_found'  # 그 주문번호가 없다
     AMBIGUOUS = 'ambiguous'  # 검색 결과가 1건이 아니다

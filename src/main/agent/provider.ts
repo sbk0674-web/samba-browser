@@ -52,12 +52,50 @@ export function currentAuth(): AgentAuth {
   }
 }
 
+// 구독 예비 계정: 이 PC 의 Claude 로그인이 막히면(만료·차단·한도) 다른 계정의 OAuth 토큰
+// (`claude setup-token`)으로 넘어간다. 0 = PC 로그인, 1.. = 예비 토큰 순서. 토큰 값은 로그에 남기지 않는다
+let fallbackTokens: () => string[] = () => []
+let fallbackIndex = 0
+
+export function setSubscriptionFallbackTokens(fn: (() => string[]) | null): void {
+  fallbackTokens = fn ?? (() => [])
+  fallbackIndex = 0
+}
+
+/** 구독 경로에서 다음 예비 계정으로 넘긴다. 넘길 계정이 없거나 구독 경로가 아니면 false */
+export function advanceSubscriptionFallback(auth: AgentAuth = currentAuth()): boolean {
+  if (auth.mode !== 'claude_subscription') return false
+  let count = 0
+  try {
+    count = fallbackTokens().length
+  } catch {
+    count = 0
+  }
+  if (fallbackIndex >= count) return false
+  fallbackIndex += 1
+  return true
+}
+
+/** 지금 쓰는 구독 계정 순번(0 = PC 로그인) — 화면 안내용 */
+export function subscriptionFallbackIndex(): number {
+  return fallbackIndex
+}
+
 // 인증 경로가 없을 때 실행부가 그대로 실패 사유로 쓰는 표식(UI 는 "연결 필요" 안내로 바꾼다)
 export const NOT_CONNECTED_ERROR = 'auth:not_connected'
 
 // 내 API 키를 쓸 때만 환경을 교체한다(교체 시 process.env 를 통째로 펼쳐 PATH 등을 유지)
 function resolveEnv(auth: AgentAuth): Record<string, string | undefined> | undefined {
-  // 구독 경로에서는 키를 꺼내지도 않는다
+  // 구독 경로에서는 API 키를 꺼내지 않는다 — 예비 계정으로 넘어간 뒤면 그 토큰만 넣는다
+  if (auth.mode === 'claude_subscription' && fallbackIndex > 0) {
+    let token: string | undefined
+    try {
+      token = fallbackTokens()[fallbackIndex - 1]
+    } catch {
+      token = undefined
+    }
+    return token ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: token } : undefined
+  }
   if (auth.mode !== 'api_key') return undefined
   let key: string | null = null
   try {

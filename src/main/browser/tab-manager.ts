@@ -21,14 +21,22 @@ import {
   NEW_TAB_URL
 } from '../../shared/url'
 import { normalizeHost } from '../../shared/host'
+import { moveItem } from '../../shared/reorder'
 import { attachInternalProtocol } from './internal-protocol'
 import type { PermissionMode, SearchEngine } from '../../shared/settings'
 import { applyMobileEmulation, clearMobileEmulation, MOBILE_WIDTH } from './emulation'
-import { installWebstoreNavigatorUserAgent, installWebstoreUserAgent } from './webstore-ua'
+import {
+  googleLoadOptions,
+  installGooglePasskeyBlock,
+  installGoogleSigninUserAgent,
+  isGoogleSigninUrl
+} from './google-signin-ua'
+import { installSiteUserAgents, installWebstoreNavigatorUserAgent } from './webstore-ua'
 import { installSessionCookieKeeper } from './session-cookies'
 import { installDialogHandler, isAutomationActive } from './dialogs'
 import {
   isAutomation,
+  isBackgroundAutomation,
   isHumanInputEvent,
   lastHumanInWindowAt,
   markHuman,
@@ -137,8 +145,10 @@ function hardenSession(ses: Session, partition: string): void {
     console.warn(`다운로드 차단: ${item.getURL()}`)
   })
   // 웹스토어는 Electron UA 를 보면 "지원되지 않는 브라우저" 안내로 설치 버튼을 감춘다.
-  // 그 호스트 요청에만 크롬 UA 를 보낸다(다른 사이트는 그대로)
-  installWebstoreUserAgent(ses)
+  // 구글 로그인은 크롬 UA 를 보면 로그인을 막는다 — 두 호스트 요청에만 각각 맞는 UA 를 보낸다(다른 사이트는 그대로)
+  installSiteUserAgents(ses)
+  // 구글 로그인 화면의 패스키(암호 키) 자동 호출을 막는다 — 윈도우 보안 창이 저절로 뜨는 것을 막는다
+  installGooglePasskeyBlock(ses)
   // 로그인 토큰이 세션 쿠키인 사이트(무신사)는 앱을 다시 켤 때마다 반쪽 로그인이 됐다 —
   // 크롬의 "이전 세션 이어서" 처럼 세션 쿠키에 만료를 얹어 남긴다
   installSessionCookieKeeper(ses)
@@ -190,6 +200,8 @@ export class TabManager {
   private behindIds: string[] = []
   // 레인(lane-tabs)이 연 탭 — 전역 자동화 대상이 아니어도 뒤 층에 붙여 둔다
   private laneIds = new Set<string>()
+  // 사람이 직접 연 탭(새 탭 버튼·프로필 메뉴·그 탭에서 열린 링크). 바깥 자동화(브릿지)는 이 탭을 닫지 못한다
+  private userIds = new Set<string>()
   // 팝업이 새로 열렸을 때 알리는 구독자(AI 도구가 "팝업이 열렸다"를 결과에 붙인다)
   private popupOpenedListeners: Array<(target: AgentTarget) => void> = []
   // 로그인 게이트: 계정 로그인 전에는 탭 뷰(네이티브)를 화면에서 치운다 — 렌더러가 가리는 것만으로는 안 보인다
@@ -422,6 +434,7 @@ export class TabManager {
     this.automationTabId = null
     this.behindIds = []
     this.laneIds.clear()
+    this.userIds.clear()
     this.focusedPopupId = null
     // 부모 창이 사라졌는데 결제창만 남아 떠 있지 않게 팝업도 함께 파괴한다
     this.popups.destroyAll()
@@ -458,19 +471,25 @@ export class TabManager {
   /** 이 세션을 쓰는 프로필 이름. 탭 파티션이 아니면(기본 세션) 'default' */
   profileOfSession(ses: Session): string {
     for (const [partition, s] of this.partitionSessions) {
-      if (s === ses && partition.startsWith(this.partitionPrefix)) return partition.slice(this.partitionPrefix.length)
+      if (s === ses && partition.startsWith(this.partitionPrefix))
+        return partition.slice(this.partitionPrefix.length)
     }
     return 'default'
   }
 
   /** 확장 탭·창 API 다리(extensions/tabs-bridge)에 줄 탭 관리 기능 */
   extensionTabsProvider(): ExtensionTabsProvider {
-    const byWc = (wc: WebContents): Tab | undefined => this.tabs.find((t) => t.view.webContents === wc)
+    const byWc = (wc: WebContents): Tab | undefined =>
+      this.tabs.find((t) => t.view.webContents === wc)
     return {
       tabs: () =>
         this.tabs
           .filter((t) => isTabAlive(t))
-          .map((t) => ({ wc: t.view.webContents, active: t.id === this.activeId, profile: t.profile })),
+          .map((t) => ({
+            wc: t.view.webContents,
+            active: t.id === this.activeId,
+            profile: t.profile
+          })),
       create: (url, profile, active) => {
         // 뒤에서 열기 — 크롬 tabs.create({active:false}) 처럼 보던 탭을 그대로 둔다
         const info = this.create({ url, profile, background: !active && this.activeId !== null })
@@ -529,12 +548,19 @@ export class TabManager {
 
   /** 탭과 살아 있는 팝업을 한 목록으로. AI 의 list_tabs 와 사이드바 목록이 같이 쓴다 */
   listTargets(): AgentTarget[] {
-    const tabs = this.list().map((t) => ({ id: t.id, title: t.title, url: t.url }))
+    // 프로필을 함께 준다 — 계정 비교를 동시에 돌리면 같은 주문서 주소의 탭이 계정마다 열린다
+    const tabs = this.list().map((t) => ({
+      id: t.id,
+      title: t.title,
+      url: t.url,
+      profile: t.profile
+    }))
     const popups = this.popups.alive().map((p) => ({
       id: p.id,
       title: p.win.isDestroyed() ? '' : p.win.webContents.getTitle(),
       url: p.win.isDestroyed() ? '' : p.win.webContents.getURL(),
-      openerId: p.openerId
+      openerId: p.openerId,
+      profile: p.profile
     }))
     // AI 가 보는 '활성' 표시는 자동화 대상 탭 기준이다(보이는 탭과 다를 수 있다)
     return buildTargets(tabs, popups, this.workingTabId(), this.focusedPopupId)
@@ -664,6 +690,8 @@ export class TabManager {
        * 레인 탭 생성이 레인 없는 세션의 대상 탭을 바꾸면 안 된다
        */
       keepAgentTarget?: boolean
+      /** 사람이 직접 연 탭인가(탭 바·단축키·프로필 메뉴). 자동화가 연 탭에는 주지 않는다 */
+      user?: boolean
     } = {}
   ): TabInfo {
     if (this.disposed) throw new Error('window closed')
@@ -761,6 +789,8 @@ export class TabManager {
     // 웹스토어 페이지 JS 가 읽는 navigator.userAgent 도 헤더와 같은 크롬 UA 로 맞춘다.
     // 모바일 탭은 emulation.ts 가 UA 를 따로 관리하므로 건드리지 않는다
     tab.refreshWebstoreUa = installWebstoreNavigatorUserAgent(wc, () => tab.mobile)
+    // 구글 로그인 화면에만 Electron 표기 UA 를 쓴다(크롬 UA 로 가면 구글이 로그인을 막는다)
+    installGoogleSigninUserAgent(wc, { isMobile: () => tab.mobile })
     // 사람의 키 입력·마우스 누름을 기록한다 — 그 탭은 잠시 자동화가 입력·로그인하지 않고,
     // 창 전체도 잠시 자동화가 보이는 탭을 바꾸거나 포커스를 가져가지 않는다(human-activity.ts·visible-guard.ts)
     this.watchHumanInput(wc)
@@ -800,7 +830,9 @@ export class TabManager {
             profile,
             mobile: tab.mobile,
             openerId: tab.id,
-            background
+            background,
+            // 사람이 쓰던 탭에서 열린 링크 탭도 사람의 탭이다
+            user: this.userIds.has(tab.id)
           })
           // 자동화 대상 탭이 연 탭이면 자동화 대상도 새 탭으로 옮긴다(보이는 탭이 연 새 탭을 따라가던 예전 동작과 같다)
           if (background && this.automationTabId === tab.id) this.automationTabId = opened.id
@@ -817,6 +849,7 @@ export class TabManager {
       // 보이지 않는 탭(자동화가 뒤에서 조작하는 탭)이 연 팝업 창은 포커스를 가져가지 않게 숨긴 채 만들고
       // did-create-window 에서 showInactive 로 띄운다 — 사람이 쓰던 창의 키 입력이 팝업으로 넘어가지 않게
       const quiet = openInBackground(tab.id, this.activeId)
+      googlePopupTarget = isGoogleSigninUrl(target)
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -829,14 +862,19 @@ export class TabManager {
         }
       }
     })
+    // 직전 window.open 대상이 구글 로그인 주소였는가 — 그 팝업은 첫 요청 전에 UA 를 건다
+    let googlePopupTarget = false
     wc.on('did-create-window', (popupWin) => {
+      installGoogleSigninUserAgent(popupWin.webContents, { eager: googlePopupTarget })
+      googlePopupTarget = false
       this.registerPopup(popupWin, tab.id, profile)
       // 숨긴 채 만든 팝업(뒤 탭이 연 것)은 포커스 없이 보여 준다
       if (!popupWin.isDestroyed() && !popupWin.isVisible()) popupWin.showInactive()
     })
     if (tab.mobile) void applyMobileEmulation(wc)
-    void wc.loadURL(url)
+    void wc.loadURL(url, googleLoadOptions(url, wc.getUserAgent()))
     if (opts.keepAgentTarget === true) this.laneIds.add(tab.id)
+    if (opts.user === true) this.userIds.add(tab.id)
     if (opts.background === true) {
       this.sizeHidden(tab)
     } else if (opts.keepAgentTarget === true) {
@@ -866,12 +904,19 @@ export class TabManager {
     const tab = this.get(id)
     if (!tab || this.win.isDestroyed() || id === this.activeId || !isTabAlive(tab)) return fn()
     const visible = this.activeId !== null ? this.get(this.activeId) : null
+    // 설정·작업 화면처럼 브라우저 영역이 0 크기면 탭도 0 크기로 그려져 캡처·키패드 판정이 안 된다
+    // (실기 2026-09-30 네이버페이 키패드: 칸 크기 0·후보 0) — 그동안만 창 크기를 준다
+    const [w, h] = this.win.getContentSize()
+    const b = computeViewBounds(this.layout, w, h, tab.mobile)
+    const resized = !this.gateHidden && (b.width <= 0 || b.height <= 0) && w > 0 && h > 0
+    if (resized) tab.view.setBounds({ x: 0, y: 0, width: w, height: h })
     this.win.contentView.addChildView(tab.view)
     try {
       return await fn()
     } finally {
-      if (!this.win.isDestroyed() && visible && isTabAlive(visible)) {
-        this.win.contentView.addChildView(visible.view)
+      if (!this.win.isDestroyed()) {
+        if (resized && isTabAlive(tab)) tab.view.setBounds(b)
+        if (visible && isTabAlive(visible)) this.win.contentView.addChildView(visible.view)
       }
     }
   }
@@ -879,6 +924,8 @@ export class TabManager {
   /** 사람이 이 창을 쓰는 중이라 자동화가 보이는 탭·창 포커스를 바꾸면 안 되는가(visible-guard.ts) */
   private holdVisible(): boolean {
     if (this.win.isDestroyed()) return false
+    // 브릿지(하네스) 작업은 사람의 입력 시각과 상관없이 늘 뒤에서만 돈다
+    if (isBackgroundAutomation()) return true
     return shouldHoldVisible(isAutomation(), lastHumanInWindowAt(this.win), Date.now())
   }
 
@@ -1095,6 +1142,19 @@ export class TabManager {
     this.emit()
   }
 
+  /** 사람이 직접 연 탭인가 — 바깥 자동화(브릿지)의 탭 정리에서 빼는 데 쓴다 */
+  isUserTab(id: string): boolean {
+    return this.userIds.has(id)
+  }
+
+  /** 탭 바에서 끌어 옮긴 탭의 자리를 바꾼다(toIndex 는 탭만 센 자리 — 팝업은 목록 뒤에 따로 붙는다) */
+  move(id: string, toIndex: number): void {
+    const from = this.tabs.findIndex((t) => t.id === id)
+    if (from < 0) return
+    this.tabs = moveItem(this.tabs, from, toIndex)
+    this.emit()
+  }
+
   close(id: string): void {
     const idx = this.tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
@@ -1103,6 +1163,7 @@ export class TabManager {
     if (this.automationTabId === id) this.automationTabId = null
     this.behindIds = this.behindIds.filter((b) => b !== id)
     this.laneIds.delete(id)
+    this.userIds.delete(id)
     // 닫히기 전에 주소를 챙겨 둔다(제스처 '닫은 탭 다시 열기')
     if (isTabAlive(tab)) {
       const record: ClosedTabRecord = {

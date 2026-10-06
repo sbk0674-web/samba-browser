@@ -11,7 +11,9 @@ import { remoteTableOf } from './mappers'
 import { LAST_PULLED_AT_KEY, pullAll, type PullResult } from './pull'
 import { pushAll, type PushDeps } from './push'
 
-export const SYNC_POLL_INTERVAL_MS = 60_000
+// 폴링은 Realtime 이 못 받은 변경을 줍는 보험이다 — 1분 폴링이 PC 여러 대에서 돌며 Supabase 무료 한도(Egress·Log)를
+// 넘겼다(2026-10-06, 10/8 제한 예고). Realtime(publication 등록) 뒤로는 5분이면 충분하다
+export const SYNC_POLL_INTERVAL_MS = 300_000
 
 export interface EngineDeps extends PushDeps {
   /**
@@ -47,6 +49,9 @@ export class SyncEngine {
   private authExpiredNotified = false
   // 완료한 동기화 주기 수(첫 주기 판정용)
   private cyclesDone = 0
+  // Realtime 구독이 살아 있는 표. 전부 살아 있으면 주기 폴링은 당기지 않는다(변경은 구독으로 바로 온다) —
+  // 폴링은 구독이 끊긴 동안의 보험일 뿐이다(사용자 2026-10-06 "실시간이면 왜 5분마다 당기냐")
+  private liveTables = new Set<string>()
   private readonly local: SyncLocal
 
   constructor(private readonly deps: EngineDeps) {
@@ -59,7 +64,7 @@ export class SyncEngine {
     this.started = true
     void this.syncNow()
     this.timer = setInterval(() => {
-      void this.syncNow()
+      void this.syncNow({ poll: true })
     }, SYNC_POLL_INTERVAL_MS)
     this.timer.unref?.()
     void this.subscribeAll()
@@ -90,13 +95,21 @@ export class SyncEngine {
     }
   }
 
-  /** 지금 한 번 동기화한다. 이미 돌고 있으면 그 결과를 함께 기다린다 */
-  syncNow(): Promise<SyncStatus> {
+  /**
+   * 지금 한 번 동기화한다. 이미 돌고 있으면 그 결과를 함께 기다린다.
+   * poll: 주기 폴링에서 온 호출 — Realtime 이 전부 살아 있으면 당기지 않고(heartbeat·대기 중인 푸시만) 끝낸다
+   */
+  syncNow(opts: { poll?: boolean } = {}): Promise<SyncStatus> {
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.runOnce().finally(() => {
+    this.inFlight = this.runOnce(opts).finally(() => {
       this.inFlight = null
     })
     return this.inFlight
+  }
+
+  /** 동기화 표 전부의 Realtime 구독이 살아 있는가 */
+  realtimeLive(): boolean {
+    return SYNC_TABLES.every((t) => this.liveTables.has(t))
   }
 
   onStatusChanged(fn: (status: SyncStatus) => void): () => void {
@@ -106,9 +119,19 @@ export class SyncEngine {
     }
   }
 
-  private async runOnce(): Promise<SyncStatus> {
+  private async runOnce(opts: { poll?: boolean } = {}): Promise<SyncStatus> {
     try {
       await this.deps.onCycleStart?.()
+      if (opts.poll && this.realtimeLive()) {
+        // 변경은 Realtime 으로 이미 받았다 — 당기지 않는다. 대기 중인 로컬 변경만 있으면 보낸다
+        if (this.deps.outbox.count() > 0) await pushAll(this.deps, {})
+        this.online = true
+        this.authExpiredNotified = false
+        this.cyclesDone += 1
+        const status = this.status()
+        this.emit(status)
+        return status
+      }
       // 먼저 받고(pull) 나서 보낸다(push) — 로컬 변경이 원격 최신본 위에 얹히도록
       const pulled = await pullAll(this.deps)
       this.deps.onAfterPull?.(pulled)
@@ -135,9 +158,19 @@ export class SyncEngine {
   private async subscribeAll(): Promise<void> {
     for (const table of SYNC_TABLES) {
       try {
-        const unsubscribe = await this.deps.backend.subscribe(remoteTableOf(table), () => {
-          void this.syncNow()
-        })
+        const unsubscribe = await this.deps.backend.subscribe(
+          remoteTableOf(table),
+          () => {
+            void this.syncNow()
+          },
+          (live) => {
+            const wasLive = this.realtimeLive()
+            if (live) this.liveTables.add(table)
+            else this.liveTables.delete(table)
+            // 끊겼다 다시 붙으면 그사이 놓친 변경을 한 번 당긴다
+            if (!wasLive && this.realtimeLive()) void this.syncNow()
+          }
+        )
         // stop() 이 먼저 불렸다면 방금 건 구독을 바로 푼다
         if (!this.started) unsubscribe()
         else this.unsubscribers.push(unsubscribe)

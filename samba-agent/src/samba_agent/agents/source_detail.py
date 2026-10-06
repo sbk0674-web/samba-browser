@@ -61,6 +61,23 @@ def detail_check(source_order_no: object) -> Callable[[dict[str, object]], str |
     return check
 
 
+def with_pay_card(detail: dict[str, object], handoff: dict[str, object]) -> dict[str, object]:
+    """주문 상세에 카드사가 안 읽히면(롯데온 L.PAY·간편결제는 '간편결제'로만 나온다) 구매 때 고른 카드사를 쓴다.
+
+    청구할인 계수(롯데 ×0.98·현대 ×0.973)는 카드사 이름으로 정해진다 — 안 곱하면 실제 원가가 그만큼 높게 기록된다
+    (실기 2026-10-06 롯데온 L.PAY 롯데카드: 결제 78,950 · 적립 437 → 원가 76,934 인데 78,513 으로 기록).
+    상세에 계수가 있는 카드사가 읽혔으면 그대로 둔다.
+    """
+    from samba_agent.agents.buyer import billing_factor
+
+    if billing_factor(str(detail.get('card') or '')) != 1.0:
+        return detail
+    issuer = str(handoff.get('card_issuer') or '').strip()
+    if issuer and billing_factor(issuer) != 1.0:
+        return {**detail, 'card': issuer}
+    return detail
+
+
 def actual_cost(detail: dict[str, object]) -> float | None:
     """상세 값으로 원가(플레이북 §6): 결제액 × 카드 청구할인 − 후기 제외 적립 + 사용 적립금. 결제액을 모르면 None."""
     try:

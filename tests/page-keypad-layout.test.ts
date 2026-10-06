@@ -93,6 +93,23 @@ describe('keypadLayout', () => {
     expect(keypadLayout()).toBeNull()
   })
 
+  it('키패드가 모달이면 뒤 페이지의 같은 숫자(수량 1)는 세지 않는다(롯데온 L.PAY)', () => {
+    document.body.innerHTML =
+      '<div class="order"><span>수량</span> <span>1</span></div>' +
+      `<div role="dialog" aria-label="L.PAY 비밀번호 입력">${keypadHtml(DIGITS, (d) => `<div class="key">${d}</div>`)}</div>`
+    const layout = keypadLayout()
+    expect(layout?.digits.map((d) => d.digit)).toEqual(DIGITS)
+    // 고른 요소는 모달 안의 것이다
+    const one = layout!.digits.find((d) => d.digit === '1')!
+    performClick(one.id)
+  })
+
+  it('모달 밖에만 같은 숫자가 있어도 모달 안 배치가 불완전하면 null 이다', () => {
+    document.body.innerHTML =
+      keypadHtml() + `<div role="dialog">${keypadHtml(DIGITS.slice(0, 9))}</div>`
+    expect(keypadLayout()).toBeNull()
+  })
+
   it('숨겨진 버튼은 세지 않는다', () => {
     document.body.innerHTML = keypadHtml() + '<button style="display:none">3</button>'
     expect(keypadLayout()?.digits.length).toBe(10)
@@ -213,15 +230,37 @@ describe('keypadUnlabeled — 글자 없는 보안 키패드(네이버페이)', 
     document.body.innerHTML = unlabeledHtml(10)
     placeGrid({ w: 12, h: 12 })
     expect(keypadUnlabeled()).toBeNull()
-    placeGrid({ w: 300, h: 40 })
+    placeGrid({ w: 500, h: 40 })
     expect(keypadUnlabeled()).toBeNull()
     placeGrid()
     ;(document.querySelector('.kpd') as HTMLElement).style.display = 'none'
     expect(keypadUnlabeled()).toBeNull()
   })
 
+  it('넓은 창의 큰 칸(300px)도 키패드로 본다', () => {
+    document.body.innerHTML = unlabeledHtml(10)
+    placeGrid({ w: 300, h: 80 })
+    expect(keypadUnlabeled()).toHaveLength(10)
+  })
+
   it('jsdom 기본(크기 0) 버튼은 후보가 아니다', () => {
     document.body.innerHTML = unlabeledHtml(10)
     expect(keypadUnlabeled()).toBeNull()
+  })
+})
+
+describe('keypadUnlabeled — 여분 아이콘 버튼', () => {
+  it('글자 없는 버튼이 14개를 넘으면 크기가 같은 무리만 키패드로 본다', async () => {
+    const { keypadUnlabeled } = await import('../src/preload/page-core')
+    document.body.innerHTML = ''
+    const add = (w: number, h: number, x: number, y: number): void => {
+      const b = document.createElement('button')
+      b.getBoundingClientRect = () =>
+        ({ left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, x, y, toJSON: () => ({}) }) as DOMRect
+      document.body.appendChild(b)
+    }
+    for (let i = 0; i < 12; i++) add(60, 50, (i % 3) * 60, Math.floor(i / 3) * 50)
+    for (let i = 0; i < 4; i++) add(24, 24, 500 + i * 30, 0)
+    expect(keypadUnlabeled()).toHaveLength(12)
   })
 })

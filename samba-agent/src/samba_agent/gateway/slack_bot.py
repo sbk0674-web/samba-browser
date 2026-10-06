@@ -188,8 +188,10 @@ class SambaBot:
             live = self.queue.live()
             if not live:
                 return '지금 도는 주문이 없습니다'
+            # 같은 상품주문번호의 행이 여럿일 수 있어 행 id(ord_…)도 보인다 — `취소 ord_…` 처럼 그 행만 가리킨다
             return '\n'.join(
-                f'{j.order_no} · {j.state} · {j.assignee_agent or "-"} · {j.step or "-"}'
+                f'{j.order_no}{f" ({j.wave_id})" if j.wave_id else ""} · {j.state} · '
+                f'{j.assignee_agent or "-"} · {j.step or "-"}'
                 for j in live
             )
         if cmd.kind == 'cancel' and cmd.order_no:
@@ -240,6 +242,8 @@ class SambaBot:
     ) -> str:
         """승인·거부 버튼. 누른 사람도 등록돼 있어야 하고, 같은 버튼 두 번은 한 번만 먹는다.
 
+        ``order_no`` 는 버튼 value 의 작업 키 — 자동 수집 작업은 삼바웨이브 행 id(ord_…), 수동 접수는 주문번호.
+
         ``stage`` 는 버튼 value 에 실어온 단계(pay/record) — 지금 큐가 그 단계의 승인 대기가
         아니면(이미 처리됐거나 다음 단계로 넘어갔으면) 그래프를 다시 부르지 않고 안내만 한다
         (스펙 리뷰 지적 — Critical 2).
@@ -255,6 +259,7 @@ class SambaBot:
         job = self.worker.resume(order_no, approved=approved, by=user, stage=stage)
         if job is None:
             return '이미 처리된 승인입니다'
+        order_no = job.order_no  # 답은 사람이 아는 상품주문번호로
         answer = (
             f'<@{user}>님이 {order_no} 를 승인했습니다 → {job.state}'
             if approved

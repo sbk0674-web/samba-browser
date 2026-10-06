@@ -33,7 +33,7 @@ class EmpUi(Protocol):
 
     def read(self, order_no: str) -> CellValues: ...
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None: ...
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None: ...
 
     def show_only(self, order_no: str) -> None:
         """그 주문만 그리드에 띄운다. 없으면 AdapterRetry(NOT_FOUND)."""
@@ -41,6 +41,10 @@ class EmpUi(Protocol):
 
     def clear_keyword(self) -> None:
         """검색어를 지우고 목록을 되돌린다."""
+        ...
+
+    def seller_code(self, order_no: str) -> str:
+        """그 주문 행의 판매자상품코드. 비어 있으면 빈 글자."""
         ...
 
     def cancel(self, order_no: str) -> None:
@@ -63,12 +67,12 @@ class EmpAdapter:
         finally:
             self._ui.clear_keyword()
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
         self._ui.ensure_ready()
         # 그 주문 행만 띄운 채로 넣는다 — 값이 다른 주문 행에 들어갈 자리가 없다(실기 2026-09-29 사고)
         try:
             self._ui.show_only(order_no)
-            self._ui.write(order_no, cost, shipping_fee)
+            self._ui.write(order_no, cost, shipping_fee, memo)
         finally:
             self._ui.clear_keyword()
 
@@ -101,3 +105,37 @@ class EmpCancelAdapter:
         finally:
             self._ui.clear_keyword()
         return done
+
+
+class EmpLookupAdapter:
+    """BatchAdapter 구현 — 소싱처 미등록 주문의 판매자상품코드를 읽는다. 화면의 값은 바꾸지 않는다."""
+
+    one_at_a_time = True
+
+    def __init__(self, ui: EmpUi) -> None:
+        self._ui = ui
+        self._found: dict[str, str] = {}
+
+    def complete_pending(self, order_nos: Sequence[str]) -> set[str]:
+        wanted = [o for o in dict.fromkeys(order_nos) if o]
+        if not wanted:
+            return set()
+        self._ui.ensure_ready()
+        self._found = {}
+        try:
+            for order_no in wanted:
+                try:
+                    self._ui.show_only(order_no)
+                    code = self._ui.seller_code(order_no)
+                except AdapterRetry as e:
+                    if e.reason is not ExportFail.NOT_FOUND:
+                        raise
+                    continue
+                if code:
+                    self._found[order_no] = code
+        finally:
+            self._ui.clear_keyword()
+        return set(self._found)
+
+    def detail_for(self, order_no: str) -> str | None:
+        return self._found.get(order_no)

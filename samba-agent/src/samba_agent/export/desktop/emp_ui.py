@@ -11,15 +11,17 @@ EMP 는 관리자 권한으로 돈다 — 이 드라이버도 관리자 권한 �
 - 컨트롤은 보이는 자식 창 핸들을 열거해 automation id 색인으로 찾는다(샵마인 드라이버와 같은 이유).
 """
 
+import contextlib
 import ctypes
 import datetime as dt
 import logging
+import re
 import threading
 import time
+from collections.abc import Callable, Iterator
 from ctypes import wintypes
 
-from pywinauto import Desktop
-from pywinauto.controls.hwndwrapper import InvalidWindowHandle
+from pywinauto.controls.hwndwrapper import HwndWrapper
 from pywinauto.controls.uiawrapper import UIAWrapper
 from pywinauto.uia_element_info import UIAElementInfo
 
@@ -32,6 +34,8 @@ from samba_agent.export.failures import ExportFail
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE_MARK = 'EMP 1.'
+# 사람이 처리해야 하는 인증 창 제목에 들어 있는 글자
+AUTH_MARKS = ('인증', 'OTP')
 LOGIN_MARK = '로그인'
 GRID_ID = 'grid'
 COL_ORDER_NO = '주문번호'
@@ -40,6 +44,9 @@ COL_SHIPPING = '배송비'
 # 화면에 보이는 셀 요소의 이름 앞머리(열의 내부 이름)
 CELL_COST = 'wprice1'
 CELL_SHIPPING = 'deliv_price'
+# 한줄메모 — 소싱주문번호를 넣는다(사용자 2026-09-30). 그리드 칸 이름은 note(실기)
+COL_NOTE = '한줄메모'
+CELL_NOTE = 'note'
 SAVE_BUTTON = '저장'
 REFRESH_BUTTON = '새로고침'
 TOOLBAR_ID = 'toolStrip2'
@@ -56,9 +63,12 @@ END_DATE = 'OrderEdate'
 TWO_WEEKS_BUTTON = 'ribbonToggleButton1511'
 SEARCH_BUTTON = 'OrderSearchBT'
 KEYWORD_BOX = 'OrderKeyword'
+# 취소 확인 창은 30초 뒤 스스로 실행된다 — 여유를 두고 기다린다
+AUTO_RUN_WAIT_S = 50.0
 _WM_RBUTTONDOWN, _WM_RBUTTONUP = 0x0204, 0x0205
 DIALOG_CLASS = '#32770'
 COL_STATE = '상태'
+COL_SELLER_CODE = '판매자상품코드'
 STATE_CANCELLED = '취소'
 # 행 메뉴(우클릭 메뉴) 항목 — 이름 뒤에 단축 글자가 붙는다('상태변경 (Q)')
 MENU_STATE = '상태변경'
@@ -75,6 +85,9 @@ _WM_KEYDOWN, _WM_KEYUP, _WM_CHAR = 0x0100, 0x0101, 0x0102
 _WM_LBUTTONDOWN, _WM_LBUTTONUP, _WM_LBUTTONDBLCLK = 0x0201, 0x0202, 0x0203
 _WM_COMMAND = 0x0111
 _VK_RETURN, _VK_ESCAPE = 0x0D, 0x1B
+
+# 확인 창 문구의 선택 건수('선택하신 1건의 주문의 …')
+_SELECTED_COUNT = re.compile(r'선택하신\s*(\d+)\s*건')
 
 _user32 = ctypes.windll.user32
 _ENUM_PROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -103,6 +116,23 @@ def _visible_children(hwnd: int) -> list[int]:
         return True
 
     _user32.EnumChildWindows(hwnd, _ENUM_PROC(collect), 0)
+    return found
+
+
+def _all_windows() -> list[tuple[int, str, str]]:
+    """보이는 최상위 창 전부 — (핸들, 제목, 창 종류)."""
+    found: list[tuple[int, str, str]] = []
+
+    def collect(hwnd, _lparam):
+        if _user32.IsWindowVisible(hwnd):
+            title = ctypes.create_unicode_buffer(256)
+            kind = ctypes.create_unicode_buffer(256)
+            _user32.GetWindowTextW(hwnd, title, 256)
+            _user32.GetClassNameW(hwnd, kind, 256)
+            found.append((hwnd, title.value, kind.value))
+        return True
+
+    _user32.EnumWindows(_ENUM_PROC(collect), 0)
     return found
 
 
@@ -142,8 +172,14 @@ class GridRow:
 class PywinautoEmpUi:
     """EMP 주문 그리드 읽기·쓰기."""
 
-    def __init__(self, *, poll_s: float = 0.5) -> None:
+    def __init__(
+        self, *, poll_s: float = 0.5, user_active: Callable[[], bool] | None = None
+    ) -> None:
         self._poll_s = poll_s
+        # 사람이 키보드·마우스를 만지고 있는가 — 참이면 하던 일을 그 자리에서 멈춘다(사용자 지시 2026-09-29)
+        self._user_active = user_active
+        # 뒷정리(메뉴 닫기·안 저장한 값 버리기·검색어 지우기) 중에는 멈추지 않는다 — 화면을 어질러 둔 채 떠나지 않는다
+        self._guard = True
         self._main = None
         self._index: dict[str, UIAElementInfo] = {}
         # 방금 고른 행의 칸 자리(화면 좌표) — 행 메뉴를 그 자리에서 연다
@@ -151,15 +187,10 @@ class PywinautoEmpUi:
 
     # ---- 창·색인 ----
     def _find_main(self):
-        try:
-            windows = Desktop(backend='win32').windows()
-        except InvalidWindowHandle as e:
-            # 창 목록을 읽는 사이 창이 사라졌다 — 다음에 다시 하면 된다
-            raise AdapterRetry(ExportFail.BLOCKED, f'창 목록을 읽지 못했다: {e}') from e
-        for w in windows:
-            title = w.window_text() or ''
+        # pywinauto 의 창 목록은 읽는 사이 창 하나가 사라지면 통째로 실패한다 — 직접 열거한다
+        for hwnd, title, _kind in _all_windows():
             if WINDOW_TITLE_MARK in title and LOGIN_MARK not in title:
-                return w
+                return HwndWrapper(hwnd)
         raise AdapterRetry(ExportFail.WINDOW_MISSING, 'EMP 창이 없다')
 
     def _refresh(self) -> None:
@@ -182,14 +213,51 @@ class PywinautoEmpUi:
             raise AdapterRetry(ExportFail.BLOCKED, f'EMP 화면에서 {auto_id!r} 요소를 찾지 못했다')
         return UIAWrapper(info)
 
+    def _stop_if_user_back(self) -> None:
+        """사람이 돌아왔으면 멈춘다. 다음 동작을 시작하기 전마다 부른다."""
+        if self._guard and self._user_active is not None and self._user_active():
+            raise AdapterRetry(ExportFail.BUSY, '사람이 PC 를 쓰기 시작해 멈췄다')
+
+    @contextlib.contextmanager
+    def _cleanup(self) -> Iterator[None]:
+        """뒷정리 구간 — 사람이 돌아왔어도 끝까지 한다."""
+        before = self._guard
+        self._guard = False
+        try:
+            yield
+        finally:
+            self._guard = before
+
     def ensure_ready(self) -> None:
         """창이 있고 최소화가 풀려 있으며 모달 대화상자에 막히지 않았다."""
+        self._stop_if_user_back()
         self._main = self._find_main()
+        if not self._main.is_minimized() and _user32.GetForegroundWindow() != self._main.handle:
+            # EMP 그리드는 창이 뒤에 있으면 칸 편집·행 메뉴가 열리다 말다 한다(실기 2026-09-29).
+            # 작업자는 사람이 3분 넘게 자리를 비웠을 때만 EMP 를 만지므로 창을 앞으로 가져온다 —
+            # 뒤에 있는 창을 바로 부르는 것은 윈도우가 막아서, 최소화했다 복원한다
+            self._main.minimize()
+            time.sleep(self._poll_s)
         if self._main.is_minimized():
             self._main.restore()
             time.sleep(self._poll_s * 2)
         if not self._main.is_enabled():
-            raise AdapterRetry(ExportFail.BLOCKED, 'EMP 에 대화상자가 떠 있다')
+            # 앞선 시도가 남긴 '저장하시겠습니까' 창이면 닫고 계속한다. 다른 창이면 건드리지 않고 물러난다
+            try:
+                # 대화상자는 UIA 로 늦게 읽힐 때가 있다 — 6초로는 '저장하시겠습니까' 창을 못 읽고 막힘으로
+                # 끝났다(2026-09-29 저녁 EMP 9건이 6시간 멈춤). 넉넉히 기다리며 닫는다
+                self._wait_enabled(40.0)
+            except AdapterRetry as e:
+                titles = [title for _h, title, _k in _process_windows(self._main.process_id())]
+                auth = next((t for t in titles if any(m in t for m in AUTH_MARKS)), None)
+                if auth:
+                    raise AdapterRetry(
+                        ExportFail.AUTH_REQUIRED, f'EMP {auth[:40]} 창 — 직접 인증 필요'
+                    ) from e
+                shown = ', '.join(t[:30] for t in titles if t and WINDOW_TITLE_MARK not in t)
+                raise AdapterRetry(
+                    ExportFail.BLOCKED, f'EMP 에 대화상자가 떠 있다: {shown or "(제목 없음)"}'
+                ) from e
         self._refresh()
         if GRID_ID not in self._index:
             raise AdapterRetry(ExportFail.BLOCKED, 'EMP 주문관리 그리드가 화면에 없다')
@@ -222,10 +290,16 @@ class PywinautoEmpUi:
             )
         return hits[0]
 
+    def seller_code(self, order_no: str) -> str:
+        """그 주문 행의 판매자상품코드. 비어 있으면 빈 글자."""
+        return (self.find_row(order_no).values.get(COL_SELLER_CODE) or '').strip()
+
     def read(self, order_no: str) -> CellValues:
         row = self.find_row(order_no)
         return CellValues(
-            parse_won(row.values.get(COL_COST)), parse_won(row.values.get(COL_SHIPPING))
+            parse_won(row.values.get(COL_COST)),
+            parse_won(row.values.get(COL_SHIPPING)),
+            (row.values.get(COL_NOTE) or '').strip(),
         )
 
     def _cell(self, row: GridRow, prefix: str):
@@ -320,7 +394,8 @@ class PywinautoEmpUi:
 
         주문번호가 두 토막이면(GS이숍) 토막마다 검색해 본다. 끝나면 clear_keyword() 로 되돌린다.
         """
-        for word in dict.fromkeys([order_no.split(':', 1)[0], *order_no.split()]):
+        # 구분 글자(':' · 공백)로 나눈 토막마다 검색한다 — EMP 검색은 한 토막만 받는다
+        for word in dict.fromkeys(t for t in re.split(r'[:\s]+', order_no.strip()) if t):
             self.set_keyword(word)
             self.search()
             if any(order_matches(order_no, r.values.get(COL_ORDER_NO, '')) for r in self.rows()):
@@ -329,14 +404,16 @@ class PywinautoEmpUi:
 
     def clear_keyword(self) -> None:
         """검색어를 지우고 다시 검색해 목록을 되돌린다."""
-        self.set_keyword('')
-        self.search()
+        with self._cleanup():
+            self.set_keyword('')
+            self.search()
 
     def search(self, today: dt.date | None = None) -> None:
         """검색 기간에 오늘이 들어가게 한 뒤 검색시작을 눌러 그리드를 다시 채운다.
 
         종료일이 어제로 남아 있으면 오늘 들어온 주문이 그리드에 없다(실기 2026-09-29).
         """
+        self._stop_if_user_back()
         today = today or dt.datetime.now().astimezone().date()
         start, end = self._ribbon_date(START_DATE), self._ribbon_date(END_DATE)
         if (start, end) != period_to_cover(start, end, today):
@@ -400,6 +477,7 @@ class PywinautoEmpUi:
                 break
         if cell is None:
             raise AdapterRetry(ExportFail.BLOCKED, 'EMP 그리드에서 그 주문 행이 화면 밖이다')
+        self._focus_grid()
         self._selected_cell = cell.rectangle()
         self._post_click(self._el(GRID_ID).element_info.handle, cell.rectangle())
         # 상세 미리보기는 조금 늦게 바뀐다 — 그 주문번호가 보일 때까지 기다린다
@@ -493,10 +571,17 @@ class PywinautoEmpUi:
                 time.sleep(self._poll_s)
         return []
 
+    def _press_quietly(self, item) -> None:
+        try:
+            item.invoke()
+        except Exception:  # noqa: BLE001 — 눌렸는지는 뒤의 상태 되읽기로 확인한다
+            log.info('EMP 메뉴 항목 누르기가 오류로 끝났다')
+
     def cancel(self, order_no: str, *, dry_run: bool = False) -> None:
         """행 메뉴 → 상태변경 → 취소. 창 메시지로만 한다(실제 마우스·키보드는 쓰지 않는다)."""
         if (self.find_row(order_no).values.get(COL_STATE) or '').strip() == STATE_CANCELLED:
             return
+        self._stop_if_user_back()
         self._select_row(order_no)
         grid = self._el(GRID_ID).element_info.handle
         before = {h for h, _title, _kind in _process_windows(self._main.process_id())}
@@ -514,23 +599,43 @@ class PywinautoEmpUi:
                 log.info('EMP 취소 항목까지 확인(누르지 않음): %s', order_no)
                 self._close_menus(before)
                 return
-            handle, item = targets[0]
-            self._post_click(handle, item.rectangle())
+            # 취소를 누르기 직전이 마지막 확인이다 — 누른 뒤에는 확인 창을 닫는 데까지 끝낸다
+            self._stop_if_user_back()
+            _handle, item = targets[0]
+            # 메뉴 창에 보낸 클릭은 먹지 않았다(실기 2026-09-29: 상태가 그대로) — UIA 동작으로 누른다.
+            # 누르면 확인 창이 떠서 호출이 돌아오지 않으므로 따로 돌리고 기다리지 않는다
+            threading.Thread(target=self._press_quietly, args=(item,), daemon=True).start()
         except AdapterRetry:
             # 열어 둔 메뉴를 남기지 않는다
-            self._close_menus(before)
+            with self._cleanup():
+                self._close_menus(before)
             raise
-        time.sleep(self._poll_s * 2)
-        self._settle_after_cancel()
-        self.reload()
+        with self._cleanup():
+            time.sleep(self._poll_s * 2)
+            self._settle_after_cancel()
+            self.reload()
         got = (self.find_row(order_no).values.get(COL_STATE) or '').strip()
         if got != STATE_CANCELLED:
             raise AdapterReject(
                 ExportFail.VERIFY_MISMATCH, f'EMP 상태를 취소로 바꿨는데 {got!r} 로 읽힌다'
             )
 
-    def _settle_after_cancel(self, timeout_s: float = 30.0) -> None:
-        """취소 뒤 뜨는 창을 처리한다 — 아는 문구(취소·변경 확인, 완료 안내)만 누르고 나머지는 거절한다."""
+    def _settle_after_cancel(self, timeout_s: float = 90.0) -> None:
+        """취소 뒤 뜨는 창을 처리한다 — 아는 문구(취소·변경 확인, 완료 안내)만 누르고 나머지는 거절한다.
+
+        확인 창('선택하신 1건의 주문의 상태를 취소 상태로 강제 변경 하시겠습니까?')은 30초 뒤 스스로
+        실행된다(실기 2026-09-29). 메뉴 누름 호출이 끝나지 않은 동안에는 문구를 읽을 수 없어,
+        못 읽으면 누르지 않고 스스로 실행될 때까지 기다린다. 읽었는데 1건이 아니면 물러난다.
+        """
+        # 1) 확인 창이 스스로 실행돼 닫힐 때까지 기다린다. 이 동안 UIA 는 쓰지 않는다 — 메뉴 누름
+        #    호출이 끝나지 않은 채 UIA 로 창을 읽으면 작업자가 통째로 멈춘다(실기 2026-09-29: 10분 넘게 무응답)
+        pid = self._main.process_id()
+        auto_run = time.monotonic() + AUTO_RUN_WAIT_S
+        while time.monotonic() < auto_run:
+            if not any(kind == DIALOG_CLASS for _h, _t, kind in _process_windows(pid)):
+                break
+            time.sleep(self._poll_s)
+        # 2) 그 뒤에 남았거나 새로 뜬 창(완료 안내 등)을 읽어 처리한다
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             found = self.dialogs()
@@ -540,6 +645,17 @@ class PywinautoEmpUi:
                 time.sleep(self._poll_s)
                 continue
             _handle, title, message, buttons = found[0]
+            if not message.strip() or not buttons:
+                # 아직 다 그려지지 않았거나 스스로 닫히는 진행 창이다 — 누르지 않고 기다린다
+                time.sleep(self._poll_s)
+                continue
+            count = _SELECTED_COUNT.search(message)
+            if count is not None and int(count.group(1)) != 1:
+                self._click_dialog_button(buttons, NO_BUTTONS)
+                raise AdapterReject(
+                    ExportFail.AMBIGUOUS,
+                    f'EMP 취소 확인 창이 {count.group(1)}건을 묻는다 — 누르지 않았다',
+                )
             known = ('취소' in message or '변경' in message) and UNSAVED_MARK not in message
             if not known:
                 raise AdapterReject(
@@ -564,9 +680,9 @@ class PywinautoEmpUi:
             _user32.GetClassNameW(hwnd, name, 256)
         return hwnd, name.value
 
-    def _window_text(self, hwnd: int) -> str:
-        buf = ctypes.create_unicode_buffer(128)
-        _user32.SendMessageW(hwnd, _WM_GETTEXT, 128, buf)
+    def _window_text(self, hwnd: int, size: int = 128) -> str:
+        buf = ctypes.create_unicode_buffer(size)
+        _user32.SendMessageTimeoutW(hwnd, _WM_GETTEXT, size, buf, 0x0002, 2000, None)
         return buf.value
 
     def _wait_focus(self, want_edit: bool, timeout_s: float = 3.0) -> int:
@@ -580,7 +696,22 @@ class PywinautoEmpUi:
         what = '편집 상자가 열리지' if want_edit else '편집이 끝나지'
         raise AdapterRetry(ExportFail.TIMEOUT, f'EMP 칸 {what} 않았다')
 
-    def _edit_cell(self, order_no: str, prefix: str, column: str, value: int) -> None:
+    def _focus_grid(self) -> None:
+        """키보드 포커스를 그리드로 옮긴다.
+
+        주문번호로 검색한 뒤에는 포커스가 검색어 칸에 남아, 그리드에 보낸 클릭·글자가 먹지 않았다
+        (실기 2026-09-29: '그리드가 포커스를 받지 못했다(…EDIT…)').
+        """
+        grid = self._el(GRID_ID)
+        if self._focus()[0] == grid.element_info.handle:
+            return
+        try:
+            grid.set_focus()
+        except Exception:  # noqa: BLE001 — 못 옮겼으면 아래 확인에서 걸린다
+            log.info('EMP 그리드로 포커스를 옮기지 못했다')
+        time.sleep(self._poll_s)
+
+    def _edit_cell(self, order_no: str, prefix: str, column: str, value: int | str) -> None:
         """그리드 칸 하나에 값을 넣는다(저장 전).
 
         실제 마우스·전역 키 입력은 쓰지 않는다 — 다른 창이 앞에 있으면 글자가 그 창으로 샌다
@@ -588,6 +719,7 @@ class PywinautoEmpUi:
         칸 더블클릭 → 숫자 한 글자(편집 상자가 열린다) → 편집 상자에 값을 통째로 넣고 되읽기 →
         Enter → 행 값 확인. 글자를 하나씩 보내면 기존 값과 섞인다(실기: 57131 → 507131).
         """
+        self._stop_if_user_back()
         row = self.find_row(order_no)
         cell = self._cell(row, prefix)
         grid = self._el(GRID_ID).element_info.handle
@@ -597,6 +729,7 @@ class PywinautoEmpUi:
             raise AdapterRetry(ExportFail.BLOCKED, f'EMP 그리드에서 {column} 칸이 화면 밖이다')
         if rect.bottom > area.bottom:
             raise AdapterRetry(ExportFail.BLOCKED, 'EMP 그리드에서 그 주문 행이 화면 밖이다')
+        self._focus_grid()
         point = wintypes.POINT((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
         _user32.ScreenToClient(grid, ctypes.byref(point))
         lparam = (point.y << 16) | (point.x & 0xFFFF)
@@ -610,23 +743,32 @@ class PywinautoEmpUi:
             time.sleep(0.05)
         time.sleep(self._poll_s)
         hwnd, cls = self._focus()
-        if hwnd != grid:
-            raise AdapterRetry(ExportFail.BLOCKED, f'EMP 그리드가 포커스를 받지 못했다({cls})')
         text = str(value)
-        _user32.PostMessageW(grid, _WM_CHAR, ord(text[0]), 0)
-        editor = self._wait_focus(want_edit=True)
+        if hwnd == grid:
+            # 칸만 골라졌다 — 숫자 한 글자를 보내 편집 상자를 연다
+            _user32.PostMessageW(grid, _WM_CHAR, ord(text[0]), 0)
+            editor = self._wait_focus(want_edit=True)
+        elif 'EDIT' in cls.upper():
+            # 더블클릭으로 편집 상자가 바로 열렸다(창이 앞에 있을 때, 실기 2026-09-29) —
+            # 검색어 칸 같은 다른 편집 상자일 수도 있으니 아래 위치 확인으로 가린다
+            editor = hwnd
+        else:
+            raise AdapterRetry(ExportFail.BLOCKED, f'EMP 그리드가 포커스를 받지 못했다({cls})')
         # 편집 상자가 대상 칸 위에 열렸는지 본다 — 다른 칸(다른 주문 행·배송방법 등)에 열렸으면
         # 아무것도 넣지 않고 닫는다(실기 2026-09-29: 값이 다른 행에 찍혔다)
         box = wintypes.RECT()
         _user32.GetWindowRect(editor, ctypes.byref(box))
         middle_x, middle_y = (box.left + box.right) // 2, (box.top + box.bottom) // 2
         if not (rect.left <= middle_x <= rect.right and rect.top <= middle_y <= rect.bottom):
-            _user32.PostMessageW(editor, _WM_KEYDOWN, _VK_ESCAPE, 0)
-            _user32.PostMessageW(editor, _WM_KEYUP, _VK_ESCAPE, 0)
-            self._wait_focus(want_edit=False)
-            self.reload()
+            if _user32.GetParent(editor) == grid:
+                # 그리드의 편집 상자가 다른 칸에 열렸다 — 값 없이 닫고 그리드를 되돌린다
+                _user32.PostMessageW(editor, _WM_KEYDOWN, _VK_ESCAPE, 0)
+                _user32.PostMessageW(editor, _WM_KEYUP, _VK_ESCAPE, 0)
+                time.sleep(self._poll_s)
+                with self._cleanup():
+                    self.reload()
             raise AdapterRetry(
-                ExportFail.BLOCKED, f'EMP {column} 칸이 아닌 곳에 편집 상자가 열렸다'
+                ExportFail.BLOCKED, f'EMP {column} 칸이 아닌 곳에 편집 상자가 열렸다({cls})'
             )
         _user32.SendMessageW(editor, _WM_SETTEXT, 0, ctypes.c_wchar_p(text))
         if self._window_text(editor) != text:
@@ -639,14 +781,15 @@ class PywinautoEmpUi:
         _user32.PostMessageW(editor, _WM_KEYUP, _VK_RETURN, 0)
         self._wait_focus(want_edit=False)
         time.sleep(self._poll_s)
-        got = parse_won(self.find_row(order_no).values.get(column))
+        shown = self.find_row(order_no).values.get(column)
+        got = parse_won(shown) if isinstance(value, int) else (shown or '').strip()
         if got != value:
             # 값이 다른 칸에 들어갔을 수 있다(실기 2026-09-29: 다른 주문 행에 찍힘) — 저장하지 않고
             # 그리드를 서버 값으로 되돌린다. 남겨 두면 사람이 저장을 누를 때 함께 저장된다
             self.reload()
             raise AdapterReject(
                 ExportFail.VERIFY_MISMATCH,
-                f'EMP {column} 칸에 {value:,} 을 넣었는데 {got} 로 읽힌다',
+                f'EMP {column} 칸에 {value!r} 을 넣었는데 {got!r} 로 읽힌다',
             )
 
     def _toolbar_button(self, name: str):
@@ -670,7 +813,12 @@ class PywinautoEmpUi:
         _user32.PostMessageW(toolbar, _WM_LBUTTONUP, 0, lparam)
 
     def dialogs(self) -> list[tuple[int, str, str, list]]:
-        """EMP 가 띄운 보이는 대화상자들 — (핸들, 제목, 문구, 버튼 요소들)."""
+        """EMP 가 띄운 보이는 대화상자들 — (핸들, 제목, 문구, 버튼 요소들).
+
+        EMP 의 확인 창은 자식 창에 글자가 없는 새 모양 대화상자라 UIA 로 읽어야 한다(자식 창을
+        직접 읽으면 문구·버튼이 비어 온다, 실기 2026-09-29). 메뉴 항목을 누르는 호출이 끝나지 않은
+        동안에는 UIA 도 빈 값을 주므로, 부르는 쪽이 빈 문구를 '아직 못 읽음'으로 보고 다시 읽는다.
+        """
         found = []
         pid = self._main.process_id()
         for handle, title, kind in _process_windows(pid):
@@ -680,8 +828,8 @@ class PywinautoEmpUi:
                 dialog = UIAWrapper(UIAElementInfo(handle))
                 message = ' '.join(t.window_text() for t in dialog.descendants(control_type='Text'))
                 buttons = dialog.descendants(control_type='Button')
-            except Exception:  # noqa: BLE001, S112 — 이미 닫힌 창
-                continue
+            except Exception:  # noqa: BLE001 — 읽지 못했다(닫히는 중이거나 UIA 가 바쁘다)
+                message, buttons = '', []
             found.append((handle, title, message, buttons))
         return found
 
@@ -701,11 +849,20 @@ class PywinautoEmpUi:
     def _wait_dialog(self, timeout_s: float) -> tuple[int, str, str, list] | None:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            found = self.dialogs()
+            # 문구를 읽은 창만 돌려준다 — 빈 문구는 아직 못 읽은 것이라 다시 읽는다
+            found = [d for d in self.dialogs() if d[2].strip()]
             if found:
                 return found[0]
             time.sleep(self._poll_s)
         return None
+
+    def _close_editor(self) -> None:
+        """열려 있는 편집 상자를 값 없이 닫는다."""
+        hwnd, cls = self._focus()
+        if hwnd and 'EDIT' in cls.upper():
+            _user32.PostMessageW(hwnd, _WM_KEYDOWN, _VK_ESCAPE, 0)
+            _user32.PostMessageW(hwnd, _WM_KEYUP, _VK_ESCAPE, 0)
+            time.sleep(self._poll_s)
 
     def save(self) -> None:
         """저장을 누르고 '저장완료' 안내창을 닫는다. 다른 창이 뜨면 건드리지 않고 거절한다."""
@@ -721,11 +878,18 @@ class PywinautoEmpUi:
         self._click_dialog_button(buttons, OK_BUTTONS)
         self._wait_enabled()
 
-    def _wait_enabled(self, timeout_s: float = 10.0) -> None:
+    def _wait_enabled(self, timeout_s: float = 20.0) -> None:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            if self._main.is_enabled() and not self.dialogs():
+            found = self.dialogs()
+            if self._main.is_enabled() and not found:
                 return
+            for _handle, _title, message, buttons in found:
+                # 저장 안 된 편집을 묻는 창은 늦게 읽혀도 여기서 닫는다 — 우리가 넣은 값은 저장을 거친
+                # 뒤에만 남기므로, 이 창이 뜬 것은 버려도 되는 값이다(실기 2026-09-29: 창이 남아 EMP 가 막혔다)
+                if UNSAVED_MARK in message:
+                    self._click_dialog_button(buttons, NO_BUTTONS)
+                    log.warning('EMP 에 저장 안 된 편집이 남아 있어 버렸다')
             time.sleep(self._poll_s)
         raise AdapterRetry(ExportFail.BLOCKED, 'EMP 대화상자가 닫히지 않았다')
 
@@ -750,12 +914,29 @@ class PywinautoEmpUi:
         time.sleep(self._poll_s * 4)
         self._refresh()
 
-    def write(self, order_no: str, cost: int, shipping_fee: int) -> None:
-        """원가·배송비 칸에 값을 넣고 저장한 뒤 새로고침한다. 이미 같은 값인 칸은 건드리지 않는다."""
+    def write(self, order_no: str, cost: int, shipping_fee: int, memo: str = '') -> None:
+        """원가·배송비(·한줄메모) 칸에 값을 넣고 저장한 뒤 새로고침한다. 이미 같은 값인 칸은 건드리지 않는다.
+
+        한줄메모는 그 글이 이미 들어 있으면 두고, 다른 글이 있으면 ' / ' 로 뒤에 붙인다(사람이 쓴 글을 지우지 않는다).
+        """
         current = self.read(order_no)
-        if (current.cost or 0) != cost:
-            self._edit_cell(order_no, CELL_COST, COL_COST, cost)
-        if (current.shipping_fee or 0) != shipping_fee:
-            self._edit_cell(order_no, CELL_SHIPPING, COL_SHIPPING, shipping_fee)
-        self.save()
-        self.reload()
+        try:
+            if (current.cost or 0) != cost:
+                self._edit_cell(order_no, CELL_COST, COL_COST, cost)
+            if (current.shipping_fee or 0) != shipping_fee:
+                self._edit_cell(order_no, CELL_SHIPPING, COL_SHIPPING, shipping_fee)
+            note = current.memo or ''
+            if memo and memo not in note:
+                self._edit_cell(order_no, CELL_NOTE, COL_NOTE, f'{note} / {memo}' if note else memo)
+            # 저장을 누르기 직전이 마지막 확인이다 — 누른 뒤에는 안내창을 닫는 데까지 끝낸다
+            self._stop_if_user_back()
+        except AdapterRetry as e:
+            if e.reason is ExportFail.BUSY:
+                # 넣다 만 값을 남기지 않는다 — 사람이 저장을 누르면 함께 저장된다
+                with self._cleanup():
+                    self._close_editor()
+                    self.reload()
+            raise
+        with self._cleanup():
+            self.save()
+            self.reload()

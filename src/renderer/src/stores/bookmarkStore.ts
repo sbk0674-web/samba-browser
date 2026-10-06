@@ -14,6 +14,13 @@ interface BookmarkState {
   createLink: (folderId: number | null, title: string, url: string) => Promise<void>
   rename: (id: number, kind: 'folder' | 'link', name: string) => Promise<void>
   move: (id: number, kind: 'folder' | 'link', toFolderId: number | null) => Promise<void>
+  // 끌어 옮기기 — 폴더 안 자리까지 지정한다
+  place: (
+    id: number,
+    kind: 'folder' | 'link',
+    toFolderId: number | null,
+    toIndex: number
+  ) => Promise<void>
   removeFolder: (id: number) => Promise<void>
   sort: (folderId: number | null) => Promise<void>
   exportBookmarks: () => Promise<string | undefined>
@@ -69,6 +76,10 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
   },
   move: async (id, kind, toFolderId) => {
     const r = await window.samba.bookmarks.move({ id, kind, toFolderId })
+    if (r.ok) await get().load()
+  },
+  place: async (id, kind, toFolderId, toIndex) => {
+    const r = await window.samba.bookmarks.place({ id, kind, toFolderId, toIndex })
     if (r.ok) await get().load()
   },
   removeFolder: async (id) => {

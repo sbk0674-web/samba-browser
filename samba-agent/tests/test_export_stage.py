@@ -205,3 +205,79 @@ def test_취소_연동_요청이_실패해도_예외를_내지_않는다(queue):
 
     export_cancel = make_cancel_exporter(queue, ExportRouting(), broken)
     assert export_cancel('A1') == '외부 취소 연동 요청 실패: RuntimeError'
+
+
+def test_구매까지_끝낸_주문은_취소_연동하지_않는다(queue):
+    from samba_agent.export.stage import make_cancel_exporter
+
+    queue.enqueue('A1', 'shopmine', 50000, 0)
+    export_cancel = make_cancel_exporter(queue, ExportRouting(), lambda _o: '쿠팡(unclehg)')
+    assert export_cancel('A1') == '구매까지 끝낸 주문 — 취소 연동하지 않음'
+    assert queue.find('A1', 'shopmine_cancel') is None
+
+
+def test_나중에_하는_대상은_기다리지_않고_예약으로_끝낸다(queue):
+    queue.beat(['emp'])
+    slept: list[float] = []
+    out = make_exporter(queue, ROUTING, wait_s=240, sleep=slept.append, deferred=('emp',))(state())
+    assert out.payload['export'] == 'pending'
+    assert slept == []
+    assert '예약' in out.reason
+    assert queue.find('A1', 'emp') is not None
+
+
+def test_한_번_시도한_대기_요청은_기다림을_막지_않는다(queue):
+    queue.beat(['emp'])
+    old = queue.enqueue('B9', 'emp', 1000, 0)
+    claimed = queue.claim_next(['emp'])
+    assert claimed is not None and claimed.id == old.id
+    queue.retry_later(old.id, ExportFail.NOT_FOUND, '아직 없다', 600)
+
+    def sleep(_s: float) -> None:
+        req = queue.claim_next(['emp'])
+        assert req is not None
+        queue.done(req.id, '기입 완료')
+
+    out = make_exporter(queue, ROUTING, wait_s=10, sleep=sleep)(state())
+    assert out.payload['export'] == 'done'
+
+
+def test_취소_연동은_작업자가_끝내면_완료로_알린다(queue):
+    from samba_agent.export.stage import make_cancel_exporter
+
+    queue.beat(['shopmine_cancel'])
+
+    def sleep(_s: float) -> None:
+        req = queue.claim_next(['shopmine_cancel'])
+        assert req is not None
+        queue.done(req.id, '처리 1건')
+
+    export_cancel = make_cancel_exporter(
+        queue, ExportRouting(), lambda _o: '쿠팡(unclehg)', wait_s=10, sleep=sleep
+    )
+    assert export_cancel('A1') == 'shopmine 취소 연동 완료'
+
+
+def _with_source(no: str) -> AgentResult:
+    return AgentResult(
+        status='ok',
+        reason='기록 완료',
+        payload={
+            'saved': True,
+            'values': {'real_price': 62470, 'shipping_fee': 0, 'source_order_no': no},
+        },
+    )
+
+
+def test_EMP_요청에는_소싱주문번호를_메모로_싣는다(queue):
+    make_exporter(queue, ROUTING, wait_s=0, deferred=('emp',))(
+        state(seller='GS이숍(캐논)', recorder=_with_source('202609291041430002'))
+    )
+    assert queue.find('A1', 'emp').memo == '202609291041430002'
+
+
+def test_샵마인_요청에는_메모를_싣지_않는다(queue):
+    make_exporter(queue, ROUTING, wait_s=0)(
+        state(seller='스마트스토어', recorder=_with_source('X1'))
+    )
+    assert queue.find('A1', 'shopmine').memo == ''
