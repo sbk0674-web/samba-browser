@@ -90,6 +90,24 @@ describe('dumpScreen', () => {
     expect(adb.calls[1].slice(0, 3)).toEqual(['-s', 'R3CRA05HY3R', 'shell'])
   })
 
+  it('토스 홈처럼 덤프가 안 되는 화면은 uiautomator 를 부르지 않고 빈 화면을 돌려준다(실기 2026-10-06)', async () => {
+    const adb = new FakeAdb()
+    adb.reply(
+      'dumpsys window displays',
+      '  mCurrentFocus=Window{8d3be u0 viva.republica.toss/im.toss.features.main.ui.MainActivity}'
+    )
+    adb.reply('uiautomator dump', 'ERROR: could not get idle state', 1)
+    const screen = await dumpScreen(adb, 'S')
+    expect(screen).toEqual({
+      serial: 'S',
+      width: 0,
+      height: 0,
+      app: 'viva.republica.toss',
+      elements: []
+    })
+    expect(adb.calls.some((c) => c.join(' ').includes('uiautomator'))).toBe(false)
+  })
+
   it('덤프가 실패하면 빈 화면을 돌려준다(보안 앱·게임)', async () => {
     const adb = new FakeAdb()
     adb.reply('dumpsys window displays', '')

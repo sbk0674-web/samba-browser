@@ -105,9 +105,10 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     methodSheetTitle: /결제수단 선택/,
     installmentText: /할부 선택/,
     // 카드 줄을 눌러 바꾸면 화면이 내려가 [결제수단 변경]이 안 보일 수 있다 — 할부 줄도 결제 화면 표식으로 본다
-    payScreenHint: /결제수단 변경|할부 선택/,
-    // 실기: 알림창의 결제 알림을 눌러 들어가면 엉뚱한 곳을 누르기 일쑤였다 — 앱을 열면 결제 요청 화면이 뜬다
-    openBy: 'app'
+    payScreenHint: /결제수단 변경|할부 선택/
+    // 결제 알림을 먼저 누른다(openBy 기본). 앱을 바로 열면 홈이 뜨고(결제 화면이 저절로 뜨지 않는다) 홈은 UI 덤프가
+    // 안 돼("could not get idle state") 폴링마다 15초씩 멈춰 7분을 다 쓴다(실기 2026-10-06). 알림은 제목이 정확히
+    // 같은 그 앱의 알림만 누르므로 엉뚱한 곳으로 들어가지 않는다 — 누르면 바로 결제 화면(OnlinePayActivity)
   },
   payco: {
     id: 'payco',

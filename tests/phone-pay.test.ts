@@ -650,12 +650,12 @@ describe('결제 요청이 푸시 알림으로만 와 있을 때 — 알림창�
   const done = screen(TOSS.packageName, [el(4, '결제가 완료되었습니다', { clickable: false })])
   const TOSS_PUSH = { title: '무신사 결제하기', text: '알림을 누르고 결제를 완료해주세요.' }
 
-  // 알림 우선 규칙 자체를 검증하는 묶음 — 토스는 이제 앱을 바로 열므로(openBy: 'app') 여기서만 알림 우선으로 되돌린다
+  // 알림 우선 규칙을 검증하는 묶음 — 토스 기본값(openBy 없음 = 알림 우선)을 명시해 두고 끝나면 되돌린다
   beforeEach(() => {
     PAY_PROVIDERS.toss.openBy = 'notification'
   })
   afterEach(() => {
-    PAY_PROVIDERS.toss.openBy = 'app'
+    delete PAY_PROVIDERS.toss.openBy
   })
 
   // 실기 그대로: 카카오톡으로 온 "토스" 채널 메시지(제목이 토스)와 토스 앱의 결제 알림이 함께 떠 있다
@@ -697,9 +697,12 @@ describe('결제 요청이 푸시 알림으로만 와 있을 때 — 알림창�
     expect(findPayNotification(s, [])).toBeUndefined()
   })
 
-  it('토스는 알림창을 거치지 않고 앱을 바로 연다 — 알림 클릭이 엉뚱한 곳으로 들어가던 실기 대응', async () => {
-    PAY_PROVIDERS.toss.openBy = 'app'
-    const h = harness({ screens: [tossHome, payAsk, payAsk, keypad, done, done] })
+  it('토스도 결제 알림을 먼저 누른다 — 앱을 바로 열면 홈이라 결제 화면이 안 뜨고 덤프도 안 됐다(실기 2026-10-06)', async () => {
+    // 기본 openBy(알림 우선 — 'app' 이 아니다). 알림을 누르면 바로 결제 화면이다
+    expect(PAY_PROVIDERS.toss.openBy).not.toBe('app')
+    const h = harness({
+      screens: [shade([el(1, '무신사 결제하기')]), payAsk, payAsk, keypad, done, done]
+    })
     const calls: string[] = []
     h.deps.notifications = {
       open: async () => void calls.push('open'),
@@ -711,10 +714,9 @@ describe('결제 요청이 푸시 알림으로만 와 있을 때 — 알림창�
     }
     const r = await runPayApproval(h.deps, request())
     expect(r).toEqual({ ok: true })
-    expect(h.deps.launchApp).toHaveBeenCalledTimes(1)
-    // 앱을 열자 결제 화면이 떴으므로 알림창은 한 번도 열지 않았다
-    expect(calls).toEqual([])
-    expect(PAY_PROVIDERS.toss.openBy).toBe('app')
+    // 알림을 눌러 들어갔으니 앱을 따로 열지 않는다
+    expect(h.deps.launchApp).not.toHaveBeenCalled()
+    expect(calls.slice(0, 2)).toEqual(['list', 'open'])
   })
 
   it('그 앱이 올린 결제 알림이 있으면 앱을 열기 전에 그 알림부터 누른다(가장 짧은 길)', async () => {

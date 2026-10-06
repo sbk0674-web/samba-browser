@@ -114,9 +114,32 @@ export async function currentApp(adb: AdbRunner, serial: string): Promise<string
   return parseCurrentApp(res.stdout)
 }
 
+/** dumpsys 출력에서 최상위 액티비티(`패키지/클래스`)를 뽑는다. 없으면 빈 문자열 */
+export function parseCurrentActivity(stdout: string): string {
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes('mCurrentFocus')) continue
+    const m = /\s([A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+)/.exec(line)
+    if (m) return m[1]
+  }
+  return ''
+}
+
+/**
+ * UI 덤프를 아예 뜨지 않는 화면 — 애니메이션이 계속 돌아 uiautomator 가 idle 을 못 잡고("could not get idle state")
+ * 호출마다 15초씩 멈추는 화면. 실기 2026-10-06 토스 홈: 결제 흐름이 폴링마다 멈춰 7분을 다 썼다.
+ * 이 화면은 어차피 누를 것이 없다 — 빈 화면으로 바로 돌려준다
+ */
+export const NO_DUMP_ACTIVITIES: ReadonlySet<string> = new Set([
+  'viva.republica.toss/im.toss.features.main.ui.MainActivity'
+])
+
 /** 폰에서 덤프를 떠 와 파싱한다. 실패(보안 앱·게임)하면 elements 가 빈 화면을 돌려준다 */
 export async function dumpScreen(adb: AdbRunner, serial: string): Promise<PhoneScreen> {
-  const app = await currentApp(adb, serial)
+  const focus = await adb.run(shellArgs(serial, ['dumpsys', 'window', 'displays']))
+  const app = parseCurrentApp(focus.stdout)
+  if (NO_DUMP_ACTIVITIES.has(parseCurrentActivity(focus.stdout))) {
+    return { serial, width: 0, height: 0, app, elements: [] }
+  }
   const dumped = await adb.run(shellArgs(serial, `uiautomator dump ${DUMP_PATH}`))
   if (dumped.code !== 0) return { serial, width: 0, height: 0, app, elements: [] }
   const xml = await adb.run(shellArgs(serial, `cat ${DUMP_PATH}`), 20_000)
