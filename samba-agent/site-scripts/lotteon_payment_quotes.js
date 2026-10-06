@@ -37,7 +37,8 @@ await sleep(300);
 let chk = await page.get({selector:'body'});
 if (!/결제수단/.test(chk.tree)) return { quotes:[], base_cost:null, note:'payments UI not found on target tab: '+page.url() };
 
-const defMethods = ['신용카드','카카오페이','네이버페이','토스페이','삼성페이','휴대폰결제','퀵계좌이체','온누리상품권'];
+// 간편결제 = L.PAY 카드(롯데카드) — 롯데카드 즉시할인이 붙는 줄(사용자 2026-10-06). 카드는 buyer 가 easy_pay_card 로 채운다
+const defMethods = ['간편결제','신용카드','카카오페이','네이버페이','토스페이','삼성페이','휴대폰결제','퀵계좌이체','온누리상품권'];
 const methods = (args.methods && args.methods.length) ? args.methods : defMethods;
 const defCards = ['롯데카드','신한카드','KB국민카드','삼성카드','현대카드','BC카드','하나카드','씨티카드','우리카드','NH농협카드'];
 const cards = (args.cards && args.cards.length) ? args.cards.slice(0,12) : defCards;
@@ -57,6 +58,10 @@ for (const m of methods) {
       const ok = await pickCard(c);
       quotes.push({method:m, card:c, cost: ok ? await curCost() : null});
     }
+  } else if (m === '간편결제') {
+    // L.PAY 카드 = 롯데카드 한 줄 — 카드선택에서 골라야 즉시할인이 금액에 반영된다
+    const ok = await pickCard('롯데카드');
+    quotes.push({method:m, card: ok ? '롯데카드' : null, cost: ok ? await curCost() : null});
   } else {
     quotes.push({method:m, card:null, cost: await curCost()});
   }
