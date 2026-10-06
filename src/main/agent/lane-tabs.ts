@@ -34,6 +34,10 @@ export function laneTabs(real: TabManager, state: LaneState): TabManager {
         .map((t) => ({ ...t, active: t.id === state.current })),
     active: (): Tab | null =>
       state.current && state.owned.has(state.current) ? real.get(state.current) : null,
+    // 폰 배선(tab-port)이 보는 "자동화가 조작하는 진짜 탭" 도 레인의 작업 탭이다 — 전역 표식을 보면
+    // 사람이 보던 탭의 호스트로 계정을 찾아 결제가 거부됐다(실기 2026-10-06)
+    workingTab: (): Tab | null =>
+      state.current && alive(state.current) ? real.get(state.current) : null,
     agentTarget: (): Tab | null => {
       if (state.current && alive(state.current)) return real.targetTab(state.current)
       // 작업 창이 닫혔으면(결제창 등) 레인의 마지막 탭으로 돌아간다

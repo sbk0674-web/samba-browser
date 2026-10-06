@@ -17,6 +17,7 @@ import { hasConnectedPhone } from './tools-phone'
 import type { PayToolRequest, PhoneToolContext, SmsCodeOutcome } from './tools-phone'
 import type { PayResult } from '../phone/pay'
 import type { PhoneRunContext } from '../phone/wiring'
+import { createTabPagePort } from '../phone/tab-port'
 import { appendSiteMemory, buildSystemPrompt } from './prompt'
 import { appendPlaybooks, matchPlaybooks, type PlaybookDto } from '../../shared/playbook'
 import type { AgentToolCall } from '../../shared/site-memory'
@@ -948,14 +949,18 @@ ${CODEX_NO_IMAGE_NOTE}`
       if (e.type === 'step') opts.onStep?.(e.label, e.ok)
     }
     const phones = this.phones
+    const laneState = opts.lane ? this.laneStateOf(opts.lane) : null
+    const laneView = laneState ? laneTabs(this.tabs, laneState) : null
     const phoneCtx = (): PhoneRunContext => ({
       jobId,
       confirm: async () => true,
       onStep: (label, ok) => emit({ type: 'step', label, ok }),
       handoff: async (req) => ({ outcome: 'skipped', url: req.currentUrl() }),
-      cancelled: () => false
+      cancelled: () => false,
+      // 레인 호출이면 폰 배선(계정 특정·결제창 확인)도 레인의 작업 탭을 본다 — 전역 작업 탭을 보면
+      // 사람이 보던 탭의 호스트로 계정을 찾아 "계정을 특정할 수 없음"으로 거부됐다(실기 2026-10-06)
+      ...(laneView ? { page: createTabPagePort(laneView) } : {})
     })
-    const laneState = opts.lane ? this.laneStateOf(opts.lane) : null
     const baseCtx = this.buildToolContext({
       s: { ...s, permissionMode: 'full', finalConfirm: false },
       jobId,
@@ -981,8 +986,8 @@ ${CODEX_NO_IMAGE_NOTE}`
     // 브릿지 작업은 늘 뒤에서 — 사람이 보는 탭을 바꾸지 않는다
     const bridgeCtx = { ...baseCtx, keypadEntered: this.bridgeKeypadEntered, background: true }
     const server = createSambaTools(
-      laneState
-        ? { ...bridgeCtx, tabs: laneTabs(this.tabs, laneState) }
+      laneView
+        ? { ...bridgeCtx, tabs: laneView }
         : { ...bridgeCtx, tabs: labelLaneTargets(this.tabs, this.lanes) }
     )
     const tools = extractSdkTools(server).filter((t) => t.name !== 'done')
