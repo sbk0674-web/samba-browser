@@ -1887,8 +1887,10 @@ overlays left: ${after.length}${kept}`
           const tab = activeOr(ctx)
           if (!tab) return 'no active tab'
           // UNC(\서버\공유) 경로는 네트워크로 자격 증명이 새어 나갈 수 있어 막는다
-          if (paths.some((p) => p.startsWith('\\') || p.startsWith('//'))) return 'UNC 경로 불가'
+          // 슬래시·역슬래시가 섞인 형태(/\srv)도 윈도우에서는 UNC 가 되므로 원본과 정규화 결과를 모두 본다
+          const UNC = /^[\\/]{2}/
           const files = paths.map((p) => (isAbsolute(p) ? resolvePath(p) : p))
+          if (paths.some((p) => UNC.test(p)) || files.some((p) => UNC.test(p))) return 'UNC 경로 불가'
           for (const p of files) {
             const st = isAbsolute(p) ? await fsp.stat(p).catch(() => null) : null
             if (!st || !st.isFile()) return `파일 없음: ${p}`

@@ -172,6 +172,13 @@ describe('upload_file 보강', () => {
     expect(sendCommand).not.toHaveBeenCalled()
   })
 
+  it('슬래시가 섞인 UNC 경로도 거부한다', async () => {
+    expect(await run('upload_file', { selector: '#f', paths: [String.raw`/\srv\share\x`] })).toBe(
+      'UNC 경로 불가'
+    )
+    expect(sendCommand).not.toHaveBeenCalled()
+  })
+
   it('정규화한 경로를 확인 카드와 CDP 에 쓴다', async () => {
     const messy = `${tmp}${path.sep}.${path.sep}a.txt`
     await run('upload_file', { selector: '#f', paths: [messy] })
