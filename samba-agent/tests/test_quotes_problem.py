@@ -45,3 +45,20 @@ def test_주문서에_간편결제가_없으면_요구하지_않는다():
 def test_site_결제가_허용되지_않으면_요구하지_않는다():
     out = _out({'method': '카카오페이', 'card': None, 'cost': 102090})
     assert quotes_problem(out, OFFERED, {'kakao', 'naver'}, None, '롯데카드') is None
+
+
+def test_간편결제_줄이_할인_전_금액_그대로면_문제로_돌려준다():
+    out = _out(
+        {'method': '카카오페이', 'card': None, 'cost': 102090},
+        {'method': '간편결제', 'card': '롯데카드', 'cost': 113430},
+    )
+    problem = quotes_problem(out, OFFERED, ALLOWED, None, '롯데카드')
+    assert problem is not None and '즉시할인' in problem
+
+
+def test_간편결제_줄이_기본가보다_싸면_통과():
+    out = _out(
+        {'method': '카카오페이', 'card': None, 'cost': 102090},
+        {'method': '간편결제', 'card': '롯데카드', 'cost': 102090},
+    )
+    assert quotes_problem(out, OFFERED, ALLOWED, None, '롯데카드') is None

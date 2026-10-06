@@ -1016,6 +1016,21 @@ def quotes_problem(
             f'주문서에 간편결제가 있는데 간편결제({easy_pay_card}) 줄의 cost 가 없다 — 간편결제를 누르고 '
             f'"L.PAY 카드" 라디오를 켠 뒤 카드선택에서 {easy_pay_card}를 골라 즉시할인이 반영된 결제 금액을 읽어라'
         )
+    base = _as_float(out.get('base_cost'))
+    if easy_pay_card and base > 0:
+        easy = [
+            _as_float(r.get('cost'))
+            for r in rows
+            if isinstance(r, dict) and '간편결제' in str(r.get('method') or '') and _as_float(r.get('cost')) > 0
+        ]
+        if easy and min(easy) >= base:
+            # 간편결제 줄이 할인 전 금액 그대로다 — 주문서 '할인변경' 창의 카드 즉시할인(롯데카드 N%)을 안 읽었다.
+            # 카카오페이 머니 즉시할인과 같은 창·같은 방식이다(실기 2026-10-06 롯데카드 10% 즉시할인이 견적에서 빠져 카카오페이가 골라짐)
+            return (
+                f'간편결제({easy_pay_card}) 줄 금액 {min(easy):,.0f}원이 기본가 {base:,.0f}원과 같다 — 카드 즉시할인이 반영되지 않았다. '
+                f'"할인변경" 창에서 "{easy_pay_card} N% 즉시할인" 항목을 골라(카카오페이 머니 할인과 같은 방식, 적용하기는 누르지 말고) '
+                '"N원 할인혜택 받기" 금액만큼 뺀 결제 금액을 간편결제 줄 cost 로 돌려라. 그 할인이 이 주문서에 정말 없을 때만 그대로 둔다'
+            )
     return None
 
 
