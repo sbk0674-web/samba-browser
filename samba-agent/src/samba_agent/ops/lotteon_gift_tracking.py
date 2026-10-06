@@ -177,27 +177,35 @@ def _room_row(nodes: list[Node]) -> Node | None:
 
 
 def enter_search(
-    phone: Phone, word: str = SEARCH_WORD, *, sleep: Callable[[float], None] = time.sleep
-) -> bool:
-    """방 안에서 대화내용 검색을 켜고 word 를 쳐 넣는다(숫자·영문만 — 한글은 adb 가 못 친다). 검색 UI 가 없거나 적중 0이면 False."""
-    nodes = phone.nodes()
+    phone: Phone,
+    word: str = SEARCH_WORD,
+    *,
+    nodes: list[Node] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[Node] | None:
+    """방 안에서 대화내용 검색을 켜고 word 를 쳐 넣는다(숫자·영문만 — 한글은 adb 가 못 친다).
+
+    적중한 첫 화면의 노드를 돌려준다. 검색 UI 가 없거나 적중 0('위로' 없음)이면 None. 화면 덤프는 한 번에 3초쯤
+    걸리므로 호출부가 이미 읽은 nodes 를 넘겨 다시 읽지 않는다.
+    """
+    nodes = nodes if nodes is not None else phone.nodes()
     box = next((n for n in nodes if n.rid == SEARCH_BOX), None)
     if box is None:
         btn = next((n for n in nodes if n.desc == '검색' and n.y < 200), None)
         if btn is None:
-            return False
+            return None
         phone.tap(btn.x, btn.y)
-        sleep(1.5)
+        sleep(1.2)
         box = next((n for n in phone.nodes() if n.rid == SEARCH_BOX), None)
         if box is None:
-            return False
+            return None
     phone.tap(box.x, box.y)
-    sleep(0.8)
-    phone._run('shell', 'input', 'text', word)
     sleep(0.5)
+    phone._run('shell', 'input', 'text', word)
     phone.key('66')  # Enter
-    sleep(2)
-    return any(n.desc == '위로' for n in phone.nodes())
+    sleep(1.8)
+    hit = phone.nodes()
+    return hit if any(n.desc == '위로' for n in hit) else None
 
 
 def product_codes(name: str) -> list[str]:
@@ -216,9 +224,13 @@ def product_codes(name: str) -> list[str]:
 
 
 def search_order(
-    phone: Phone, order_no: str, *, sleep: Callable[[float], None] = time.sleep
+    phone: Phone,
+    order_no: str,
+    *,
+    nodes: list[Node] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> list[GiftNotice]:
-    """방에서 롯데ON 주문번호를 검색해 그 자리에 보이는 알림을 모은다(사용자 2026-10-06 "검색하면 바로 나온다").
+    """방에서 롯데ON 주문번호(또는 품번)를 검색해 그 자리에 보이는 알림을 모은다(사용자 2026-10-06 "검색하면 바로 나온다").
 
     보낸 사람 쪽 알림(주문번호)과 받는 사람 쪽 알림(송장)은 같은 때에 붙어 오므로 적중 화면에 둘이 같이 보인다.
     실측: 2026100518180202 검색 → 적중 2, 화면에 주문번호 알림 + 송장 알림. 끝나면 검색을 닫는다(방 화면으로).
@@ -226,12 +238,14 @@ def search_order(
     out: list[GiftNotice] = []
     if not re.fullmatch(r'[A-Za-z0-9]{6,}', order_no):
         return out
-    if not enter_search(phone, order_no, sleep=sleep):
+    screen = enter_search(phone, order_no, nodes=nodes, sleep=sleep)
+    if screen is None:
         phone.key('4')
+        sleep(0.6)
         return out
     seen: set[str] = set()
     for _ in range(3):  # 적중 자리 → '위로' 로 바로 옆 알림까지
-        for node in phone.nodes():
+        for node in screen:
             if node.text.startswith(PREFIX) and node.text not in seen:
                 seen.add(node.text)
                 notice = parse_notice(node.text)
@@ -239,13 +253,14 @@ def search_order(
                     out.append(notice)
         if any(n.order_no == order_no for n in out) and any(n.number for n in out):
             break
-        up = next((n for n in phone.nodes() if n.desc == '위로'), None)
+        up = next((n for n in screen if n.desc == '위로'), None)
         if up is None:
             break
         phone.tap(up.x, up.y)
-        sleep(1.0)
+        sleep(0.9)
+        screen = phone.nodes()
     phone.key('4')
-    sleep(0.8)
+    sleep(0.6)
     return out
 
 
@@ -284,7 +299,7 @@ def read_notices(
                 fresh = True
         return fresh
 
-    if enter_search(phone, sleep=sleep):
+    if enter_search(phone, sleep=sleep) is not None:
         quiet = 0
         stale = 0
         for _ in range(MAX_STEPS):
@@ -384,17 +399,18 @@ def collect_lotteon_gift_tracking(
                     break
                 order_no = str(row.get('sourcing_order_number') or '')
                 found = search_order(phone, order_no, sleep=sleep)
-                if not any(n.number for n in found):
-                    # 송장 알림이 주문번호 알림 옆에 없다(온 때가 다르다) — 상품 품번(영문·숫자)으로 한 번 더 찾는다
-                    for code in product_codes(str(row.get('product_name') or ''))[:2]:
+                if any(n.order_no == order_no for n in found) and not any(n.number for n in found):
+                    # 주문번호 알림은 있는데 송장 알림이 옆에 없다(온 때가 다르다) — 상품 품번(영문·숫자)으로 한 번 더
+                    for code in product_codes(str(row.get('product_name') or ''))[:1]:
                         found += search_order(phone, code, sleep=sleep)
-                        if any(n.number for n in found):
-                            break
                 if not any(n.number for n in found):
                     log.info(
-                        '[롯데ON 선물 송장] %s: 주문번호 %s·품번 검색에 송장 알림 없음',
+                        '[롯데ON 선물 송장] %s: 주문번호 %s 검색 — %s',
                         row.get('order_number'),
                         order_no,
+                        '송장 알림 없음(품번 검색까지)'
+                        if any(n.order_no == order_no for n in found)
+                        else '알림 없음(아직 발송 전)',
                     )
                 notices.extend(found)
     else:
