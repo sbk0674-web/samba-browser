@@ -27,6 +27,7 @@ phone_*(폰 연결 시), phone_approve_payment(결제 배선 시). `done` 은 �
 - `upload_file` — 활성 탭의 `<input type=file>`(숨김 포함)에 이 PC 의 절대 경로 파일을 넣는다. 인자 `{ selector, paths[] }`
 - `set_download_dir` — 웹페이지 다운로드를 저장할 폴더(절대 경로)를 지정한다. 지정 전에는 모든 다운로드가 막힌다. 인자 `{ path }`
 - `list_downloads` — 받은 파일 기록(최근 순, 최대 50건). 읽기 전용에서도 쓸 수 있다
+- `fetch_url` — 활성 탭 페이지 안에서 fetch(쿠키 포함)로 같은 출처/CORS 허용 URL 을 받는다. `save_to`(절대 경로)면 파일로 저장, 없으면 base64(1MB 이하). 최대 25MB. 인자 `{ url, save_to? }`
 
 ## 하네스 .env
 

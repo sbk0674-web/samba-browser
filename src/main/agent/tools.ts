@@ -37,7 +37,7 @@ import {
 import { DEFAULT_FIELD_KEY } from '../vault/fields'
 import { formatDialogNote } from '../browser/dialogs'
 import { promises as fsp } from 'fs'
-import { isAbsolute, resolve as resolvePath } from 'path'
+import { dirname, isAbsolute, resolve as resolvePath } from 'path'
 import { ensureDebuggerAttached, keepDebuggerAttached } from '../browser/emulation'
 import { createOcrTool, ocrDigitInRegion, resolveKeypadDigits, type DigitRead } from './tools-ocr'
 import {
@@ -546,7 +546,13 @@ const text = (t: string): { content: [{ type: 'text'; text: string }] } => ({
 // 지금 조작할 창. 팝업(결제창·주소 검색창)을 골라 둔 상태면 그 팝업, 아니면 활성 탭.
 // 대상이 없으면 null
 // 행동 도구(action)가 아니어도 탭에 입력하는 도구의 라벨 머리 — fill_secret('입력: …')·login('로그인…')·run_script
-const HUMAN_GATED_LABEL_RE = /^(입력|로그인|스크립트 실행|파일 업로드)/
+// 슬래시·역슬래시 두 개로 시작하면 윈도우에서 UNC 경로다
+const UNC = /^[\\/]{2}/
+// fetch_url 한도
+const FETCH_MAX_BYTES = 25 * 1024 * 1024
+const FETCH_INLINE_B64_MAX = 1024 * 1024
+
+const HUMAN_GATED_LABEL_RE = /^(입력|로그인|스크립트 실행|파일 업로드|파일 저장)/
 
 function activeOr(ctx: ToolContext): Tab | null {
   return agentTargetOf(ctx.tabs)
@@ -1888,7 +1894,6 @@ overlays left: ${after.length}${kept}`
           if (!tab) return 'no active tab'
           // UNC(\서버\공유) 경로는 네트워크로 자격 증명이 새어 나갈 수 있어 막는다
           // 슬래시·역슬래시가 섞인 형태(/\srv)도 윈도우에서는 UNC 가 되므로 원본과 정규화 결과를 모두 본다
-          const UNC = /^[\\/]{2}/
           const files = paths.map((p) => (isAbsolute(p) ? resolvePath(p) : p))
           if (paths.some((p) => UNC.test(p)) || files.some((p) => UNC.test(p))) return 'UNC 경로 불가'
           for (const p of files) {
@@ -1945,6 +1950,66 @@ overlays left: ${after.length}${kept}`
     '받은 파일 기록(최근 순, 최대 50건): file, url, state, bytes, startedAt.',
     {},
     () => guard('다운로드 목록', async () => JSON.stringify(ctx.tabs.downloads.slice(0, 50)))
+  )
+
+  const fetchUrl = tool(
+    'fetch_url',
+    '활성 탭의 페이지 안에서 fetch(credentials 포함)로 URL 을 받아 온다 — 같은 출처이거나 CORS 를 허용하는 URL 만 된다. ' +
+      '비브라우저 요청을 막는 사이트의 이미지·파일을 받을 때 쓴다. save_to(절대 경로)를 주면 파일로 저장하고 ' +
+      '{ok,bytes,type,path} 를, 없으면 {ok,bytes,type,b64} 를 돌려준다(b64 가 1MB 를 넘으면 save_to 필요). 최대 25MB.',
+    { url: z.string().min(1), save_to: z.string().optional() },
+    ({ url, save_to }) =>
+      guard(save_to ? `파일 저장: ${save_to}` : `URL 받기: ${url}`, async () => {
+        const tab = activeOr(ctx)
+        if (!tab) return 'no active tab'
+        let target: string | null = null
+        if (save_to !== undefined) {
+          if (UNC.test(save_to) || (isAbsolute(save_to) && UNC.test(resolvePath(save_to)))) {
+            return 'UNC 경로 불가'
+          }
+          if (!isAbsolute(save_to)) return `절대 경로가 아님: ${save_to}`
+          target = resolvePath(save_to)
+          const parent = await fsp.stat(dirname(target)).catch(() => null)
+          if (!parent || !parent.isDirectory()) return `폴더 없음: ${dirname(target)}`
+          // 이 PC 에 파일을 쓰는 동작이라 채팅 모드에서는 확인을 받는다(브릿지는 자동 승인)
+          if (ctx.mode !== 'read_only') {
+            const ok = await ctx.confirm(`파일 저장: ${target}`, 'danger')
+            if (!ok) return 'denied by user'
+          } else {
+            return READ_ONLY_REFUSAL
+          }
+        }
+        interface FetchResult {
+          error?: string
+          b64?: string
+          type?: string
+          bytes?: number
+          tooBig?: number
+        }
+        const script =
+          `(async()=>{const r=await fetch(${JSON.stringify(url)},{credentials:'include'});` +
+          `if(!r.ok)return {error:'HTTP '+r.status};const b=await r.arrayBuffer();` +
+          `const u=new Uint8Array(b);if(u.length>${FETCH_MAX_BYTES})return {tooBig:u.length};let s='';` +
+          `for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));` +
+          `return {b64:btoa(s),type:r.headers.get('content-type')||'',bytes:u.length}})()`
+        let res: FetchResult
+        try {
+          res = (await tab.view.webContents.executeJavaScript(script, true)) as FetchResult
+        } catch (e) {
+          return `fetch 실패: ${e instanceof Error ? e.message : String(e)}`
+        }
+        if (res.error) return res.error
+        const bytes = res.bytes ?? res.tooBig ?? 0
+        if (res.tooBig !== undefined || bytes > FETCH_MAX_BYTES) return `파일 너무 큼: ${bytes}`
+        const b64 = res.b64 ?? ''
+        const type = res.type ?? ''
+        if (target) {
+          await fsp.writeFile(target, Buffer.from(b64, 'base64'))
+          return JSON.stringify({ ok: true, bytes, type, path: target })
+        }
+        if (b64.length > FETCH_INLINE_B64_MAX) return `save_to 필요: ${bytes} bytes`
+        return JSON.stringify({ ok: true, bytes, type, b64 })
+      })
   )
 
   const wait = tool(
@@ -2579,6 +2644,7 @@ ${submittedNote}`
     uploadFile,
     setDownloadDir,
     listDownloads,
+    fetchUrl,
     wait,
     newTab,
     listTabs,
@@ -2621,6 +2687,7 @@ export const SAMBA_TOOL_NAMES = [
   'upload_file',
   'set_download_dir',
   'list_downloads',
+  'fetch_url',
   'wait',
   'new_tab',
   'list_tabs',

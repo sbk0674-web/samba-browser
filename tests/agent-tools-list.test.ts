@@ -46,6 +46,7 @@ describe('tools/list', () => {
       'upload_file',
       'set_download_dir',
       'list_downloads',
+      'fetch_url',
       'fill_secret',
       'save_script',
       'run_script',
