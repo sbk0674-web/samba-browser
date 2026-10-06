@@ -11,7 +11,9 @@ import { remoteTableOf } from './mappers'
 import { LAST_PULLED_AT_KEY, pullAll, type PullResult } from './pull'
 import { pushAll, type PushDeps } from './push'
 
-export const SYNC_POLL_INTERVAL_MS = 60_000
+// 폴링은 Realtime 이 못 받은 변경을 줍는 보험이다 — 1분 폴링이 PC 여러 대에서 돌며 Supabase 무료 한도(Egress·Log)를
+// 넘겼다(2026-10-06, 10/8 제한 예고). Realtime(publication 등록) 뒤로는 5분이면 충분하다
+export const SYNC_POLL_INTERVAL_MS = 300_000
 
 export interface EngineDeps extends PushDeps {
   /**
