@@ -13,8 +13,11 @@ if (!model) return { ...R, note: 'model 필요(예: II7406-105)' }
 const id = (String(await tabs.open({ ...pf, url: 'https://www.ssg.com/search.ssg?target=all&query=' + encodeURIComponent(model) })).match(/tab (\S+)/) || [])[1]
 if (id) await tabs.switch(id)
 let T = ''
-for (let i = 0; i < 10; i++) { await sleep(1200); T = String((await page.get({})).tree || ''); if (/itemView\.ssg|검색결과|상품이 없|Access Denied|차단/i.test(T)) break }
+for (let i = 0; i < 10; i++) { await sleep(1200); T = String((await page.get({})).tree || ''); if (/검색결과|검색한 결과|상품이 없|Access Denied|차단/i.test(T)) break }
 if (/Access Denied|차단|px-captcha/i.test(T)) { if (id) { try { await tabs.close(id) } catch (e) {} } return { ...R, error: 'blocked', note: 'SSG 봇 차단' } }
+// 전체 트리는 요소 수 상한에 잘린다(검색 결과가 770개 넘게 숨음) — 상품 링크만 selector 로 모은다
+await sleep(1500)
+T = String((await page.get({ selector: 'a[href*="itemView.ssg"]' })).tree || '')
 // 상품 링크 한 줄: link "브랜드 상품명 모델 … 판매가격 N원" href=…itemView.ssg?itemId=…&siteNo=…
 for (const l of T.split('\n')) {
   const m = l.match(/^\[\d+\] link "([^"]*)" href=(https:\/\/[a-z.]*ssg\.com\/item\/itemView\.ssg\?itemId=(\d+)[^\s"]*)/)
