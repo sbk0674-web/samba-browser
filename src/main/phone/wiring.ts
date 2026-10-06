@@ -119,9 +119,17 @@ export function createLaunchApp(
   adb: AdbRunner
 ): (serial: string, deepLink: string) => Promise<void> {
   return async (serial, deepLink) => {
+    const spec = Object.values(PAY_PROVIDERS).find((p) => p.deepLink === deepLink)
+    if (spec?.launchActivity) {
+      // 결제 화면 액티비티를 바로 띄우는 앱(롯데카드 로카페이) — 딥링크·런처보다 확실하다
+      const direct = await adb.run(
+        shellArgs(serial, ['am', 'start', '-n', spec.launchActivity]),
+        10000
+      )
+      if (direct.code === 0 && !LAUNCH_FAILED_RE.test(`${direct.stdout}\n${direct.stderr}`)) return
+    }
     const res = await adb.run(amStartArgs(serial, deepLink), 10000)
     if (res.code === 0 && !LAUNCH_FAILED_RE.test(`${res.stdout}\n${res.stderr}`)) return
-    const spec = Object.values(PAY_PROVIDERS).find((p) => p.deepLink === deepLink)
     if (!spec) return
     await adb.run(monkeyArgs(serial, spec.packageName), 10000)
   }

@@ -29,6 +29,7 @@ import {
 } from '../src/main/phone/pay'
 import { createPayTool, PAY_TOOL_NAME, PHONE_TOOL_NAMES } from '../src/main/agent/tools-phone'
 import { SAMBA_TOOL_NAMES } from '../src/main/agent/tools'
+import { keypadFromUiTree } from '../src/main/phone/pay-secret'
 
 // 사용자가 설정에 적어 넣은 상한(테스트용 값). 기본값은 둘 다 없음(0)이다
 import type { PhoneElement, PhoneScreen } from '../src/shared/phone-snapshot'
@@ -167,37 +168,58 @@ function harness(
 describe('롯데카드 앱카드(lottecard)', () => {
   const LC = PAY_PROVIDERS.lottecard
   const APP = 'com.lcacApp'
-  const home = screen(APP, [el(1, '출석체크'), el(2, '로카페이')])
-  const pay = screen(APP, [el(3, 'QR결제'), el(4, '온라인 결제 코드 입력')])
-  const codeScreen = screen(APP, [
-    el(5, '숫자코드 7자리를 입력하세요', { clickable: false }),
-    el(6, '', { className: 'android.widget.EditText' }),
-    el(7, '확인')
+  // 로카페이 홈: 카드 캐러셀(LOCA 1832 를 골라야 한다) + [숫자 코드]
+  const home = screen(APP, [
+    el(1, '', { contentDesc: '선택됨, SKYPASS롯데 플래티넘 체크카드 7053, 버튼' }),
+    el(2, '', { contentDesc: '선택됨, LOCA Professional 1832, 버튼' }),
+    el(3, '숫자 코드')
+  ])
+  // 숫자코드 화면: 안내 문구 + 키패드 뷰(눌러야 키패드가 뜬다)
+  const codeIntro = screen(APP, [
+    el(4, '숫자코드 입력', { clickable: false }),
+    el(5, 'PC 화면의 숫자코드를 입력해주세요.', { clickable: false }),
+    el(6, '', { contentDesc: '숫자코드(7자리) 입력 키패드, 버튼' })
+  ])
+  // 섞인 보안 키패드(contentDesc 숫자) + [입력완료]
+  const digits = ['2', '8', '6', '9', '7', '3', '1', '4', '0', '5']
+  const codeKeypad = screen(APP, [
+    el(7, '숫자코드 입력', { clickable: false }),
+    ...digits.map((d, i) => el(10 + i, '', { contentDesc: d })),
+    el(30, '', { contentDesc: '입력완료' })
   ])
   const password = screen(APP, [el(8, '결제 비밀번호 6자리', { clickable: false }), el(9, '', { isSecret: true })])
   const done = screen(APP, [el(10, '결제가 완료되었습니다', { clickable: false })])
 
-  it('로카페이 → 코드 입력 화면에서 결제창 숫자코드를 치고 → 결제 비밀번호 → 완료(appOnly)', async () => {
-    const h = harness({ screens: [home, pay, codeScreen, codeScreen, password, done] })
+  it('LOCA 1832 → 숫자 코드 → 키패드 뷰 → 코드 자리 누르기 → 입력완료 → 결제 비밀번호 → 완료(appOnly)', async () => {
+    const h = harness({ screens: [home, home, codeIntro, codeKeypad, codeKeypad, password, done] })
+    // 코드 키패드는 화면에서 읽는다(안내 화면엔 키패드가 없다) — 비밀번호 키패드만 시험용 배치
+    h.deps.keypad.fromUiTree = (s) => (s.elements.some((e) => e.isSecret) ? fullLayout : keypadFromUiTree(s))
     const r = await runPayApproval(h.deps, request({ provider: 'lottecard', code: '7826101' }))
     expect(r).toEqual({ ok: true })
-    expect(h.typed).toEqual(['7826101'])
-    // 경로 버튼 둘 + 입력칸 + 확인
-    expect(h.taps.map((t) => t[2])).toEqual([230, 430, 630, 730])
+    const ys = h.taps.map((t) => t[2])
+    // 경로: LOCA(2) → 숫자 코드(3) → 키패드 뷰(6)
+    expect(ys.slice(0, 3)).toEqual([230, 330, 630])
+    // 코드 7826101 자리를 키패드 배치대로: 7→id14, 8→11, 2→10, 6→12, 1→16, 0→18, 1→16
+    expect(ys.slice(3, 10)).toEqual([1430, 1130, 1030, 1230, 1630, 1830, 1630])
+    // 그다음 [입력완료](30)
+    expect(ys[10]).toBe(3030)
+    expect(h.typed).toEqual([])
     expect(h.tapPassword).toHaveBeenCalledTimes(1)
     expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ provider: 'lottecard' })
   })
 
-  it('코드 화면인데 요청에 code 가 없으면 아무것도 치지 않고 code-missing', async () => {
-    const h = harness({ screens: [codeScreen] })
+  it('코드 키패드가 떴는데 요청에 code 가 없으면 아무것도 누르지 않고 code-missing', async () => {
+    const h = harness({ screens: [codeKeypad] })
+    h.deps.keypad.fromUiTree = (s) => keypadFromUiTree(s)
     const r = await runPayApproval(h.deps, request({ provider: 'lottecard' }))
     expect(r.ok).toBe(false)
     expect(r.reason).toBe('code-missing')
-    expect(h.typed).toEqual([])
+    expect(h.taps).toEqual([])
   })
 
   it('매핑·계정 호스트가 있다', () => {
     expect(LC.appOnly).toBe(true)
+    expect(LC.launchActivity).toContain('AppCardActivity')
     expect(PAY_APP_TO_PAYMENT_PROVIDER.lottecard).toBe('lottecard')
   })
 })

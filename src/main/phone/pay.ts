@@ -76,10 +76,12 @@ export interface PayProviderSpec {
    */
   appPath?: RegExp[]
   /**
-   * 웹 결제창이 보여 준 숫자코드를 넣는 화면의 문구. 이 화면이 보이면 입력칸을 누르고 PayRequest.code 를 친 뒤
-   * 진행 버튼을 누른다. code 가 없으면 이 화면에서 멈춘다(엉뚱한 값을 넣지 않는다)
+   * 웹 결제창이 보여 준 숫자코드를 넣는 화면의 문구. 이 화면에 숫자 키패드(UI 트리의 0~9)가 보이면
+   * PayRequest.code 자리를 차례로 누르고 진행 버튼([입력완료])을 누른다. code 가 없으면 멈춘다(엉뚱한 값을 넣지 않는다)
    */
   codeHint?: RegExp
+  /** 딥링크 대신 이 액티비티를 바로 띄운다(롯데카드 로카페이: 앱 홈의 [PAY] 아이콘에 접근성 글자가 없다) */
+  launchActivity?: string
 }
 
 export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
@@ -152,17 +154,20 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
   // 롯데카드 앱카드(디지로카 앱 com.lcacApp 의 로카페이) — PC 결제창(sps.lottecard.co.kr)은 푸시를 보내지 않고
   // 7자리 숫자코드(잔여시간 10분)를 보여 준다(실기 2026-10-06 롯데온). 폰에서 로카페이 → 코드 입력 → 결제 비밀번호 →
   // 완료 뒤, PC 결제창의 [결제 완료]는 하네스가 누른다(appOnly: 웹 성공 확인은 하네스 몫)
+  // 실기 2026-10-06 로카페이: 홈(카드 캐러셀·[숫자 코드]) → 숫자코드 화면('PC 화면의 숫자코드를 입력해주세요', 키패드 뷰 탭)
+  // → 섞인 보안 키패드(contentDesc 0~9·삭제·입력완료, 캡처 불가). 카드는 반드시 LOCA Professional 1832(사용자 2026-10-06)
   lottecard: {
     id: 'lottecard',
     packageName: 'com.lcacApp',
     deepLink: 'lcacapp://',
-    confirmText: /^(?:결제하기|확인|다음|결제)$/,
+    launchActivity: 'com.lcacApp/.appcard.views.activity.AppCardActivity',
+    confirmText: /^(?:결제하기|확인|다음|결제|입력완료)$/,
     passwordHint: /결제 ?비밀번호|간편 ?비밀번호|비밀번호 ?(?:6자리|입력)/,
     successHint: /결제(?:가)? ?완료|승인(?:이)? ?완료|완료되었습니다|결제 성공/,
     openBy: 'app',
     appOnly: true,
-    appPath: [/로카페이|LOCA ?PAY/i, /온라인 ?결제|숫자 ?코드|코드 ?입력|코드로 ?결제/],
-    codeHint: /숫자 ?코드|코드 ?입력|코드를 입력|인증 ?코드|7자리/
+    appPath: [/LOCA Professional 1832/, /^숫자 ?코드$/, /숫자코드\(7자리\) 입력 키패드/],
+    codeHint: /숫자코드 입력|PC 화면의 숫자코드/
   }
 }
 
@@ -804,20 +809,19 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
     }
 
     // 숫자코드 화면(롯데카드 앱카드): 진행 버튼보다 먼저 코드를 넣는다 — 빈 채로 [확인]을 누르지 않는다
-    // 입력칸(EditText)이 있어야 코드 화면이다 — 안내 문구만 있는 메뉴('온라인 결제 코드 입력' 버튼)는 경로 버튼으로 본다
-    const codeInput =
+    // 숫자 키패드(0~9)가 보여야 코드 화면이다 — 안내 문구만 있는 화면(키패드 뷰를 눌러야 키패드가 뜬다)은 경로 버튼으로 본다
+    const codeKeypad =
       spec.codeHint && state === 'app_steps' && !codeTyped && hasText(screen, spec.codeHint)
-        ? screen.elements.find((e) => /EditText/.test(e.className) && !e.isSecret)
-        : undefined
-    if (codeInput) {
+        ? deps.keypad.fromUiTree(screen)
+        : null
+    if (codeKeypad) {
       const code = req.code?.trim() ?? ''
       if (!/^\d{4,12}$/.test(code)) return fail('code-missing', screen)
-      if (!deps.phones.typeText) return fail('layout-incomplete', screen)
-      const input = codeInput
-      await deps.phones.tap(req.serial, input.center.x, input.center.y)
-      await sleep(PAY_POLL_MS)
-      if ((await deps.phones.typeText(req.serial, code)) !== 'ok') {
-        return fail('layout-incomplete', screen)
+      // 코드는 비밀이 아니다 — 자리마다 키패드의 그 숫자를 누른다(키 배치는 섞여 있어 화면에서 읽은 자리를 쓴다)
+      for (const d of code) {
+        const key = codeKeypad.digits[d]
+        if (!key) return fail('layout-incomplete', screen)
+        await deps.phones.tap(req.serial, key.x, key.y)
       }
       codeTyped = true
       lastTapped = null
