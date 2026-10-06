@@ -149,7 +149,9 @@ export function isPaySuccessUrl(url: string): boolean {
 }
 
 /** 웹 팝업 성공 확인을 몇 번까지 다시 볼지(앱 완료보다 리다이렉트가 늦을 수 있다) */
-export const WEB_SUCCESS_TRIES = 8
+// 폰 승인 뒤 웹 결제창이 주문 완료로 넘어가기까지 — 실기 2026-10-07 토스: 폰 승인 00:02 → 무신사 주문 완료 ~00:05.
+// 8초로는 늘 verify-failed 였다. 3분까지 기다린다(성공은 보통 몇 초, 실패일 때만 길어진다)
+export const WEB_SUCCESS_TRIES = 180
 export const WEB_SUCCESS_INTERVAL_MS = 1000
 
 // --- 화면 인증번호 읽기(로컬 OCR 1차 → Visual 2차) ---------------------------

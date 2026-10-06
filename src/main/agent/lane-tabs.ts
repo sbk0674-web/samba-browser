@@ -36,8 +36,17 @@ export function laneTabs(real: TabManager, state: LaneState): TabManager {
       state.current && state.owned.has(state.current) ? real.get(state.current) : null,
     // 폰 배선(tab-port)이 보는 "자동화가 조작하는 진짜 탭" 도 레인의 작업 탭이다 — 전역 표식을 보면
     // 사람이 보던 탭의 호스트로 계정을 찾아 결제가 거부됐다(실기 2026-10-06)
-    workingTab: (): Tab | null =>
-      state.current && alive(state.current) ? real.get(state.current) : null,
+    workingTab: (): Tab | null => {
+      if (!state.current || !alive(state.current)) return null
+      const tab = real.get(state.current)
+      if (tab) return tab
+      // 작업 창이 팝업(결제창)이면 그 팝업을 연 탭이 "진짜 탭" 이다 — 계정은 구매 사이트(여는 탭) 기준으로 찾는다
+      // (실기 2026-10-06: 토스 결제창으로 switch_tab 한 직후 폰 승인을 불러 host 가 비어 no-account 로 거부)
+      const target = real.listTargets().find((t) => t.id === state.current)
+      return target?.kind === 'popup' && typeof target.openerId === 'string'
+        ? real.get(target.openerId)
+        : null
+    },
     agentTarget: (): Tab | null => {
       if (state.current && alive(state.current)) return real.targetTab(state.current)
       // 작업 창이 닫혔으면(결제창 등) 레인의 마지막 탭으로 돌아간다

@@ -650,12 +650,12 @@ describe('결제 요청이 푸시 알림으로만 와 있을 때 — 알림창�
   const done = screen(TOSS.packageName, [el(4, '결제가 완료되었습니다', { clickable: false })])
   const TOSS_PUSH = { title: '무신사 결제하기', text: '알림을 누르고 결제를 완료해주세요.' }
 
-  // 알림 우선 규칙을 검증하는 묶음 — 토스 기본값(openBy 없음 = 알림 우선)을 명시해 두고 끝나면 되돌린다
+  // 알림 우선 규칙 자체를 검증하는 묶음 — 토스는 앱을 바로 열므로(openBy: 'app') 여기서만 알림 우선으로 되돌린다
   beforeEach(() => {
     PAY_PROVIDERS.toss.openBy = 'notification'
   })
   afterEach(() => {
-    delete PAY_PROVIDERS.toss.openBy
+    PAY_PROVIDERS.toss.openBy = 'app'
   })
 
   // 실기 그대로: 카카오톡으로 온 "토스" 채널 메시지(제목이 토스)와 토스 앱의 결제 알림이 함께 떠 있다

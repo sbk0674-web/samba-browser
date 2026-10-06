@@ -104,4 +104,35 @@ describe('레인 탭 보기', () => {
     a.close('t2')
     expect(tabs.length).toBe(2)
   })
+
+  it('작업 창이 결제 팝업이면 workingTab 은 그 팝업을 연 탭이다 — 폰 승인이 구매 사이트 계정을 찾는다', () => {
+    // 실기 2026-10-06: 토스 결제창(pay.toss.im 팝업)으로 switch_tab 한 직후 phone_approve_payment 가 host 를 비워 no-account
+    const tabs = [{ id: 't1', url: 'https://www.musinsa.com/order' }]
+    const popups = [{ id: 'p1', openerId: 't1', url: 'https://pay.toss.im/' }]
+    const real = {
+      list: () => tabs.map((t) => ({ ...t, title: '', active: false })),
+      listTargets: () => [
+        ...tabs.map((t) => ({ id: t.id, kind: 'tab', title: '', url: t.url, active: false })),
+        ...popups.map((p) => ({
+          id: p.id,
+          kind: 'popup',
+          openerId: p.openerId,
+          title: '',
+          url: p.url,
+          active: false
+        }))
+      ],
+      get: (id: string) => (tabs.some((t) => t.id === id) ? ({ id } as never) : null),
+      targetTab: (id: string) => ({ id }) as never,
+      create: (o: { url?: string }) => {
+        const t = { id: 't1', url: o.url ?? '' }
+        return { ...t, title: '', active: true }
+      }
+    } as unknown as TabManager
+    const lane = laneTabs(real, newLaneState())
+    lane.create({ url: 'https://www.musinsa.com/order' })
+    expect((lane.workingTab() as unknown as { id: string }).id).toBe('t1')
+    lane.focusTarget('p1')
+    expect((lane.workingTab() as unknown as { id: string }).id).toBe('t1')
+  })
 })
