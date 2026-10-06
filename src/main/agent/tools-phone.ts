@@ -450,6 +450,8 @@ export interface PayToolRequest {
   card?: string
   /** 결제 앱 자체의 키마스터 계정(네이버페이면 naver.com 계정)의 아이디 또는 라벨 */
   payAccount?: string
+  /** 웹 결제창이 보여 준 숫자코드(롯데카드 앱카드 7자리) — 앱의 코드 입력 화면에 친다 */
+  code?: string
   /**
    * 시험 입력(dry-run) 자리수. 주면 결제 비밀번호를 이 자리수만 누르고 취소한다 —
    * 실기에서 키패드 자동 입력이 되는지만 보고 결제는 하지 않는다
@@ -499,6 +501,14 @@ export function createPayTool(ctx: PayToolContext): PhoneTool {
           'DRY RUN: type only this many digits of the payment password, then cancel and leave the keypad. ' +
             'Nothing is paid - the tool answers "refused: dry-run". Pass it only when the user asked to test the keypad.'
         ),
+      code: z
+        .string()
+        .regex(/^\d{4,12}$/)
+        .optional()
+        .describe(
+          'lottecard only: the numeric code (7 digits) shown in the PC card window (sps.lottecard.co.kr) — ' +
+            'the tool types it into the LOCA Pay code screen on the phone. Not a password.'
+        ),
       payAccount: z
         .string()
         .optional()
@@ -527,7 +537,8 @@ export function createPayTool(ctx: PayToolContext): PhoneTool {
           methodLabel: args.methodLabel,
           ...(args.card === undefined ? {} : { card: args.card }),
           ...(args.dryRunDigits === undefined ? {} : { dryRunDigits: args.dryRunDigits }),
-          ...(args.payAccount === undefined ? {} : { payAccount: args.payAccount })
+          ...(args.payAccount === undefined ? {} : { payAccount: args.payAccount }),
+          ...(args.code === undefined ? {} : { code: args.code })
         })
         // 사유는 상태 이름뿐이다 — 화면 값은 담지 않는다(진행 로그는 실행기가 남긴다).
         // detail 은 실행기가 고른 덧붙임(계정 아이디 목록 등)이라 그대로 전한다

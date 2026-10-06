@@ -291,6 +291,7 @@ const PAYMENT_PROVIDER_NAMES = [
   'naver',
   'payco',
   'alipay',
+  'lottecard',
   'samsung',
   'apple',
   'other'

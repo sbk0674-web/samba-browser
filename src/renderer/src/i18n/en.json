@@ -814,6 +814,7 @@
       "naver": "Naver Pay",
       "payco": "PAYCO",
       "alipay": "Alipay",
+      "lottecard": "Lotte Card app card (LOCA Pay)",
       "samsung": "Samsung Pay",
       "apple": "Apple Pay",
       "other": "Other"

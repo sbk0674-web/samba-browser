@@ -83,6 +83,8 @@ interface Harness {
   deps: PayRunDeps
   screens: PhoneScreen[]
   taps: Array<[string, number, number]>
+  /** typeText 로 친 글자(숫자코드) */
+  typed: string[]
   /** 뒤로 키를 누른 폰 목록(시험 입력 취소) */
   backs: string[]
   confirm: ReturnType<typeof vi.fn>
@@ -108,6 +110,7 @@ function harness(
   const screens = opts.screens ?? [screen('viva.republica.toss')]
   const taps: Array<[string, number, number]> = []
   const backs: string[] = []
+  const typed: string[] = []
   const records: Array<{ kind: string; ok: boolean; dryRunDigits?: number }> = []
   const notices: Array<{ message: string; hasImage: boolean }> = []
   const steps: Array<{ label: string; ok: boolean }> = []
@@ -128,6 +131,10 @@ function harness(
           : { png: Buffer.from([1, 2, 3]), secret: false },
       back: async (serial) => {
         backs.push(serial)
+      },
+      typeText: async (_serial, text) => {
+        typed.push(text)
+        return 'ok'
       }
     },
     launchApp: vi.fn(async () => {}),
@@ -154,8 +161,46 @@ function harness(
     sleep: async () => {},
     tapPassword
   }
-  return { deps, screens, taps, backs, confirm, tapPassword, records, notices, steps }
+  return { deps, screens, taps, backs, typed, confirm, tapPassword, records, notices, steps }
 }
+
+describe('롯데카드 앱카드(lottecard)', () => {
+  const LC = PAY_PROVIDERS.lottecard
+  const APP = 'com.lcacApp'
+  const home = screen(APP, [el(1, '출석체크'), el(2, '로카페이')])
+  const pay = screen(APP, [el(3, 'QR결제'), el(4, '온라인 결제 코드 입력')])
+  const codeScreen = screen(APP, [
+    el(5, '숫자코드 7자리를 입력하세요', { clickable: false }),
+    el(6, '', { className: 'android.widget.EditText' }),
+    el(7, '확인')
+  ])
+  const password = screen(APP, [el(8, '결제 비밀번호 6자리', { clickable: false }), el(9, '', { isSecret: true })])
+  const done = screen(APP, [el(10, '결제가 완료되었습니다', { clickable: false })])
+
+  it('로카페이 → 코드 입력 화면에서 결제창 숫자코드를 치고 → 결제 비밀번호 → 완료(appOnly)', async () => {
+    const h = harness({ screens: [home, pay, codeScreen, codeScreen, password, done] })
+    const r = await runPayApproval(h.deps, request({ provider: 'lottecard', code: '7826101' }))
+    expect(r).toEqual({ ok: true })
+    expect(h.typed).toEqual(['7826101'])
+    // 경로 버튼 둘 + 입력칸 + 확인
+    expect(h.taps.map((t) => t[2])).toEqual([230, 430, 630, 730])
+    expect(h.tapPassword).toHaveBeenCalledTimes(1)
+    expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ provider: 'lottecard' })
+  })
+
+  it('코드 화면인데 요청에 code 가 없으면 아무것도 치지 않고 code-missing', async () => {
+    const h = harness({ screens: [codeScreen] })
+    const r = await runPayApproval(h.deps, request({ provider: 'lottecard' }))
+    expect(r.ok).toBe(false)
+    expect(r.reason).toBe('code-missing')
+    expect(h.typed).toEqual([])
+  })
+
+  it('매핑·계정 호스트가 있다', () => {
+    expect(LC.appOnly).toBe(true)
+    expect(PAY_APP_TO_PAYMENT_PROVIDER.lottecard).toBe('lottecard')
+  })
+})
 
 describe('PAY_APP_TO_PAYMENT_PROVIDER', () => {
   it('결제앱 4종이 모두 금고 결제 수단으로 이어진다', () => {
@@ -164,7 +209,8 @@ describe('PAY_APP_TO_PAYMENT_PROVIDER', () => {
       payco: 'payco',
       kakaopay: 'kakao',
       naverpay: 'naver',
-      alipay: 'alipay'
+      alipay: 'alipay',
+      lottecard: 'lottecard'
     })
     // 앱 목록과 매핑표가 어긋나면(새 앱 추가 후 매핑 누락) 여기서 걸린다
     expect(Object.keys(PAY_APP_TO_PAYMENT_PROVIDER).sort()).toEqual(

@@ -24,7 +24,7 @@ import { tr, type MessageKey } from '../i18n'
 
 export type PayState =
   'idle' | 'await_app' | 'app_steps' | 'password' | 'verify' | 'done' | 'failed'
-export type PayProvider = 'toss' | 'payco' | 'kakaopay' | 'naverpay' | 'alipay'
+export type PayProvider = 'toss' | 'payco' | 'kakaopay' | 'naverpay' | 'alipay' | 'lottecard'
 
 export interface PayProviderSpec {
   id: PayProvider
@@ -70,6 +70,16 @@ export interface PayProviderSpec {
   pinHint?: RegExp
   /** 진행이 막히는 화면(백신 설치 요구 등) — 보이면 누르지 않고 멈춘다 */
   blockerHint?: RegExp
+  /**
+   * 결제 요청 화면까지 앱 안에서 거쳐 가는 버튼 문구(순서대로 한 번씩 누른다). 웹 결제창이 푸시를 보내지 않고
+   * 사용자가 앱에서 코드를 넣는 결제(롯데카드 앱카드: 홈 → 로카페이 → 온라인 결제 코드 입력)에 쓴다
+   */
+  appPath?: RegExp[]
+  /**
+   * 웹 결제창이 보여 준 숫자코드를 넣는 화면의 문구. 이 화면이 보이면 입력칸을 누르고 PayRequest.code 를 친 뒤
+   * 진행 버튼을 누른다. code 가 없으면 이 화면에서 멈춘다(엉뚱한 값을 넣지 않는다)
+   */
+  codeHint?: RegExp
 }
 
 export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
@@ -138,6 +148,21 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     // '백신 설치' 페이지 = 카드사 3D 인증(Cruise API)이 V3 확인을 못 받은 상태 — 이 폰에선 설치·권한·재설치로도 안 풀렸고
     // (2026-10-03, 알리페이 12.12.16 웹뷰가 V3 스킴을 안 보냄) '다음'을 반복해 두드릴수록 카드사 위험점수만 오른다. 바로 멈춘다
     blockerHint: /系统正忙|백신 설치|백신 앱을 설치/
+  },
+  // 롯데카드 앱카드(디지로카 앱 com.lcacApp 의 로카페이) — PC 결제창(sps.lottecard.co.kr)은 푸시를 보내지 않고
+  // 7자리 숫자코드(잔여시간 10분)를 보여 준다(실기 2026-10-06 롯데온). 폰에서 로카페이 → 코드 입력 → 결제 비밀번호 →
+  // 완료 뒤, PC 결제창의 [결제 완료]는 하네스가 누른다(appOnly: 웹 성공 확인은 하네스 몫)
+  lottecard: {
+    id: 'lottecard',
+    packageName: 'com.lcacApp',
+    deepLink: 'lcacapp://',
+    confirmText: /^(?:결제하기|확인|다음|결제)$/,
+    passwordHint: /결제 ?비밀번호|간편 ?비밀번호|비밀번호 ?(?:6자리|입력)/,
+    successHint: /결제(?:가)? ?완료|승인(?:이)? ?완료|완료되었습니다|결제 성공/,
+    openBy: 'app',
+    appOnly: true,
+    appPath: [/로카페이|LOCA ?PAY/i, /온라인 ?결제|숫자 ?코드|코드 ?입력|코드로 ?결제/],
+    codeHint: /숫자 ?코드|코드 ?입력|코드를 입력|인증 ?코드|7자리/
   }
 }
 
@@ -150,7 +175,8 @@ export const PAY_APP_TO_PAYMENT_PROVIDER: Record<PayProvider, PaymentProvider> =
   payco: 'payco',
   kakaopay: 'kakao',
   naverpay: 'naver',
-  alipay: 'alipay'
+  alipay: 'alipay',
+  lottecard: 'lottecard'
 }
 
 /**
@@ -160,7 +186,8 @@ export const PAY_APP_TO_PAYMENT_PROVIDER: Record<PayProvider, PaymentProvider> =
  */
 export const PAY_APP_ACCOUNT_HOST: Partial<Record<PayProvider, string>> = {
   naverpay: PAYMENT_PROVIDER_ACCOUNT_HOST.naver ?? 'naver.com',
-  alipay: PAYMENT_PROVIDER_ACCOUNT_HOST.alipay ?? 'alipay.com'
+  alipay: PAYMENT_PROVIDER_ACCOUNT_HOST.alipay ?? 'alipay.com',
+  lottecard: PAYMENT_PROVIDER_ACCOUNT_HOST.lottecard ?? 'lottecard.co.kr'
 }
 
 /** 앱 화면을 더듬는 최대 스텝(무한 루프 방지) */
@@ -391,6 +418,8 @@ export type PayFailReason =
   | 'card-not-saved'
   // 카드사 인증이 백신 앱 설치 등 사람만 할 수 있는 것을 요구한다
   | 'blocked-by-app'
+  // 앱이 숫자코드를 묻는데 요청에 code 가 없다(롯데카드 앱카드)
+  | 'code-missing'
   // 배선부가 실행기에 닿기도 전에 막는 두 가지(계정 특정 실패·연결된 폰 없음)
   | 'no-account'
   | 'no-phone'
@@ -423,6 +452,8 @@ export interface PayRequest {
   jobId?: string
   /** 결제 앱 안에서 고를 카드 이름의 일부(예: "현대"). 지금 선택된 카드가 이와 다르면 바꾼 뒤 결제한다 */
   cardHint?: string
+  /** 웹 결제창이 보여 준 숫자코드(롯데카드 앱카드 7자리) — spec.codeHint 화면에 친다. 숫자만 */
+  code?: string
   /** 결제 전에 확인 카드를 띄울지. 생략하면 띄운다(guard). 자동 모드에서는 false */
   confirmFirst?: boolean
   /**
@@ -448,6 +479,8 @@ export interface PayRunDeps {
     screenshot: (serial: string) => Promise<{ png: Buffer; secret: boolean }>
     /** 뒤로 키. 시험 입력을 취소하고 키패드에서 빠져나오는 데만 쓴다 */
     back?: (serial: string) => Promise<void>
+    /** 글자 입력(숫자코드). 비밀 값은 절대 여기로 보내지 않는다 — 결제 비밀번호는 tapPassword 가 누른다 */
+    typeText?: (serial: string, text: string) => Promise<'ok' | 'unsupported-text'>
   }
   /** 딥링크로 결제 앱을 앞으로 부른다(배선부가 am start 로 채운다) */
   launchApp: (serial: string, deepLink: string) => Promise<void>
@@ -666,6 +699,9 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
   let cardTaps = 0
   // 카드를 지정하지 않은 결제는 앱에 선택된 카드로 나간다 — 어떤 카드였는지 진행 로그에 한 번 남긴다
   let cardNoted = false
+  // 앱 안 경로(appPath)에서 다음에 누를 버튼 차례, 숫자코드를 넣었는가
+  let pathIdx = 0
+  let codeTyped = false
 
   for (let i = 0; i < MAX_PAY_STEPS && state !== 'done'; i++) {
     screen = await deps.phones.screen(req.serial)
@@ -765,6 +801,46 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
       lastTapped = null
       await sleep(PAY_POLL_MS)
       continue
+    }
+
+    // 숫자코드 화면(롯데카드 앱카드): 진행 버튼보다 먼저 코드를 넣는다 — 빈 채로 [확인]을 누르지 않는다
+    // 입력칸(EditText)이 있어야 코드 화면이다 — 안내 문구만 있는 메뉴('온라인 결제 코드 입력' 버튼)는 경로 버튼으로 본다
+    const codeInput =
+      spec.codeHint && state === 'app_steps' && !codeTyped && hasText(screen, spec.codeHint)
+        ? screen.elements.find((e) => /EditText/.test(e.className) && !e.isSecret)
+        : undefined
+    if (codeInput) {
+      const code = req.code?.trim() ?? ''
+      if (!/^\d{4,12}$/.test(code)) return fail('code-missing', screen)
+      if (!deps.phones.typeText) return fail('layout-incomplete', screen)
+      const input = codeInput
+      await deps.phones.tap(req.serial, input.center.x, input.center.y)
+      await sleep(PAY_POLL_MS)
+      if ((await deps.phones.typeText(req.serial, code)) !== 'ok') {
+        return fail('layout-incomplete', screen)
+      }
+      codeTyped = true
+      lastTapped = null
+      idlePolls = 0
+      deps.onStep(tr('phone.payCodeTyped'), true)
+      await sleep(PAY_POLL_MS)
+      continue
+    }
+    // 앱 안 경로(appPath): 결제 요청 화면으로 가는 버튼을 순서대로 한 번씩 누른다(코드를 넣기 전까지만)
+    if (spec.appPath && pathIdx < spec.appPath.length && state === 'app_steps' && !codeTyped) {
+      const want = spec.appPath[pathIdx]
+      const el = screen.elements.find(
+        (e) => want.test(e.text.trim()) || want.test(e.contentDesc ?? '')
+      )
+      if (el) {
+        pathIdx += 1
+        lastTapped = null
+        idlePolls = 0
+        deps.onStep(tr('phone.payPathTap', { label: el.text.trim() || el.contentDesc || '' }), true)
+        await deps.phones.tap(req.serial, el.center.x, el.center.y)
+        await sleep(PAY_POLL_MS)
+        continue
+      }
     }
 
     // 카드 지정: 결제하기를 누르기 전에 선택된 카드를 맞춘다

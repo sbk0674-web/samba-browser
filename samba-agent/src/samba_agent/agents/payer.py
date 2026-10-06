@@ -33,6 +33,39 @@ CM29_RECENT_ORDER_SCRIPT = 'cm29_recent_order'
 # 한국 시간(윈도에 tzdata 가 없어 고정 오프셋)
 _KST = timezone(timedelta(hours=9))
 
+# 롯데카드 결제창(통합 일반/간편서비스) 호스트 — 롯데온 신용카드 → 롯데카드 선택 → 결제하기 뒤 뜨는 팝업(실기 2026-10-06)
+LOTTECARD_HOST = 'lottecard.co.kr'
+# 롯데카드 결제창에서 로카페이(앱카드) [결제하기]를 눌러 7자리 숫자코드를 읽는 run_js 본문.
+# 첫 화면: "로카페이(앱카드) 추천 … 결제하기 / 다른 결제" → 누르면 "숫자코드 입력 NNNNNNN 잔여시간 09:59 … [결제 완료]"
+_LOTTECARD_CODE_JS = (
+    "const L = await tabs.list()\n"
+    "const p = L.filter(t => /lottecard\\.co\\.kr/.test(t.url || '')).pop()\n"
+    "if (!p) return JSON.stringify({ code: null, note: 'no lottecard window' })\n"
+    "await tabs.switch(p.id)\n"
+    "let T = String((await page.get({})).tree || '')\n"
+    "if (!/숫자코드/.test(T)) {\n"
+    "  const b = T.match(/^\\[(\\d+)\\] button \"결제하기\"/m)\n"
+    "  if (!b) return JSON.stringify({ code: null, note: 'no appcard button', text: (T.split('PAGE TEXT')[1] || '').slice(0, 200) })\n"
+    "  await page.click(parseInt(b[1]))\n"
+    "  for (let i = 0; i < 10 && !/숫자코드/.test(T); i++) { await sleep(1500); T = String((await page.get({})).tree || '') }\n"
+    "}\n"
+    "const txt = (T.split('PAGE TEXT')[1] || T).replace(/\\s+/g, ' ')\n"
+    "const m = txt.match(/숫자코드 ?입력 ?(\\d{4,12})/)\n"
+    "const left = (txt.match(/잔여시간 ?(\\d{1,2}:\\d{2})/) || [])[1] || null\n"
+    "return JSON.stringify({ code: m ? m[1] : null, left, note: m ? null : txt.slice(0, 200) })"
+)
+# 폰 승인 뒤 롯데카드 결제창의 [결제 완료](payCheck)를 누르는 run_js 본문 — 눌러야 주문서가 주문 완료로 넘어간다
+_LOTTECARD_DONE_JS = (
+    "const L = await tabs.list()\n"
+    "const p = L.filter(t => /lottecard\\.co\\.kr/.test(t.url || '')).pop()\n"
+    "if (!p) return JSON.stringify({ clicked: false, note: 'window already closed' })\n"
+    "await tabs.switch(p.id)\n"
+    "const T = String((await page.get({})).tree || '')\n"
+    "const b = T.match(/^\\[(\\d+)\\] (?:link|button|clickable) \"결제 ?완료\"/m)\n"
+    "if (!b) return JSON.stringify({ clicked: false, note: (T.split('PAGE TEXT')[1] || '').slice(0, 160) })\n"
+    "await page.click(parseInt(b[1])); await sleep(4000)\n"
+    "return JSON.stringify({ clicked: true })"
+)
 # 페이코 PC 결제창: 정보제공동의 체크박스를 켜고 '결제' 링크를 누르는 run_js 본문(탭 전환 다음에 붙인다)
 _PAYCO_AGREE_PAY_JS = (
     # 동의 체크박스는 숨어 있어 요소 목록에 없다 — 앱의 page.check 가 라벨 글자로 켠다(실기 2026-09-25).
@@ -1281,6 +1314,8 @@ class PayerAgent(AgentBase):
         보이면 사람이 결제한 것으로 기록하고, 시간 안에 안 보이면 멈춘다(재결제 금지).
         """
         window = str(entered.get('popup_url') or '')
+        if '롯데' in issuer and LOTTECARD_HOST in _host_of(window):
+            return self._lottecard_appcard(a, card, issuer, window)
         self.note(
             '카드 직접 결제',
             mask_text(f'{issuer} 결제창({entered.get("pay_window") or "-"} {window[:80]}) — 사람이 폰으로 승인한다. 에이전트는 누르지 않는다'),
@@ -1303,6 +1338,59 @@ class PayerAgent(AgentBase):
             f'{issuer} 결제창 승인을 기다렸지만 주문 완료가 보이지 않는다 — 사람이 결제 여부를 확인한다(재결제 금지)',
             FailReason.PAY_INTERRUPTED,
         )
+
+    def _lottecard_appcard(self, a: Assignment, card: str, issuer: str, window: str) -> AgentResult:
+        """롯데카드 앱카드(로카페이) 결제 — 롯데카드 결제창(sps.lottecard.co.kr)은 푸시 없이 7자리 숫자코드를 보여 준다.
+
+        결제창의 [결제하기](로카페이 추천)를 눌러 숫자코드를 읽고, 앱의 phone_approve_payment(provider lottecard, code)가
+        폰 디지로카 앱에서 로카페이 → 코드 입력 → 결제 비밀번호(키마스터)까지 끝내면, 결제창의 [결제 완료]를 눌러
+        주문 완료로 넘어간다(실기 2026-10-06 롯데온). 폰 승인이 거절되면 결제는 안 된 것이다 — 재시도 없이 사람에게.
+        """
+        self.step(f'payer: {issuer} 앱카드 — 결제창 숫자코드 읽기')
+        try:
+            out = self.tool('run_js', code=_LOTTECARD_CODE_JS)
+        except AgentFailure as e:
+            raise AgentFailure(
+                'needs_human',
+                mask_text(f'{issuer} 결제창에서 앱카드 숫자코드를 못 읽었다({e.reason[:80]}) — 결제하지 않았다'),
+                FailReason.PAY_INTERRUPTED,
+            ) from e
+        self.note('롯데카드 앱카드', mask_text(out[:160]))
+        m = re.search(r'"code"\s*:\s*"(\d{4,12})"', out)
+        if m is None:
+            raise AgentFailure(
+                'needs_human',
+                mask_text(f'{issuer} 결제창에 앱카드 숫자코드가 안 보인다 — 결제하지 않았다: {out[:120]}'),
+                FailReason.PAY_INTERRUPTED,
+            )
+        amount = _amount_krw(a.handoff.get('cost'))
+        if amount is None:
+            raise AgentFailure('needs_human', '결제 금액을 모른다 — 폰 승인을 부르지 않는다', FailReason.UNKNOWN)
+        self.step('payer: 폰 승인(롯데카드 앱카드)')
+        approved = self.tool(
+            'phone_approve_payment',
+            provider='lottecard',
+            amountKrw=amount,
+            merchant=a.order.source,
+            methodLabel=f'{card}/{issuer}',
+            code=m.group(1),
+        )
+        self.note('폰 승인', mask_text(approved[:200]))
+        low = approved.lower()
+        if low.startswith(('refused', 'error')) or any(k in approved for k in DECLINED_MARKERS):
+            raise AgentFailure(
+                'needs_human',
+                mask_text(f'롯데카드 앱카드 폰 승인 실패: {approved[:120]} — 결제창은 열어 둔다(재결제 금지)'),
+                FailReason.PAY_INTERRUPTED,
+            )
+        # 앱에서 본인인증이 끝났으면 결제창의 [결제 완료]를 눌러야 주문이 완료된다
+        self.step('payer: 롯데카드 결제창 [결제 완료]')
+        try:
+            done = self.tool('run_js', code=_LOTTECARD_DONE_JS)
+            self.note('롯데카드 앱카드', mask_text(done[:160]))
+        except AgentFailure as e:
+            self.note('롯데카드 앱카드', mask_text(f'[결제 완료] 누르기 실패({e.reason[:80]}) — 주문 완료 화면을 그대로 본다'))
+        return self._confirm_paid(a, card)
 
     def _payco_agree_and_pay(self, card: str = '') -> bool:
         """페이코 PC 결제창(bill.payco.com) — 버튼이 '결제하기'가 아니라 '결제' 링크이고 정보제공동의를 켜야 한다.

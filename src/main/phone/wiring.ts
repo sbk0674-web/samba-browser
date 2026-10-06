@@ -533,7 +533,9 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         tap: deps.ops.tap,
         screenshot: deps.ops.screenshot,
         // 시험 입력(dry-run)을 취소하고 키패드에서 빠져나올 때만 쓴다
-        back: (s) => deps.ops.key(s, 'back')
+        back: (s) => deps.ops.key(s, 'back'),
+        // 결제창 숫자코드(롯데카드 앱카드) 입력 — 비밀 값은 지나가지 않는다
+        typeText: (s, text) => deps.ops.typeText(s, text)
       },
       // 폰이 잠들어 있으면 결제 앱 화면을 못 읽는다 — 앱을 부르기 전에 깨운다(실기 2026-09-30)
       launchApp: async (serial, link) => {
@@ -583,6 +585,7 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         methodLabel: req.methodLabel,
         ...(req.card === undefined ? {} : { cardHint: req.card }),
         ...(req.dryRunDigits === undefined ? {} : { dryRunDigits: req.dryRunDigits }),
+        ...(req.code === undefined ? {} : { code: req.code }),
         phoneLabel: deps.phones.list().find((p) => p.serial === serial)?.label ?? serial,
         accountId: account.id,
         phoneId: phoneIdOf(serial),

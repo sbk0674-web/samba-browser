@@ -55,6 +55,8 @@ export const phoneMessages = defineMessages({
     'phone.payNotificationOpened': '폰 알림창에서 결제 요청 알림을 열었습니다',
     'phone.payCardReady': '카드 확인: {card}',
     'phone.payCardTap': '카드 맞추기: [{label}] 누름',
+    'phone.payPathTap': '결제 화면으로: [{label}] 누름',
+    'phone.payCodeTyped': '결제창 숫자코드 입력',
     'phone.payCardUnspecified': '카드 미지정 — 앱에 선택된 카드로 결제: {card}',
     'phone.payCardRequired':
       '카드 미지정 거부: 지시문에 {card}가 있는데 결제 도구에 card 를 넘기지 않음',
@@ -115,6 +117,8 @@ export const phoneMessages = defineMessages({
     'phone.payNotificationOpened': 'Opened the payment request from the phone’s notifications',
     'phone.payCardReady': 'Card confirmed: {card}',
     'phone.payCardTap': 'Matching card: tapped [{label}]',
+    'phone.payPathTap': 'To payment screen: tapped [{label}]',
+    'phone.payCodeTyped': 'Entered the checkout numeric code',
     'phone.payCardUnspecified':
       'No card specified — paying with the card selected in the app: {card}',
     'phone.payCardRequired':
