@@ -150,7 +150,48 @@ describe('upload_file', () => {
   })
 })
 
+describe('upload_file 보강', () => {
+  it('input 과 무관한 CDP 오류는 업로드 실패로 알린다', async () => {
+    sendCommand.mockImplementation(async (method: string) => {
+      if (method === 'DOM.setFileInputFiles') throw new Error('Target closed')
+      if (method === 'DOM.getDocument') return { root: { nodeId: 1 } }
+      return { nodeId: 7 }
+    })
+    expect(await run('upload_file', { selector: '#f', paths: [realFile] })).toBe(
+      '업로드 실패: Target closed'
+    )
+  })
+
+  it('UNC 경로는 거부한다', async () => {
+    expect(await run('upload_file', { selector: '#f', paths: [String.raw`\\srv\share\a.txt`] })).toBe(
+      'UNC 경로 불가'
+    )
+    expect(await run('upload_file', { selector: '#f', paths: ['//srv/share/a.txt'] })).toBe(
+      'UNC 경로 불가'
+    )
+    expect(sendCommand).not.toHaveBeenCalled()
+  })
+
+  it('정규화한 경로를 확인 카드와 CDP 에 쓴다', async () => {
+    const messy = `${tmp}${path.sep}.${path.sep}a.txt`
+    await run('upload_file', { selector: '#f', paths: [messy] })
+    expect(confirm).toHaveBeenCalledWith(`파일 업로드: ${realFile} → #f`, 'danger')
+    expect(sendCommand).toHaveBeenCalledWith('DOM.setFileInputFiles', {
+      files: [realFile],
+      nodeId: 7
+    })
+  })
+})
+
 describe('set_download_dir · list_downloads', () => {
+  it('확인을 거절하면 폴더를 만들지 않는다', async () => {
+    confirm.mockResolvedValueOnce(false)
+    const dir = path.join(tmp, 'denied')
+    expect(await run('set_download_dir', { path: dir })).toBe('denied by user')
+    expect(fs.existsSync(dir)).toBe(false)
+    expect(tabsStub.downloadDir).toBeNull()
+  })
+
   it('폴더를 만들고 TabManager 에 저장한다', async () => {
     const dir = path.join(tmp, 'dl', 'nested')
     const out = await run('set_download_dir', { path: dir })

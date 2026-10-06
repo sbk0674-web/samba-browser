@@ -37,7 +37,7 @@ import {
 import { DEFAULT_FIELD_KEY } from '../vault/fields'
 import { formatDialogNote } from '../browser/dialogs'
 import { promises as fsp } from 'fs'
-import { isAbsolute } from 'path'
+import { isAbsolute, resolve as resolvePath } from 'path'
 import { ensureDebuggerAttached, keepDebuggerAttached } from '../browser/emulation'
 import { createOcrTool, ocrDigitInRegion, resolveKeypadDigits, type DigitRead } from './tools-ocr'
 import {
@@ -1886,12 +1886,15 @@ overlays left: ${after.length}${kept}`
           if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
           const tab = activeOr(ctx)
           if (!tab) return 'no active tab'
-          for (const p of paths) {
+          // UNC(\서버\공유) 경로는 네트워크로 자격 증명이 새어 나갈 수 있어 막는다
+          if (paths.some((p) => p.startsWith('\\') || p.startsWith('//'))) return 'UNC 경로 불가'
+          const files = paths.map((p) => (isAbsolute(p) ? resolvePath(p) : p))
+          for (const p of files) {
             const st = isAbsolute(p) ? await fsp.stat(p).catch(() => null) : null
             if (!st || !st.isFile()) return `파일 없음: ${p}`
           }
           // 이 PC 의 파일을 웹사이트로 내보내는 도구라 권한 모드와 무관하게 항상 확인한다
-          const ok = await ctx.confirm(`파일 업로드: ${paths.join(', ')} → ${selector}`, 'danger')
+          const ok = await ctx.confirm(`파일 업로드: ${files.join(', ')} → ${selector}`, 'danger')
           if (!ok) return 'denied by user'
           const wc = tab.view.webContents
           ensureDebuggerAttached(wc)
@@ -1903,11 +1906,14 @@ overlays left: ${after.length}${kept}`
           })
           if (!nodeId) return `셀렉터 없음: ${selector}`
           try {
-            await wc.debugger.sendCommand('DOM.setFileInputFiles', { files: paths, nodeId })
-          } catch {
-            return `file input 아님: ${selector}`
+            await wc.debugger.sendCommand('DOM.setFileInputFiles', { files, nodeId })
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e)
+            // 입력 칸이 아닌 노드일 때만 그렇게 알리고, 나머지는 원인을 그대로 돌려준다
+            if (/input|file/i.test(message)) return `file input 아님: ${selector}`
+            return `업로드 실패: ${message}`
           }
-          return JSON.stringify({ ok: true, files: paths.length })
+          return JSON.stringify({ ok: true, files: files.length })
         }
       )
   )
@@ -1920,11 +1926,15 @@ overlays left: ${after.length}${kept}`
       guard(`다운로드 폴더: ${path}`, async () => {
         if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
         if (!isAbsolute(path)) return `절대 경로가 아님: ${path}`
-        await fsp.mkdir(path, { recursive: true })
-        const st = await fsp.stat(path)
-        if (!st.isDirectory()) return `폴더 아님: ${path}`
-        ctx.tabs.downloadDir = path
-        return JSON.stringify({ ok: true, dir: path })
+        const dir = resolvePath(path)
+        // 이후 모든 탭의 다운로드가 이 폴더로 저장되므로 채팅 모드에서는 확인을 받는다(브릿지는 자동 승인)
+        const ok = await ctx.confirm(`다운로드 폴더 지정: ${dir}`, 'danger')
+        if (!ok) return 'denied by user'
+        await fsp.mkdir(dir, { recursive: true })
+        const st = await fsp.stat(dir)
+        if (!st.isDirectory()) return `폴더 아님: ${dir}`
+        ctx.tabs.downloadDir = dir
+        return JSON.stringify({ ok: true, dir })
       })
   )
 
