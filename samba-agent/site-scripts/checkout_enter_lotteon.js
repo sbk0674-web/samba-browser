@@ -52,7 +52,7 @@ if (mc) {
       if(!best&&KP) return {ok:false,error:'카카오페이 머니 즉시할인 없음'};
       if(!best&&LC) return {ok:false,error:'롯데카드 즉시할인 없음 — 결제하지 않음'};
       if(!best){const c=hi(await Q('닫기',/button "닫기"/)); if(c>0){await page.click(c); await sleep(600);}}
-      else{var want=1; if(!best.on){await page.click(best.id); await sleep(1200);}
+      else{var want=1; if(!best.on){if(LC&&page.clickNative){await page.clickNative(best.id);}else{await page.click(best.id);} await sleep(1200);}
       const b=hi(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/)); if(b<0) return {ok:false,error:'할인혜택 받기 버튼 없음'};
       await page.click(b); await sleep(2500);
       const ap=hi(await Q('적용하기',/button "적용하기"/)); if(ap>0){await page.click(ap); await sleep(3500);}
