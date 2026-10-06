@@ -30,7 +30,7 @@ import {
   installGoogleSigninUserAgent,
   isGoogleSigninUrl
 } from './google-signin-ua'
-import { installWebstoreNavigatorUserAgent, installWebstoreUserAgent } from './webstore-ua'
+import { installSiteUserAgents, installWebstoreNavigatorUserAgent } from './webstore-ua'
 import { installSessionCookieKeeper } from './session-cookies'
 import { installDialogHandler, isAutomationActive } from './dialogs'
 import { handleWillDownload, type DownloadPolicy, type DownloadRecord } from './downloads'
@@ -151,8 +151,8 @@ function hardenSession(ses: Session, partition: string): void {
     }
   })
   // 웹스토어는 Electron UA 를 보면 "지원되지 않는 브라우저" 안내로 설치 버튼을 감춘다.
-  // 그 호스트 요청에만 크롬 UA 를 보낸다(다른 사이트는 그대로)
-  installWebstoreUserAgent(ses)
+  // 구글 로그인은 크롬 UA 를 보면 로그인을 막는다 — 두 호스트 요청에만 각각 맞는 UA 를 보낸다(다른 사이트는 그대로)
+  installSiteUserAgents(ses)
   // 구글 로그인 화면의 패스키(암호 키) 자동 호출을 막는다 — 윈도우 보안 창이 저절로 뜨는 것을 막는다
   installGooglePasskeyBlock(ses)
   // 로그인 토큰이 세션 쿠키인 사이트(무신사)는 앱을 다시 켤 때마다 반쪽 로그인이 됐다 —
