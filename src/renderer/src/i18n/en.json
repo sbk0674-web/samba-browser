@@ -460,6 +460,22 @@
     "emptyAll": "No bookmarks saved yet",
     "manage": "Manage",
     "dropInto": "Move into {{name}}",
+    "menu": {
+      "openNewTab": "Open in new tab",
+      "edit": "Edit",
+      "rename": "Rename",
+      "newFolder": "New folder",
+      "delete": "Delete"
+    },
+    "edit": {
+      "linkTitle": "Edit bookmark",
+      "folderTitle": "Rename folder",
+      "newFolderTitle": "New folder",
+      "name": "Name",
+      "folder": "Folder",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
     "popover": {
       "addedTitle": "Bookmark added",
       "editTitle": "Edit bookmark",

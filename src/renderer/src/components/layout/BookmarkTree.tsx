@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import type React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronRight, Folder, X } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useBookmarkStore } from '@renderer/stores/bookmarkStore'
 import { useBrowserStore } from '@renderer/stores/browserStore'
+import { useOverlayStore } from '@renderer/stores/overlayStore'
 import { useUiStore } from '@renderer/stores/uiStore'
-import { insertIndexBefore } from '@renderer/lib/bookmark-folders'
+import { folderOptions, insertIndexBefore, type FolderOption } from '@renderer/lib/bookmark-folders'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@renderer/components/ui/dialog'
+import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
 import { SectionHeader } from './SectionHeader'
 import { isSectionOpen } from './sidebar-view'
 import type { BookmarkFolderDto, BookmarkLinkDto } from '@shared/ipc'
@@ -50,6 +60,31 @@ function allowDrop(e: React.DragEvent): boolean {
 
 type DropSpot = 'before' | 'into' | null
 
+// === 우클릭 메뉴 · 수정 대화상자 ======================================================
+// 행에서 우클릭하면 그 자리에 메뉴를 띄운다(링크: 새 탭에서 열기·수정·삭제 / 폴더: 이름 변경·새 폴더·삭제).
+// 중첩 행이 많아 콜백을 컨텍스트로 내려보낸다
+
+type MenuTarget =
+  | { kind: 'link'; link: BookmarkLinkDto; parentId: number | null }
+  | { kind: 'folder'; folder: BookmarkFolderDto }
+
+interface MenuState {
+  x: number
+  y: number
+  target: MenuTarget
+}
+
+type EditState =
+  | { kind: 'link'; id: number; title: string; folderId: number | null }
+  | { kind: 'folder'; id: number; name: string }
+  | { kind: 'newFolder'; parentId: number | null; name: string }
+
+const MenuContext = createContext<(e: React.MouseEvent, target: MenuTarget) => void>(() => {})
+
+// 메뉴 크기 추정 — 창 밖으로 나가지 않게 자리를 당긴다
+const MENU_WIDTH = 160
+const MENU_ITEM_HEIGHT = 32
+
 // 즐겨찾기 아이콘 대신 첫 글자를 검정 원에 넣은 파비콘 대체
 function LetterFavicon({ title }: { title: string }): React.JSX.Element {
   const letter = title.trim().charAt(0).toUpperCase() || '?'
@@ -77,6 +112,7 @@ function LinkRow({
   const place = useBookmarkStore((s) => s.place)
   const activeTab = useBrowserStore((s) => s.activeTab)
   const setView = useUiStore((s) => s.setView)
+  const openMenu = useContext(MenuContext)
   const [over, setOver] = useState(false)
 
   const open = async (): Promise<void> => {
@@ -119,10 +155,7 @@ function LinkRow({
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
       onClick={() => void open()}
-      onContextMenu={(e) => {
-        // 우클릭으로 즉시 삭제하지 않는다 — 삭제는 hover 시 나타나는 × 버튼으로만 한다
-        e.preventDefault()
-      }}
+      onContextMenu={(e) => openMenu(e, { kind: 'link', link, parentId })}
       style={{ paddingLeft: 10 + depth * 14 }}
       className={cn(
         'group flex w-full items-center gap-2 rounded-[8px] py-1 pr-1.5 text-left text-[12.5px] text-[var(--text)] hover:bg-black/5',
@@ -161,6 +194,7 @@ function FolderRow({
   const toggle = useBookmarkStore((s) => s.toggle)
   const removeFolder = useBookmarkStore((s) => s.removeFolder)
   const place = useBookmarkStore((s) => s.place)
+  const openMenu = useContext(MenuContext)
   const isEmpty = folder.folders.length === 0 && folder.links.length === 0
   const hasChildren = folder.folders.length > 0 || folder.links.length > 0
   const [over, setOver] = useState<DropSpot>(null)
@@ -234,6 +268,7 @@ function FolderRow({
         onDragLeave={() => setOver(null)}
         onDrop={onDrop}
         onClick={() => toggle(folder.id)}
+        onContextMenu={(e) => openMenu(e, { kind: 'folder', folder })}
         style={{ paddingLeft: 10 + depth * 14 }}
         title={over === 'into' ? t('bookmark.dropInto', { name: folder.name }) : undefined}
         className={cn(
@@ -320,21 +355,265 @@ function FolderRow({
   )
 }
 
+/** 우클릭 메뉴 — 바깥 클릭·Esc·스크롤로 닫힌다 */
+function ContextMenu({
+  menu,
+  onClose,
+  onEdit
+}: {
+  menu: MenuState
+  onClose: () => void
+  onEdit: (edit: EditState) => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const remove = useBookmarkStore((s) => s.remove)
+  const removeFolder = useBookmarkStore((s) => s.removeFolder)
+
+  useEffect(() => {
+    const close = (): void => onClose()
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [onClose])
+
+  const items: { label: string; danger?: boolean; run: () => void }[] =
+    menu.target.kind === 'link'
+      ? [
+          {
+            label: t('bookmark.menu.openNewTab'),
+            run: () =>
+              void window.samba.tabs.create({
+                url: menu.target.kind === 'link' ? menu.target.link.url : ''
+              })
+          },
+          {
+            label: t('bookmark.menu.edit'),
+            run: () => {
+              if (menu.target.kind !== 'link') return
+              onEdit({
+                kind: 'link',
+                id: menu.target.link.id,
+                title: menu.target.link.title,
+                folderId: menu.target.parentId
+              })
+            }
+          },
+          {
+            label: t('bookmark.menu.delete'),
+            danger: true,
+            run: () => {
+              if (menu.target.kind === 'link') void remove(menu.target.link.id)
+            }
+          }
+        ]
+      : [
+          // 북마크바 폴더는 이름을 바꾸거나 지우지 않는다(크롬과 같다)
+          ...(menu.target.folder.isToolbar
+            ? []
+            : [
+                {
+                  label: t('bookmark.menu.rename'),
+                  run: () => {
+                    if (menu.target.kind !== 'folder') return
+                    onEdit({
+                      kind: 'folder',
+                      id: menu.target.folder.id,
+                      name: menu.target.folder.name
+                    })
+                  }
+                }
+              ]),
+          {
+            label: t('bookmark.menu.newFolder'),
+            run: () => {
+              if (menu.target.kind !== 'folder') return
+              onEdit({ kind: 'newFolder', parentId: menu.target.folder.id, name: '' })
+            }
+          },
+          ...(menu.target.folder.isToolbar
+            ? []
+            : [
+                {
+                  label: t('bookmark.menu.delete'),
+                  danger: true,
+                  run: () => {
+                    if (menu.target.kind === 'folder') void removeFolder(menu.target.folder.id)
+                  }
+                }
+              ])
+        ]
+
+  const x = Math.min(menu.x, window.innerWidth - MENU_WIDTH - 8)
+  const y = Math.min(menu.y, window.innerHeight - items.length * MENU_ITEM_HEIGHT - 16)
+
+  return (
+    <div
+      role="menu"
+      data-bookmark-menu
+      style={{ position: 'fixed', left: x, top: y, width: MENU_WIDTH, zIndex: 60 }}
+      className="rounded-[10px] border border-[var(--line)] bg-white p-1 shadow-lg"
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {items.map((it) => (
+        <button
+          key={it.label}
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onClose()
+            it.run()
+          }}
+          className={cn(
+            'flex h-8 w-full items-center rounded-[8px] px-2.5 text-left text-[12.5px] hover:bg-black/5',
+            it.danger ? 'text-red-600' : 'text-[var(--text)]'
+          )}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** 수정 대화상자 — 링크(이름·폴더), 폴더 이름, 새 폴더 */
+function EditDialog({
+  edit,
+  options,
+  onClose
+}: {
+  edit: EditState
+  options: FolderOption[]
+  onClose: () => void
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const rename = useBookmarkStore((s) => s.rename)
+  const move = useBookmarkStore((s) => s.move)
+  const createFolder = useBookmarkStore((s) => s.createFolder)
+  const [name, setName] = useState(edit.kind === 'link' ? edit.title : edit.name)
+  const [folderId, setFolderId] = useState<number | null>(
+    edit.kind === 'link' ? edit.folderId : null
+  )
+  const [busy, setBusy] = useState(false)
+
+  const title =
+    edit.kind === 'link'
+      ? t('bookmark.edit.linkTitle')
+      : edit.kind === 'folder'
+        ? t('bookmark.edit.folderTitle')
+        : t('bookmark.edit.newFolderTitle')
+
+  const save = async (): Promise<void> => {
+    const next = name.trim()
+    if (!next || busy) return
+    setBusy(true)
+    try {
+      if (edit.kind === 'link') {
+        if (next !== edit.title) await rename(edit.id, 'link', next)
+        if (folderId !== edit.folderId) await move(edit.id, 'link', folderId)
+      } else if (edit.kind === 'folder') {
+        if (next !== edit.name) await rename(edit.id, 'folder', next)
+      } else {
+        await createFolder(edit.parentId, next)
+      }
+      onClose()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="rounded-2xl sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-2.5">
+          <label className="flex flex-col gap-1 text-[12px] text-[var(--text2)]">
+            {t('bookmark.edit.name')}
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void save()
+              }}
+              className="h-9 rounded-[9px]"
+            />
+          </label>
+          {edit.kind === 'link' && (
+            <label className="flex flex-col gap-1 text-[12px] text-[var(--text2)]">
+              {t('bookmark.edit.folder')}
+              <select
+                value={folderId === null ? 'root' : String(folderId)}
+                onChange={(e) =>
+                  setFolderId(e.target.value === 'root' ? null : Number(e.target.value))
+                }
+                className="h-9 rounded-[9px] border border-[var(--line)] bg-white px-2 text-[12.5px] text-[var(--text)] outline-none"
+              >
+                {options.map((o) => (
+                  <option
+                    key={o.id === null ? 'root' : o.id}
+                    value={o.id === null ? 'root' : String(o.id)}
+                  >
+                    {' '.repeat(o.depth * 3)}
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t('bookmark.edit.cancel')}
+          </Button>
+          <Button type="button" onClick={() => void save()} disabled={busy || !name.trim()}>
+            {t('bookmark.edit.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // 사이드바 메뉴 아래 "북마크" 섹션. 폴더는 접기/펼치기, 링크는 클릭 시 활성 탭에서 열고
-// 브라우저 뷰로 전환한다. 행을 끌어 순서를 바꾸거나 다른 폴더로 옮길 수 있다.
+// 브라우저 뷰로 전환한다. 행을 끌어 순서를 바꾸거나 다른 폴더로 옮기고, 우클릭으로 수정·삭제한다.
 // 섹션 자체가 스크롤되므로 사이드바 푸터(설정)는 항상 보인다
 export function BookmarkTree(): React.JSX.Element {
   const { t } = useTranslation()
   const tree = useBookmarkStore((s) => s.tree)
   const loading = useBookmarkStore((s) => s.loading)
   const load = useBookmarkStore((s) => s.load)
-  const setView = useUiStore((s) => s.setView)
   // 섹션 헤더로 접었으면 목록을 그리지 않는다(상태는 설정에 영속)
   const open = useUiStore((s) => isSectionOpen(s.sidebarSections, 'bookmarks'))
+  const setWebviewHidden = useOverlayStore((s) => s.setWebviewHidden)
+  const [menu, setMenu] = useState<MenuState | null>(null)
+  const [edit, setEdit] = useState<EditState | null>(null)
 
   useEffect(() => {
     void load()
   }, [load])
+
+  // 메뉴·대화상자가 떠 있는 동안 네이티브 웹뷰를 접는다 — 웹뷰 위로 뻗은 부분이 가려지지 않게
+  const overlayOpen = menu !== null || edit !== null
+  useEffect(() => {
+    setWebviewHidden(overlayOpen)
+    return () => setWebviewHidden(false)
+  }, [overlayOpen, setWebviewHidden])
+
+  const openMenu = (e: React.MouseEvent, target: MenuTarget): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu({ x: e.clientX, y: e.clientY, target })
+  }
 
   const isEmpty = !tree || (tree.folders.length === 0 && tree.links.length === 0)
   // 북마크 바(isToolbar) 폴더는 "북마크" 섹션 바로 아래 한 겹 더 접혀 보여 이중 구조가 된다 —
@@ -346,55 +625,59 @@ export function BookmarkTree(): React.JSX.Element {
   const rootFolderIds = tree?.folders.map((f) => f.id) ?? []
   const toolbarLinkIds = toolbar?.links.map((l) => l.id) ?? []
   const rootLinkIds = tree?.links.map((l) => l.id) ?? []
+  const options = tree
+    ? folderOptions(tree, {
+        root: t('bookmark.popover.otherFolder'),
+        toolbar: t('bookmark.toolbar')
+      })
+    : []
 
   return (
-    <div className={cn('flex flex-col', open && 'min-h-0 flex-1')}>
-      <SectionHeader
-        sectionKey="bookmarks"
-        label={t('bookmark.title')}
-        action={
-          <button
-            type="button"
-            onClick={() => setView('bookmarks')}
-            className="shrink-0 text-[11px] font-medium text-[var(--text3)] hover:text-[var(--text)] hover:underline"
-          >
-            {t('bookmark.manage')}
-          </button>
-        }
-      />
-      {open && (
-        <div className="min-h-0 flex-1 overflow-auto">
-          {!loading && isEmpty && (
-            <div className="px-2.5 py-2 text-[12px] text-[var(--text3)]">
-              {t('bookmark.emptyAll')}
-            </div>
-          )}
-          {(toolbar?.folders ?? []).map((f) => (
-            <FolderRow
-              key={f.id}
-              folder={f}
-              depth={0}
-              parentId={toolbar?.id ?? null}
-              siblingIds={toolbarFolderIds}
-            />
-          ))}
-          {rootFolders.map((f) => (
-            <FolderRow key={f.id} folder={f} depth={0} parentId={null} siblingIds={rootFolderIds} />
-          ))}
-          {(toolbar?.links ?? []).map((l) => (
-            <LinkRow
-              key={l.id}
-              link={l}
-              depth={0}
-              parentId={toolbar?.id ?? null}
-              siblingIds={toolbarLinkIds}
-            />
-          ))}
-          {(tree?.links ?? []).map((l) => (
-            <LinkRow key={l.id} link={l} depth={0} parentId={null} siblingIds={rootLinkIds} />
-          ))}
-        </div>
-      )}
-    </div>
+    <MenuContext.Provider value={openMenu}>
+      <div className={cn('flex flex-col', open && 'min-h-0 flex-1')}>
+        <SectionHeader sectionKey="bookmarks" label={t('bookmark.title')} />
+        {open && (
+          <div className="min-h-0 flex-1 overflow-auto">
+            {!loading && isEmpty && (
+              <div className="px-2.5 py-2 text-[12px] text-[var(--text3)]">
+                {t('bookmark.emptyAll')}
+              </div>
+            )}
+            {(toolbar?.folders ?? []).map((f) => (
+              <FolderRow
+                key={f.id}
+                folder={f}
+                depth={0}
+                parentId={toolbar?.id ?? null}
+                siblingIds={toolbarFolderIds}
+              />
+            ))}
+            {rootFolders.map((f) => (
+              <FolderRow
+                key={f.id}
+                folder={f}
+                depth={0}
+                parentId={null}
+                siblingIds={rootFolderIds}
+              />
+            ))}
+            {(toolbar?.links ?? []).map((l) => (
+              <LinkRow
+                key={l.id}
+                link={l}
+                depth={0}
+                parentId={toolbar?.id ?? null}
+                siblingIds={toolbarLinkIds}
+              />
+            ))}
+            {(tree?.links ?? []).map((l) => (
+              <LinkRow key={l.id} link={l} depth={0} parentId={null} siblingIds={rootLinkIds} />
+            ))}
+          </div>
+        )}
+        {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} onEdit={setEdit} />}
+        {edit && <EditDialog edit={edit} options={options} onClose={() => setEdit(null)} />}
+      </div>
+    </MenuContext.Provider>
   )
 }
