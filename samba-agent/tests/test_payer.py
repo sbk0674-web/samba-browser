@@ -434,7 +434,7 @@ def _args(route) -> dict:
     return json.loads(route.calls.last.request.content.decode('utf-8'))['args']
 
 
-def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL):
+def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL, toss_front: bool = False):
     respx.post(f'{URL}/tool/run_script').mock(return_value=page(ENTER_OK))
     respx.post(f'{URL}/tool/list_tabs').mock(return_value=list_tabs_page(popup_url))
     # 팝업이 0개일 때만 실제로 불린다(리뷰 지적 — Minor 4) — 다른 시나리오에서는 그냥 등록만 해 둔다
@@ -442,8 +442,10 @@ def _full_pay_mocks(popup_url: str | None = TOSS_POPUP_URL):
     respx.post(f'{URL}/tool/find_elements').mock(
         return_value=page('INTERACTIVE ELEMENTS:\n[12] textbox "주문자 이름"')
     )
+    # 토스페이면 폰 승인 직전에 PC 결제창을 한 번 더 읽는다(알림 전송 단계) — 로그인 화면이 아니면 아무것도 안 한다
+    first = [page('URL: https://pay.toss.im/payfront/web/app-payment/push')] if toss_front else []
     respx.post(f'{URL}/tool/get_page').mock(
-        side_effect=[page('결제 진행 중'), page('결제 완료 주문번호 M-1')]
+        side_effect=[*first, page('결제 진행 중'), page('결제 완료 주문번호 M-1')]
     )
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
@@ -471,7 +473,7 @@ def test_fill_secret_인자가_앱_스키마와_맞는다(reg):
 def test_phone_approve_payment_인자가_앱_스키마와_맞는다(reg):
     # 리뷰 지적 — I7: provider enum · 양의 정수 amountKrw · merchant · methodLabel 이 필수다.
     # 카드 이름 자체가 결제 앱을 가리키면(토스페이) 결제창을 보지 않고 바로 정한다
-    _fill, pay = _full_pay_mocks(popup_url=None)
+    _fill, pay = _full_pay_mocks(popup_url=None, toss_front=True)
     out = agent(reg)(assignment(reg, dry_run=False, card='토스페이', handoff={'cost': 89000}))
     assert out.status == 'ok'
     args = _args(pay)
@@ -513,7 +515,7 @@ def test_카드_이름이_네이버페이면_폰_승인이_아니라_PC_결제�
 def test_토스여도_handoff에_pay_account가_있어도_넘기지_않는다(reg):
     # payAccount 는 앱 스키마상 네이버페이 전용이지만, 어떤 provider 에도 넘기지 않는 게
     # 사용자 결정이다(리뷰 지적 — Critical 1) — 토스에서도 죽은 값이 새 나가지 않는지 본다
-    _fill, pay = _full_pay_mocks(popup_url=None)
+    _fill, pay = _full_pay_mocks(popup_url=None, toss_front=True)
     out = agent(reg)(
         assignment(
             reg, dry_run=False, card='토스페이', handoff={'cost': 89000, 'pay_account': 'acc-b'}
@@ -1596,3 +1598,75 @@ def test_order_done_url_detects_completed_order_pages():
     assert ORDER_DONE_URL_RE.search('https://www.lotteon.com/p/order/complete/2026093016657652')
     assert not ORDER_DONE_URL_RE.search('https://www.musinsa.com/order/order-form')
     assert not ORDER_DONE_URL_RE.search('https://money.musinsapayments.com/pay')
+
+
+# ---- 토스페이 PC 결제창: 휴대폰·생년월일을 채워 폰으로 알림을 보낸다(실기 2026-10-06) ----
+TOSS_LOGIN = (
+    'URL: https://pay.toss.im/payfront/web/login\n'
+    'TITLE: 토스페이\n\nINTERACTIVE ELEMENTS:\n'
+    '[4] clickable "휴대폰번호"\n[6] clickable "QR코드"\n'
+    '[8] textbox "휴대폰번호" value=""\n[9] textbox "생년월일 6자리" value=""\n'
+)
+TOSS_PUSH = 'URL: https://pay.toss.im/payfront/web/app-payment/push\nTITLE: 토스페이\n'
+
+
+def _toss_tools(agent_, pages, fill_results):
+    calls: list[tuple[str, dict]] = []
+    queue = list(pages)
+
+    def tool(name, **kwargs):
+        calls.append((name, kwargs))
+        if name == 'get_page':
+            return queue.pop(0) if len(queue) > 1 else queue[0]
+        if name == 'fill_secret':
+            return fill_results(kwargs)
+        return 'ok'
+
+    agent_.tool = tool  # type: ignore[method-assign]
+    agent_.step = lambda *_a, **_k: None  # type: ignore[method-assign]
+    return calls
+
+
+def test_토스_결제창이면_휴대폰과_생년월일을_채워_알림을_보낸다(reg):
+    a = agent(reg)
+    calls = _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_PUSH], lambda kw: 'ok')
+    assert a._toss_phone_request(assignment(reg, dry_run=False)) is True
+    fills = [kw for n, kw in calls if n == 'fill_secret']
+    assert [(f['elementId'], f['field'], f['provider']) for f in fills] == [
+        (8, 'payment.phone', 'toss'),
+        (9, 'payment.birth', 'toss'),
+    ]
+    assert [f['format'] for f in fills] == ['digits', 'yymmdd']
+
+
+def test_토스_항목에_값이_없으면_같은_사람의_카카오페이_항목_값을_쓴다(reg):
+    a = agent(reg)
+
+    def fill(kw):
+        return 'ok' if kw['provider'] == 'kakao' else 'not found: no payment.phone saved in the toss payment item'
+
+    calls = _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_PUSH], fill)
+    assert a._toss_phone_request(assignment(reg, dry_run=False)) is True
+    providers = [kw['provider'] for n, kw in calls if n == 'fill_secret']
+    assert providers == ['toss', 'kakao', 'toss', 'kakao']
+
+
+def test_토스_로그인_화면이_아니면_아무것도_하지_않는다(reg):
+    a = agent(reg)
+    calls = _toss_tools(a, [TOSS_PUSH], lambda kw: 'ok')
+    assert a._toss_phone_request(assignment(reg, dry_run=False)) is False
+    assert not any(n == 'fill_secret' for n, _ in calls)
+
+
+def test_토스_번호가_어느_항목에도_없으면_사람에게_넘긴다(reg):
+    a = agent(reg)
+    _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN], lambda kw: 'not found: no payment.phone saved')
+    with pytest.raises(AgentFailure, match='입력 실패'):
+        a._toss_phone_request(assignment(reg, dry_run=False))
+
+
+def test_알림_대기_화면으로_안_넘어가면_사람에게_넘긴다(reg):
+    a = agent(reg)
+    _toss_tools(a, [TOSS_LOGIN, TOSS_LOGIN, TOSS_LOGIN], lambda kw: 'ok')
+    with pytest.raises(AgentFailure, match='알림 대기 화면'):
+        a._toss_phone_request(assignment(reg, dry_run=False))

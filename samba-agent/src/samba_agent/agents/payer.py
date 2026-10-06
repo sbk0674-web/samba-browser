@@ -605,6 +605,9 @@ def _element_id_of(page: str, pattern: str) -> int | None:
 # 카카오페이 카톡결제 탭을 누른 뒤·결제요청을 누른 뒤 기다리는 시간(ms)
 KAKAO_TAB_WAIT_MS = 1500
 KAKAO_REQUEST_WAIT_MS = 2500
+# 토스페이 PC 결제창: 탭을 누른 뒤·생년월일을 채워 알림 대기 화면으로 넘어가기를 기다리는 시간(ms)
+TOSS_TAB_WAIT_MS = 1000
+TOSS_PUSH_WAIT_MS = 4000
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
 KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck')
 KAKAO_HUMAN_WAIT_TRIES = 36
@@ -872,6 +875,62 @@ class PayerAgent(AgentBase):
             self.tool('switch_tab', id=kakao_tab)
         except AgentFailure as e:
             self.note('카카오페이', mask_text(f'결제창 탭으로 못 돌아감({e.reason[:80]})'))
+
+    def _toss_phone_request(self, a: Assignment) -> bool:
+        """토스페이 PC 결제창(pay.toss.im)의 '휴대폰번호' 탭에 휴대폰·생년월일을 앱(fill_secret)이 채워 폰으로 결제 알림을 보낸다.
+
+        생년월일까지 채우면 창이 알림 대기 화면(/app-payment/push)으로 넘어가며 알림이 간다(실기 2026-10-06).
+        번호·생년월일은 하네스를 지나가지 않는다. 토스 결제 항목에 값이 없으면 같은 사람의 카카오페이 항목 값을 쓴다
+        (같은 휴대폰·생년월일). 창이 로그인 화면이 아니면(이미 알림 대기 등) 아무것도 하지 않고 False.
+        """
+        page = self.tool('get_page')
+        head = page.split('\n', 1)[0]
+        if 'pay.toss.im' not in head or '/login' not in head:
+            return False
+        self.step('payer: 토스페이 알림 보내기')
+        tab = _element_id_of(page, r'clickable "휴대폰번호"')
+        if tab is not None:
+            self.tool('click', id=tab)
+            self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+            page = self.tool('get_page')
+        fields = (
+            (r'textbox "휴대폰번호"', 'payment.phone', 'digits'),
+            (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
+        )
+        for pattern, field, fmt in fields:
+            element_id = _element_id_of(page, pattern)
+            if element_id is None:
+                raise AgentFailure(
+                    'needs_human', f'토스페이 알림 요청 칸 없음({field})', FailReason.UNKNOWN
+                )
+            out = ''
+            for provider in ('toss', 'kakao'):
+                out = self.tool(
+                    'fill_secret',
+                    elementId=element_id,
+                    itemType='password',
+                    provider=provider,
+                    field=field,
+                    format=fmt,
+                )
+                if out.strip().lower().startswith('ok'):
+                    break
+            if not out.strip().lower().startswith('ok'):
+                raise AgentFailure(
+                    'needs_human',
+                    f'토스페이 알림 요청 입력 실패({field}): {mask_text(out[:100])}',
+                    FailReason.UNKNOWN,
+                )
+        self.tool('wait', ms=TOSS_PUSH_WAIT_MS)
+        now = self.tool('get_page')
+        if 'app-payment/push' not in now.split('\n', 1)[0]:
+            raise AgentFailure(
+                'needs_human',
+                '토스페이 알림 대기 화면으로 안 넘어갔다 — 알림이 갔는지 사람이 확인',
+                FailReason.UNKNOWN,
+            )
+        self.note('토스페이', '결제 알림 보냄(휴대폰·생년월일은 키마스터 값)')
+        return True
 
     def _kakao_talk_request(self, a: Assignment) -> tuple[str, str | None] | None:
         """카카오페이 결제창의 '카톡결제' 탭에서 휴대폰·생년월일을 앱(fill_secret)이 채우고 결제요청을 누른다.
@@ -1712,6 +1771,10 @@ class PayerAgent(AgentBase):
             kakao_front = self._kakao_talk_request(a)
         else:
             kakao_front = None
+
+        if provider == 'toss' and _pay_provider(card) == 'toss':
+            # 토스페이 PC 결제창은 휴대폰번호·생년월일을 넣어야 폰으로 알림이 간다 — 알림 없이 폰에서 토스 앱만 열지 않는다
+            self._toss_phone_request(a)
 
         if provider is not None:
             self.step('payer: 폰 승인')
