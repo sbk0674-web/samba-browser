@@ -218,7 +218,7 @@ export function createSupabaseBackend(
       if (error) return null
       return typeof data === 'number' ? data : null
     },
-    async subscribe(table, onChange) {
+    async subscribe(table, onChange, onStatus) {
       // Realtime 은 "있으면 좋은" 기능이다. 실패해도 폴링으로 계속 동작해야 한다
       try {
         const channel = client
@@ -233,6 +233,7 @@ export function createSupabaseBackend(
             // 이라 60초 폴링만 돈다. 사용자 2026-10-06: "1분이 아니라 실시간으로 같이 바뀌어야 한다"
             const detail = err instanceof Error ? ` ${err.message}` : ''
             console.info(`[sync] Realtime 구독 ${table}: ${status}${detail}`)
+            onStatus?.(status === 'SUBSCRIBED')
           })
         return () => {
           void client.removeChannel(channel)

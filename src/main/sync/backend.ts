@@ -112,8 +112,15 @@ export interface SyncBackend {
   ): Promise<RemoteKeyedRow[]>
   /** 복합 PK 표(settings_sync)에 올린다. 충돌 해결은 서버의 기본키를 따른다 */
   upsertKeyed(table: string, rows: RemoteKeyedRow[]): Promise<void>
-  /** 변경 알림 구독. 반환값을 호출하면 구독을 푼다 */
-  subscribe(table: string, onChange: () => void): Promise<() => void>
+  /**
+   * 변경 알림 구독. 반환값을 호출하면 구독을 푼다.
+   * onStatus 는 구독이 살아 있는지(true = 변경이 실시간으로 온다) 바뀔 때 불린다 — 엔진이 이걸 보고 폴링을 멈춘다
+   */
+  subscribe(
+    table: string,
+    onChange: () => void,
+    onStatus?: (live: boolean) => void
+  ): Promise<() => void>
   /**
    * 숫자 하나를 돌려주는 서버 함수(rpc). 함수가 없거나 권한이 없으면 null —
    * 디렉터리의 가입 사용자 수처럼 "있으면 보여 주는" 값에 쓴다
