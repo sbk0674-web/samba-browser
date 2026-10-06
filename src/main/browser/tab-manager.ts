@@ -25,6 +25,12 @@ import { moveItem } from '../../shared/reorder'
 import { attachInternalProtocol } from './internal-protocol'
 import type { PermissionMode, SearchEngine } from '../../shared/settings'
 import { applyMobileEmulation, clearMobileEmulation, MOBILE_WIDTH } from './emulation'
+import {
+  googleLoadOptions,
+  installGooglePasskeyBlock,
+  installGoogleSigninUserAgent,
+  isGoogleSigninUrl
+} from './google-signin-ua'
 import { installWebstoreNavigatorUserAgent, installWebstoreUserAgent } from './webstore-ua'
 import { installSessionCookieKeeper } from './session-cookies'
 import { installDialogHandler, isAutomationActive } from './dialogs'
@@ -141,6 +147,8 @@ function hardenSession(ses: Session, partition: string): void {
   // 웹스토어는 Electron UA 를 보면 "지원되지 않는 브라우저" 안내로 설치 버튼을 감춘다.
   // 그 호스트 요청에만 크롬 UA 를 보낸다(다른 사이트는 그대로)
   installWebstoreUserAgent(ses)
+  // 구글 로그인 화면의 패스키(암호 키) 자동 호출을 막는다 — 윈도우 보안 창이 저절로 뜨는 것을 막는다
+  installGooglePasskeyBlock(ses)
   // 로그인 토큰이 세션 쿠키인 사이트(무신사)는 앱을 다시 켤 때마다 반쪽 로그인이 됐다 —
   // 크롬의 "이전 세션 이어서" 처럼 세션 쿠키에 만료를 얹어 남긴다
   installSessionCookieKeeper(ses)
@@ -463,19 +471,25 @@ export class TabManager {
   /** 이 세션을 쓰는 프로필 이름. 탭 파티션이 아니면(기본 세션) 'default' */
   profileOfSession(ses: Session): string {
     for (const [partition, s] of this.partitionSessions) {
-      if (s === ses && partition.startsWith(this.partitionPrefix)) return partition.slice(this.partitionPrefix.length)
+      if (s === ses && partition.startsWith(this.partitionPrefix))
+        return partition.slice(this.partitionPrefix.length)
     }
     return 'default'
   }
 
   /** 확장 탭·창 API 다리(extensions/tabs-bridge)에 줄 탭 관리 기능 */
   extensionTabsProvider(): ExtensionTabsProvider {
-    const byWc = (wc: WebContents): Tab | undefined => this.tabs.find((t) => t.view.webContents === wc)
+    const byWc = (wc: WebContents): Tab | undefined =>
+      this.tabs.find((t) => t.view.webContents === wc)
     return {
       tabs: () =>
         this.tabs
           .filter((t) => isTabAlive(t))
-          .map((t) => ({ wc: t.view.webContents, active: t.id === this.activeId, profile: t.profile })),
+          .map((t) => ({
+            wc: t.view.webContents,
+            active: t.id === this.activeId,
+            profile: t.profile
+          })),
       create: (url, profile, active) => {
         // 뒤에서 열기 — 크롬 tabs.create({active:false}) 처럼 보던 탭을 그대로 둔다
         const info = this.create({ url, profile, background: !active && this.activeId !== null })
@@ -775,6 +789,8 @@ export class TabManager {
     // 웹스토어 페이지 JS 가 읽는 navigator.userAgent 도 헤더와 같은 크롬 UA 로 맞춘다.
     // 모바일 탭은 emulation.ts 가 UA 를 따로 관리하므로 건드리지 않는다
     tab.refreshWebstoreUa = installWebstoreNavigatorUserAgent(wc, () => tab.mobile)
+    // 구글 로그인 화면에만 Electron 표기 UA 를 쓴다(크롬 UA 로 가면 구글이 로그인을 막는다)
+    installGoogleSigninUserAgent(wc, { isMobile: () => tab.mobile })
     // 사람의 키 입력·마우스 누름을 기록한다 — 그 탭은 잠시 자동화가 입력·로그인하지 않고,
     // 창 전체도 잠시 자동화가 보이는 탭을 바꾸거나 포커스를 가져가지 않는다(human-activity.ts·visible-guard.ts)
     this.watchHumanInput(wc)
@@ -833,6 +849,7 @@ export class TabManager {
       // 보이지 않는 탭(자동화가 뒤에서 조작하는 탭)이 연 팝업 창은 포커스를 가져가지 않게 숨긴 채 만들고
       // did-create-window 에서 showInactive 로 띄운다 — 사람이 쓰던 창의 키 입력이 팝업으로 넘어가지 않게
       const quiet = openInBackground(tab.id, this.activeId)
+      googlePopupTarget = isGoogleSigninUrl(target)
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -845,13 +862,17 @@ export class TabManager {
         }
       }
     })
+    // 직전 window.open 대상이 구글 로그인 주소였는가 — 그 팝업은 첫 요청 전에 UA 를 건다
+    let googlePopupTarget = false
     wc.on('did-create-window', (popupWin) => {
+      installGoogleSigninUserAgent(popupWin.webContents, { eager: googlePopupTarget })
+      googlePopupTarget = false
       this.registerPopup(popupWin, tab.id, profile)
       // 숨긴 채 만든 팝업(뒤 탭이 연 것)은 포커스 없이 보여 준다
       if (!popupWin.isDestroyed() && !popupWin.isVisible()) popupWin.showInactive()
     })
     if (tab.mobile) void applyMobileEmulation(wc)
-    void wc.loadURL(url)
+    void wc.loadURL(url, googleLoadOptions(url, wc.getUserAgent()))
     if (opts.keepAgentTarget === true) this.laneIds.add(tab.id)
     if (opts.user === true) this.userIds.add(tab.id)
     if (opts.background === true) {

@@ -38,7 +38,12 @@ app.setName('SAMBA Browser')
 
 // 창이 다른 창에 가려지면 Windows 가림 감지가 렌더링을 멈춰 capturePage(키패드 OCR)가
 // "Current display surface not available for capture" 로 실패한다(실기 2026-09-28) — 가림 감지를 끈다
-app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+// WebAuthenticationConditionalUI: 구글 로그인 화면이 열릴 때마다 윈도우 '암호 키 선택' 창이 저절로 뜨는 것을 막는다
+// (크롬은 자동완성 목록으로 띄우지만 Electron 은 윈도우 보안 창을 띄운다 — 실기 2026-10-06). 사람이 누르는 패스키 로그인은 그대로 된다
+app.commandLine.appendSwitch(
+  'disable-features',
+  'CalculateNativeWinOcclusion,WebAuthenticationConditionalUI'
+)
 
 // 모든 사이트에 순수 크롬 UA 를 보낸다 — Electron 기본 UA 의 `SAMBABrowser/1.0.0 … Electron/39` 토큰은
 // reCAPTCHA Enterprise 같은 점수형 봇 판정에서 점수를 깎아 로그인이 조용히 거부된다(GS샵 실기).
