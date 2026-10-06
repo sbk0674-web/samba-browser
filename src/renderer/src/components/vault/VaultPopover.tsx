@@ -58,7 +58,12 @@ export function VaultPopover(): React.JSX.Element {
 
   const run = async (accountId: number): Promise<void> => {
     const result = await autofill(accountId)
-    setNotice(result === 'ok' || result === 'filled-password-only' ? 'ok' : 'failed')
+    // 2단계 로그인의 아이디 화면(filled-username-only)도 채우기 성공이다 — 비밀번호는 뒤에서 이어 채운다
+    setNotice(
+      result === 'ok' || result === 'filled-password-only' || result === 'filled-username-only'
+        ? 'ok'
+        : 'failed'
+    )
   }
 
   const row = (a: AccountDto, keyPrefix: string): React.JSX.Element => (
