@@ -10,6 +10,7 @@
 
 import type { Session, WebContents } from 'electron'
 import { WEBSTORE_HOST } from '../../shared/extensions'
+import { isGoogleSigninUrl } from './google-signin-ua'
 
 /** webRequest 필터 — 이 패턴에 걸리는 요청만 UA 를 갈아 끼운다 */
 export const WEBSTORE_URL_PATTERNS = [`https://${WEBSTORE_HOST}/*`]
@@ -84,6 +85,8 @@ export function installWebstoreNavigatorUserAgent(
   const webstoreUa = chromeUserAgent(defaultUa)
   const apply = (url: string): void => {
     if (isMobile()) return
+    // 구글 로그인 주소의 UA 는 google-signin-ua 가 정한다 — 여기서 되돌리면 항해가 취소된다
+    if (isGoogleSigninUrl(url)) return
     try {
       if (wc.isDestroyed()) return
       wc.setUserAgent(isWebstoreUrl(url) ? webstoreUa : defaultUa)
