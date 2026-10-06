@@ -458,7 +458,18 @@
     "delete": "Delete",
     "deleteFolder": "Delete folder",
     "emptyAll": "No bookmarks saved yet",
-    "manage": "Manage"
+    "manage": "Manage",
+    "dropInto": "Move into {{name}}",
+    "popover": {
+      "addedTitle": "Bookmark added",
+      "editTitle": "Edit bookmark",
+      "name": "Name",
+      "folder": "Folder",
+      "otherFolder": "Other bookmarks",
+      "more": "More",
+      "done": "Done",
+      "delete": "Remove"
+    }
   },
   "bookmarksPage": {
     "title": "Bookmarks",

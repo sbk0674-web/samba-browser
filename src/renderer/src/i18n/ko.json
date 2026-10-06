@@ -458,7 +458,18 @@
     "delete": "삭제",
     "deleteFolder": "폴더 삭제",
     "emptyAll": "저장된 북마크가 없어요",
-    "manage": "관리"
+    "manage": "관리",
+    "dropInto": "{{name}} 폴더로 옮기기",
+    "popover": {
+      "addedTitle": "북마크 추가됨",
+      "editTitle": "북마크 수정",
+      "name": "이름",
+      "folder": "폴더",
+      "otherFolder": "기타 북마크",
+      "more": "더 보기",
+      "done": "완료",
+      "delete": "삭제"
+    }
   },
   "bookmarksPage": {
     "title": "북마크",
