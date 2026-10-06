@@ -13,7 +13,7 @@ function fakeSession(opts: { slowMs?: number; fail?: boolean } = {}): {
   return {
     disposed: () => disposed,
     make: (onStep) => ({
-      names: () => ['get_page', 'click', 'upload_file'],
+      names: () => ['get_page', 'click', 'upload_file', 'phone_approve_payment'],
       call: async (name, args) => {
         if (name === 'click') onStep(`클릭: ${String(args.id)}`, true)
         if (opts.slowMs) await new Promise((r) => setTimeout(r, opts.slowMs))
@@ -75,7 +75,10 @@ describe('BridgeServer', () => {
     const base = await up()
     const r = await fetch(`${base}/health`, { headers: H })
     expect(r.status).toBe(200)
-    expect(await r.json()).toEqual({ ok: true, tools: ['get_page', 'click', 'upload_file'] })
+    expect(await r.json()).toEqual({
+      ok: true,
+      tools: ['get_page', 'click', 'upload_file', 'phone_approve_payment']
+    })
   })
 
   it('도구를 부르고 진행 로그를 함께 돌려주며, 요청마다 세션을 닫는다', async () => {
@@ -160,6 +163,30 @@ describe('BridgeServer', () => {
     expect(fs.disposed()).toBe(0)
     await new Promise((r2) => setTimeout(r2, 400))
     expect(fs.disposed()).toBe(1)
+  })
+
+  it('폰을 기다리는 긴 도구(phone_approve_payment)는 긴 제한 시간을 쓴다 — 일반 도구는 그대로 504', async () => {
+    // 실기 2026-10-06: 폰 결제는 90초를 넘기기 일쑤라 504 → bridge_down 으로 결제창 탭이 닫혔다
+    const fs = fakeSession({ slowMs: 300 })
+    server = new BridgeServer({
+      openSession: fs.make,
+      token: () => TOKEN,
+      toolTimeoutMs: 100,
+      longToolTimeoutMs: 1000
+    })
+    const port = await server.start(0)
+    const long = await fetch(`http://127.0.0.1:${port}/tool/phone_approve_payment`, {
+      method: 'POST',
+      headers: H,
+      body: '{"args":{}}'
+    })
+    expect(long.status).toBe(200)
+    const short = await fetch(`http://127.0.0.1:${port}/tool/get_page`, {
+      method: 'POST',
+      headers: H,
+      body: '{"args":{}}'
+    })
+    expect(short.status).toBe(504)
   })
 
   it('도구 호출이 영영 안 끝나면 유예 뒤 강제로 세션을 닫고 busy 를 푼다 — 하네스가 죽은 뒤 문이 잠기지 않게', async () => {

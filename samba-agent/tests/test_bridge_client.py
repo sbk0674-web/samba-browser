@@ -32,6 +32,18 @@ def test_성공하면_본문과_진행로그를_준다():
     assert r.steps == (('페이지 읽기', True),)
 
 
+def test_폰을_기다리는_긴_도구는_제한_시간이_길다():
+    # 실기 2026-10-06: 토스 폰 결제가 95초를 넘겨 끊기고 bridge_down 으로 접혔다
+    from samba_agent.bridge.client import DEFAULT_TIMEOUT_S, LONG_TOOL_TIMEOUT_S
+
+    c = client()
+    assert c.timeout_for('get_page') == DEFAULT_TIMEOUT_S
+    assert c.timeout_for('phone_approve_payment') == LONG_TOOL_TIMEOUT_S
+    assert c.timeout_for('wait_for_sms_code') == LONG_TOOL_TIMEOUT_S
+    # 기본값을 더 길게 준 클라이언트는 그 값을 넘기지 않는다
+    assert client(timeout_s=1000.0).timeout_for('phone_approve_payment') == 1000.0
+
+
 @respx.mock
 def test_토큰_헤더를_붙이고_args_로_감싼다():
     route = respx.post(f'{URL}/tool/run_script').mock(

@@ -14,11 +14,23 @@ export interface BridgeDeps {
   openSession: (onStep: (label: string, ok: boolean) => void, lane?: string) => ToolSession
   token: () => string
   toolTimeoutMs?: number
+  /** 폰을 기다리는 긴 도구(결제 승인·인증번호)의 제한 시간. 없으면 LONG_TOOL_TIMEOUT_MS */
+  longToolTimeoutMs?: number
   /** 제한 시간 뒤에도 도구 호출이 안 끝나면 이만큼 더 기다렸다가 강제로 busy 를 푼다 */
   hangGraceMs?: number
 }
 
 const DEFAULT_TOOL_TIMEOUT_MS = 90_000
+/**
+ * 폰에서 사람·앱을 기다리는 도구는 90초를 훌쩍 넘긴다(토스 알림 → 앱 잠금 → 카드 선택 → 비밀번호 → 완료).
+ * 실기 2026-10-06: 폰에서는 결제가 됐는데 90초 만에 504 가 나가 하네스가 bridge_down 으로 접고 결제창 탭을
+ * 닫아 PC 쪽 주문이 마무리되지 않았다. 이 도구들은 7분까지 기다린다
+ */
+export const LONG_TOOL_TIMEOUT_MS = 7 * 60_000
+export const LONG_TOOLS: ReadonlySet<string> = new Set([
+  'phone_approve_payment',
+  'wait_for_sms_code'
+])
 // 실기: 하네스가 죽어 응답을 못 받은 도구 호출이 영영 안 끝나 busy 가 풀리지 않았다(이후 모든 요청 409).
 // 늦게 끝나는 호출은 지켜보되, 이 시간이 지나면 세션을 닫고 문을 연다
 const DEFAULT_HANG_GRACE_MS = 60_000
@@ -169,7 +181,9 @@ export class BridgeServer {
       else this.busy = false
     }
     hold()
-    const timeoutMs = this.deps.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS
+    const timeoutMs = LONG_TOOLS.has(name)
+      ? (this.deps.longToolTimeoutMs ?? LONG_TOOL_TIMEOUT_MS)
+      : (this.deps.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS)
     let timer: NodeJS.Timeout | undefined
     const callPromise = session.call(name, args)
     // 제한 시간 뒤에도 callPromise 는 계속 돌 수 있다 — 늦게 끝나도 세션 정리와 busy 해제는 한 번만
