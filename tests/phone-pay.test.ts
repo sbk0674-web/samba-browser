@@ -25,6 +25,7 @@ import {
   type PayRequest,
   type PayResult,
   type PayRunDeps,
+  cardStep,
   selectedCardOf
 } from '../src/main/phone/pay'
 import { createPayTool, PAY_TOOL_NAME, PHONE_TOOL_NAMES } from '../src/main/agent/tools-phone'
@@ -187,13 +188,17 @@ describe('롯데카드 앱카드(lottecard)', () => {
     ...digits.map((d, i) => el(10 + i, '', { contentDesc: d })),
     el(30, '', { contentDesc: '입력완료' })
   ])
-  const password = screen(APP, [el(8, '결제 비밀번호 6자리', { clickable: false }), el(9, '', { isSecret: true })])
+  const password = screen(APP, [
+    el(8, '결제 비밀번호 6자리', { clickable: false }),
+    el(9, '', { isSecret: true })
+  ])
   const done = screen(APP, [el(10, '결제가 완료되었습니다', { clickable: false })])
 
   it('LOCA 1832 → 숫자 코드 → 키패드 뷰 → 코드 자리 누르기 → 입력완료 → 결제 비밀번호 → 완료(appOnly)', async () => {
     const h = harness({ screens: [home, home, codeIntro, codeKeypad, codeKeypad, password, done] })
     // 코드 키패드는 화면에서 읽는다(안내 화면엔 키패드가 없다) — 비밀번호 키패드만 시험용 배치
-    h.deps.keypad.fromUiTree = (s) => (s.elements.some((e) => e.isSecret) ? fullLayout : keypadFromUiTree(s))
+    h.deps.keypad.fromUiTree = (s) =>
+      s.elements.some((e) => e.isSecret) ? fullLayout : keypadFromUiTree(s)
     const r = await runPayApproval(h.deps, request({ provider: 'lottecard', code: '7826101' }))
     expect(r).toEqual({ ok: true })
     const ys = h.taps.map((t) => t[2])
@@ -947,6 +952,37 @@ describe('토스 결제 화면(실기 구조) — 글자와 눌리는 영역이 
     expect(h.steps.map((x) => x.label)).toContain(
       '카드 미지정 — 앱에 선택된 카드로 결제: LOCA Professional 일시불 결제'
     )
+  })
+
+  it('실기 2026-10-06: 결제 화면에 카드 행이 두 줄 보이면 지정 카드 행을 바로 눌러 고른다 — 할부 줄 위가 선택된 카드', async () => {
+    // LOCA 가 선택된 상태: 선택된 행(LOCA) 바로 아래에 할부 줄이 온다
+    const before = screen(TOSS.packageName, [
+      el(1, '1% 할인 (최대 1,000원)', { clickable: false }),
+      el(2, '넥슨현대UNLIMITED', { clickable: false }),
+      el(3, 'LOCA Professional', { clickable: false }),
+      el(4, '할부 선택 ・ 일시불', { clickable: false }),
+      el(5, '결제수단 변경 ・ 설정', { clickable: false }),
+      el(6, '결제하기', { clickable: false })
+    ])
+    // 넥슨현대 행을 누른 뒤: 선택된 행(넥슨현대) 아래로 할부 줄이 옮겨 오고, 화면이 내려가 [결제수단 변경]은 안 보인다
+    const after = screen(TOSS.packageName, [
+      el(1, '1% 할인 (최대 1,000원)', { clickable: false }),
+      el(2, '넥슨현대UNLIMITED', { clickable: false }),
+      el(3, '할부 선택 ・ 일시불', { clickable: false }),
+      el(4, '할인 유의사항', { clickable: false }),
+      el(5, 'LOCA Professional', { clickable: false }),
+      el(6, '결제하기', { clickable: false })
+    ])
+    expect(selectedCardOf(before, TOSS)).toBe('LOCA Professional')
+    expect(selectedCardOf(after, TOSS)).toBe('넥슨현대UNLIMITED')
+    const step = cardStep(before, TOSS, cardPatternOf('현대'))
+    expect(step).toMatchObject({ kind: 'tap', label: '넥슨현대UNLIMITED' })
+
+    const h = harness({ screens: [before, after, pw, done, done] })
+    const r = await runPayApproval(h.deps, request({ cardHint: '현대' }))
+    expect(r).toEqual({ ok: true })
+    // 넥슨현대 행(2) → 결제하기(6). [결제수단 변경]은 누르지 않는다
+    expect(h.taps.map((t) => t[2])).toEqual([2 * 100 + 30, 6 * 100 + 30])
   })
 
   it('selectedCardOf: [결제수단 변경] 바로 위 줄만 카드로 본다', () => {

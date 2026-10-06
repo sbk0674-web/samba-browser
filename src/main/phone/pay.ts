@@ -44,6 +44,12 @@ export interface PayProviderSpec {
   changeMethodText?: RegExp
   methodSheetTitle?: RegExp
   /**
+   * 결제 화면에서 선택된 카드 줄 바로 아래 오는 할부 안내 문구(토스 '할부 선택 ・ 일시불'). 있으면 그 바로 위
+   * 글자 줄이 지금 선택된 카드다 — 카드 행이 여럿 보이는 화면(실기 2026-10-06: 넥슨현대·LOCA 두 줄)에서는
+   * [결제수단 변경] 위 두 줄 규칙으로 선택 카드를 가릴 수 없다
+   */
+  installmentText?: RegExp
+  /**
    * 결제 화면에만 있는 문구. 적혀 있으면 이 문구가 보이는 화면에서만 진행 버튼을 누른다 —
    * 앱 홈이나 다른 서비스 화면의 [확인]·[다음]을 눌러 엉뚱한 곳으로 들어가지 않게 한다(실기: 토스 홈 → 용돈 화면)
    */
@@ -97,7 +103,9 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     unlockHint: /앱을 켜려면/,
     changeMethodText: /결제수단 변경/,
     methodSheetTitle: /결제수단 선택/,
-    payScreenHint: /결제수단 변경/,
+    installmentText: /할부 선택/,
+    // 카드 줄을 눌러 바꾸면 화면이 내려가 [결제수단 변경]이 안 보일 수 있다 — 할부 줄도 결제 화면 표식으로 본다
+    payScreenHint: /결제수단 변경|할부 선택/,
     // 실기: 알림창의 결제 알림을 눌러 들어가면 엉뚱한 곳을 누르기 일쑤였다 — 앱을 열면 결제 요청 화면이 뜬다
     openBy: 'app'
   },
@@ -136,7 +144,8 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     // 영어 표시(알리페이 '일반버전'은 한국어가 없어 영어로 뜬다, 2026-10-03)도 함께 본다
     confirmText: /^(?:결제|확인|确认付款|立即付款|付款|PIN번호 결제|다음|Pay|Confirm|Next|OK)$/,
     // 한국어 알리페이 결제창(唯品会 국제카드)은 '支付密码' 글자 없이 금액·수수료·숫자 키패드만 보인다(실기 2026-10-03)
-    passwordHint: /CVV를 입력|결제 ?비밀번호|支付密码|请输入|주문금액|국제카드 수수료|Enter CVV|Order total|International Card|Payment Password/i,
+    passwordHint:
+      /CVV를 입력|결제 ?비밀번호|支付密码|请输入|주문금액|국제카드 수수료|Enter CVV|Order total|International Card|Payment Password/i,
     successHint: /결제 ?(?:완료|성공)|支付成功|付款成功|完成|Payment Successful|Paid/,
     openBy: 'app',
     keepIfForeground: true,
@@ -313,8 +322,6 @@ type CardStep =
   | { kind: 'missing' }
   | { kind: 'tap'; x: number; y: number; label: string }
 
-/** 결제 화면에서 [결제수단 변경] 위로 이만큼 안의 글자를 "지금 선택된 카드" 줄로 본다(카드명·일시불 안내) */
-const SELECTED_CARD_LOOKBACK = 3
 /** 글자 있는 줄 기준으로 카드명·일시불 안내 두 줄만 본다 */
 const SELECTED_CARD_TEXT_LINES = 2
 
@@ -324,6 +331,17 @@ const SELECTED_CARD_TEXT_LINES = 2
  * (실기: 현대카드를 지정했는데 롯데(LOCA)로 결제됐다). 변경 버튼이 없으면 빈 문자열
  */
 export function selectedCardOf(screen: PhoneScreen, spec: PayProviderSpec): string {
+  // 할부 줄이 있으면 그 바로 위 글자 줄이 선택된 카드다(실기 2026-10-06 토스: 카드 행 두 줄 중 선택된 행 아래에만 할부 줄)
+  if (spec.installmentText) {
+    const at = screen.elements.findIndex((e) => spec.installmentText?.test(e.text))
+    if (at >= 0) {
+      const above = screen.elements
+        .slice(0, at)
+        .map((e) => e.text.trim())
+        .filter((t) => t !== '')
+      return above[above.length - 1] ?? ''
+    }
+  }
   if (!spec.changeMethodText) return ''
   const idx = screen.elements.findIndex((e) => spec.changeMethodText?.test(e.text))
   if (idx < 0) return ''
@@ -362,6 +380,17 @@ export function cardStep(screen: PhoneScreen, spec: PayProviderSpec, card: RegEx
   const change = spec.changeMethodText
     ? screen.elements.find((e) => spec.changeMethodText?.test(e.text))
     : undefined
+  // 결제 화면에 카드 행이 바로 보이면(토스: 넥슨현대·LOCA 두 줄) 그 행을 눌러 고른다 — [결제수단 변경] 목록을
+  // 거치면 "결제 취소할까요?" 팝업이 떴다(실기 2026-10-06). 카드 행은 할부 줄(없으면 변경 버튼) 위에만 있다 —
+  // 그 아래의 혜택 안내("현대카드로 결제하면…")는 카드 행이 아니다
+  const limit =
+    (spec.installmentText
+      ? screen.elements.find((e) => spec.installmentText?.test(e.text))
+      : undefined) ?? change
+  const row = limit
+    ? screen.elements.find((e) => e.bounds.t < limit.bounds.t && card.test(e.text))
+    : undefined
+  if (row) return at(row)
   // 변경 버튼이 안 보이면 아직 결제 화면이 아니다 — 카드가 없다고 단정하지 않고 기다린다
   return change ? at(change) : { kind: 'wait' }
 }
