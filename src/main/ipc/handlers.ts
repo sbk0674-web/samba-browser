@@ -1461,6 +1461,7 @@ export function registerIpc(
     adb: rawAdb,
     spawn: createSpawner(() => settings.get().adbPath),
     settings: () => settings.get(),
+    saveRoom: (value) => void settings.set({ phoneRelayRoom: value }),
     localOnline: () => new Set(phones.list().filter((p) => p.state === 'online' && p.transport !== 'relay').map((p) => p.serial))
   })
   const phoneAdb = createRelayingAdb(rawAdb, (serial) => relay.targetOf(serial))

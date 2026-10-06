@@ -207,6 +207,11 @@ export const DEFAULT_SETTINGS = {
   phoneIgnoredSerials: [] as string[],
   // 이 PC 에 붙은 폰을 다른 PC 가 쓰게 adb 서버를 LAN 에 연다(phone/relay.ts). 이 PC 의 사정이라 동기화하지 않는다
   phoneRelayEnabled: false,
+  // 인터넷 너머 중계 브로커(삼바웨이브 API 의 WebSocket, 예: wss://api.samba-wave.co.kr/api/v1/samba/phone-relay).
+  // 계정 전체가 같은 브로커를 써야 하므로 동기화한다. 비어 있으면 같은 LAN 의 adb 원격 서버만 쓴다
+  phoneRelayBrokerUrl: '',
+  // 이 PC 가 중계 방을 여는 데 쓰는 방 id·열쇠('room:key'). 다른 PC 는 등록 정보(relayHost)로 받는다 — 동기화하지 않는다
+  phoneRelayRoom: '',
   // 폰 연동 동기화(phone-registry.ts) — 폰 목록과 계정↔담당 폰. 폰 표(로컬)의 사본이라 화면에서 직접 고치지 않는다
   // 키마스터 기준 시각(ms) — "이 시각에 이 PC 의 키마스터가 기준"이라는 선언(sync/authority.ts).
   // 다른 PC 는 이보다 앞선 자기 삭제 기록·안 올린 행을 버리고 서버 내용을 그대로 받는다. 0 이면 선언 없음
@@ -418,6 +423,8 @@ export const settingsSchema = z.object({
   phoneAutoReconnect: z.boolean().catch(DEFAULT_SETTINGS.phoneAutoReconnect),
   phoneIgnoredSerials: z.array(z.string().max(120)).max(50).catch([]),
   phoneRelayEnabled: z.boolean().catch(false),
+  phoneRelayBrokerUrl: z.string().max(300).catch(''),
+  phoneRelayRoom: z.string().max(200).catch(''),
   keymasterBaselineAt: z.number().int().min(0).catch(0),
   phoneRegistry: z
     .array(
@@ -429,7 +436,7 @@ export const settingsSchema = z.object({
         wifiAddress: z.string().max(120).nullable().catch(null),
         model: z.string().max(80).catch(''),
         isDefault: z.boolean().catch(false),
-        relayHost: z.string().max(60).nullable().optional().catch(null)
+        relayHost: z.string().max(200).nullable().optional().catch(null)
       })
     )
     .max(50)

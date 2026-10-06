@@ -1245,7 +1245,9 @@
       "autoReconnect": "Auto reconnect",
       "autoReconnectDesc": "Try to reattach once when the connection drops.",
       "relay": "Relay this PC's phones to other PCs",
-      "relayDesc": "Opens the adb server on the LAN so other PCs on the same account can use phones plugged into this PC (same network; allow TCP 5037 in the firewall)",
+      "relayDesc": "Lets other PCs on this account use phones plugged into this PC. With a broker URL below it works over the internet; without one, same network only (adb 5037)",
+      "relayBroker": "Relay broker URL",
+      "relayBrokerDesc": "Phone-relay WebSocket of the samba-wave API. Shared with every PC on the account",
       "settingsOpen": "Phone settings",
       "settingsClose": "Close phone settings"
     },

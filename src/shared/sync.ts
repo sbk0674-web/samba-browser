@@ -214,6 +214,7 @@ export const SYNCED_SETTING_KEYS = [
   'phoneIgnoredSerials',
   'phoneRegistry',
   'phoneAccountLinks',
+  'phoneRelayBrokerUrl',
   // 키마스터 기준 선언 — 한 PC 의 키마스터로 나머지를 맞출 때 쓴다(sync/authority.ts)
   'keymasterBaselineAt'
 ] as const

@@ -133,7 +133,12 @@ interface RelayHarness {
   relay: ReturnType<typeof createPhoneRelay>
   runs: string[][]
   spawned: string[][]
-  settings: { phoneRelayEnabled: boolean; phoneRegistry: PhoneRegistryEntry[] }
+  settings: {
+    phoneRelayEnabled: boolean
+    phoneRegistry: PhoneRegistryEntry[]
+    phoneRelayBrokerUrl: string
+    phoneRelayRoom: string
+  }
   timers: (() => void)[]
   killed: () => number
 }
@@ -152,7 +157,7 @@ describe('createPhoneRelay', () => {
       runBinary: async () => Buffer.alloc(0),
       stream: () => () => {}
     }
-    const settings = { phoneRelayEnabled: enabled, phoneRegistry: registry }
+    const settings = { phoneRelayEnabled: enabled, phoneRegistry: registry, phoneRelayBrokerUrl: '', phoneRelayRoom: '' }
     const relay = createPhoneRelay({
       adb,
       spawn: (args) => {

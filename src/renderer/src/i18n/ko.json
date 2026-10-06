@@ -1245,7 +1245,9 @@
       "autoReconnect": "자동 재연결",
       "autoReconnectDesc": "연결이 끊기면 한 번만 다시 붙여 봐요",
       "relay": "이 PC 의 폰을 다른 PC 에 중계",
-      "relayDesc": "같은 계정의 다른 PC 가 이 PC 에 USB 로 붙은 폰을 쓸 수 있게 adb 서버를 LAN 에 열어요(같은 네트워크·방화벽 TCP 5037 허용 필요)",
+      "relayDesc": "같은 계정의 다른 PC 가 이 PC 에 USB 로 붙은 폰을 쓸 수 있게 해요. 아래 브로커 주소가 있으면 인터넷 너머에서도 되고, 없으면 같은 네트워크(adb 5037)만",
+      "relayBroker": "중계 브로커 주소",
+      "relayBrokerDesc": "삼바웨이브 API 의 폰 중계 WebSocket 주소. 계정의 모든 PC 에 함께 적용돼요",
       "settingsOpen": "폰 설정",
       "settingsClose": "폰 설정 닫기"
     },

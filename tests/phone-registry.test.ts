@@ -110,6 +110,7 @@ describe('동기화에서 빠지는 설정은 그 PC 에만 맞는 값뿐이다'
       'scrcpyPath',
       // 이 PC 에 붙은 폰을 다른 PC 에 중계할지 — 중계 PC 의 사정이다(phone/relay.ts)
       'phoneRelayEnabled',
+      'phoneRelayRoom',
       'captureDir',
       'extensionPaths',
       'extensionSources',
