@@ -27,6 +27,7 @@ import { applyMobileEmulation, clearMobileEmulation, MOBILE_WIDTH } from './emul
 import { installWebstoreNavigatorUserAgent, installWebstoreUserAgent } from './webstore-ua'
 import { installSessionCookieKeeper } from './session-cookies'
 import { installDialogHandler, isAutomationActive } from './dialogs'
+import { handleWillDownload, type DownloadPolicy, type DownloadRecord } from './downloads'
 import {
   isAutomation,
   isHumanInputEvent,
@@ -114,6 +115,9 @@ export function computeViewBounds(
 // 이미 하드닝한 파티션 이름. session.fromPartition 은 같은 인스턴스를 돌려주므로 1회만 건다
 const hardenedPartitions = new Set<string>()
 
+// 다운로드 정책 레지스트리 — 가장 최근에 만든 TabManager 가 등록한다(창은 하나라 충분하다)
+let downloadPolicy: DownloadPolicy | null = null
+
 // 세션 기본 거부 정책: 권한 요청·권한 조회·다운로드를 모두 막는다(1단계 범위)
 function hardenSession(ses: Session, partition: string): void {
   if (hardenedPartitions.has(partition)) return
@@ -132,9 +136,13 @@ function hardenSession(ses: Session, partition: string): void {
     console.warn(`권한 조회 거부: ${permission}`)
     return false
   })
+  // 폴더가 지정되지 않았으면 막고, set_download_dir 로 지정됐으면 그 폴더에 저장한다
   ses.on('will-download', (e, item) => {
-    e.preventDefault()
-    console.warn(`다운로드 차단: ${item.getURL()}`)
+    if (downloadPolicy) handleWillDownload(downloadPolicy, e, item)
+    else {
+      e.preventDefault()
+      console.warn(`다운로드 차단: ${item.getURL()}`)
+    }
   })
   // 웹스토어는 Electron UA 를 보면 "지원되지 않는 브라우저" 안내로 설치 버튼을 감춘다.
   // 그 호스트 요청에만 크롬 UA 를 보낸다(다른 사이트는 그대로)
@@ -239,7 +247,19 @@ export class TabManager {
   private closedListeners: Array<(tab: ClosedTabRecord) => void> = []
   // === 마우스 제스처 끝 ======================================================
 
+  // set_download_dir 로 지정한 저장 폴더. null 이면 다운로드를 모두 막는다
+  downloadDir: string | null = null
+  // 받은 파일 기록(최근 것이 앞)
+  downloads: DownloadRecord[] = []
+
   constructor(private win: BrowserWindow) {
+    downloadPolicy = {
+      getDir: () => this.downloadDir,
+      onRecord: (record) => {
+        this.downloads.unshift(record)
+        if (this.downloads.length > 50) this.downloads.length = 50
+      }
+    }
     // 창이 닫히면 남은 리스너·탭을 정리해 파괴된 창에 접근하지 않게 한다
     win.once('closed', () => this.dispose())
     // 창 크기가 바뀌면 렌더러 보고를 기다리지 않고 메인이 먼저 맞춘다.
