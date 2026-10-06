@@ -136,9 +136,32 @@ export class RelayHostSession {
   start(): void {
     if (this.control) return
     const { brokerUrl, room, key } = this.deps
-    const ws = this.wsOf(`${brokerUrl}/host?room=${encodeURIComponent(room)}&key=${encodeURIComponent(key)}`)
+    let ws: MiniWs
+    try {
+      ws = this.wsOf(`${brokerUrl}/host?room=${encodeURIComponent(room)}&key=${encodeURIComponent(key)}`)
+    } catch (e: unknown) {
+      this.log(`[phone-relay] 브로커 소켓을 못 만들었다: ${e instanceof Error ? e.message : String(e)}`)
+      return
+    }
     this.control = ws
-    ws.onopen = () => this.log(`[phone-relay] 브로커 연결 — 방 ${room.slice(0, 6)}…`)
+    this.log(`[phone-relay] 브로커 연결 시도 — ${brokerUrl} 방 ${room.slice(0, 6)}…`)
+    // 열리지 않은 채 오래 머물면 끊고 다음 점검에서 다시 붙는다
+    const opened = { done: false }
+    setTimeout(() => {
+      if (!opened.done && this.control === ws) {
+        this.log('[phone-relay] 브로커 연결 시간 초과 — 다시 시도')
+        this.control = null
+        try {
+          ws.close()
+        } catch {
+          // 이미 닫힘
+        }
+      }
+    }, 20_000).unref?.()
+    ws.onopen = () => {
+      opened.done = true
+      this.log(`[phone-relay] 브로커 연결 — 방 ${room.slice(0, 6)}…`)
+    }
     ws.onmessage = (ev) => {
       const b = toBuffer(ev.data)
       if (!b) return
@@ -153,8 +176,10 @@ export class RelayHostSession {
       this.control = null
       this.log('[phone-relay] 브로커 연결 끊김 — 곧 다시 붙는다')
     }
-    ws.onerror = () => {
-      // onclose 가 뒤따른다
+    ws.onerror = (ev) => {
+      const err = ev as { message?: unknown; error?: { message?: unknown } }
+      const why = String(err?.message ?? err?.error?.message ?? '')
+      if (why) this.log(`[phone-relay] 브로커 소켓 오류: ${why.slice(0, 120)}`)
     }
   }
 

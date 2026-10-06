@@ -279,8 +279,10 @@ export function createPhoneRelay(deps: PhoneRelayDeps): PhoneRelay {
 
   const check = (): void => {
     const enabled = deps.settings().phoneRelayEnabled
-    if (enabled && !cancelServer) void startServer()
-    else if (!enabled && cancelServer) stopServer()
+    // 브로커가 있으면 LAN 의 adb -a 서버는 띄우지 않는다 — 띄우려고 kill-server 를 반복하면 로컬 adb 가 끊긴다
+    const lan = enabled && !brokerUrl()
+    if (lan && !cancelServer) void startServer()
+    else if (!lan && cancelServer) stopServer()
     checkBroker()
   }
 
