@@ -1412,7 +1412,12 @@ ${handoffToolResult(result)}`
       return `${r}; via native click (retried with a real mouse click; call get_page to check)`
     })
 
-  const doType = async (id: number, value: string, submit: boolean): Promise<string> =>
+  const doType = async (
+    id: number,
+    value: string,
+    submit: boolean,
+    keys = false
+  ): Promise<string> =>
     withPopupNotice(async () => {
       if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
       const tab = activeOr(ctx)
@@ -1426,7 +1431,10 @@ ${handoffToolResult(result)}`
         const ok = await ctx.confirm(`입력: ${value}${pageText ? ` → ${pageText}` : ''}`, 'danger')
         if (!ok) return 'denied by user'
       }
-      const r = await pageBridge.type(tab, id, value, submit)
+      // keys=true: 실제 키 입력 이벤트로 넣는다 — contenteditable 리치 에디터(값 설정이 안 먹는 칸)용
+      const r = keys
+        ? await pageBridge.typeLoginKeys(tab, id, value)
+        : await pageBridge.type(tab, id, value, submit)
       if (submit) await pageBridge.waitForLoad(tab)
       return r
     })
@@ -1593,10 +1601,15 @@ ${handoffToolResult(result)}`
 
   const typeTool = tool(
     'type',
-    'Type text into input [n]. submit=true presses Enter.',
-    { id: z.number().int(), text: z.string(), submit: z.boolean().default(false) },
-    ({ id, text: t, submit }) =>
-      guard(`입력: "${t.slice(0, 30)}" (#${id})`, () => doType(id, t, submit), 'type')
+    'Type text into input [n]. submit=true presses Enter. keys=true sends real key events (for rich editors).',
+    {
+      id: z.number().int(),
+      text: z.string(),
+      submit: z.boolean().default(false),
+      keys: z.boolean().default(false)
+    },
+    ({ id, text: t, submit, keys }) =>
+      guard(`입력: "${t.slice(0, 30)}" (#${id})`, () => doType(id, t, submit, keys), 'type')
   )
 
   const select = tool(
