@@ -44,6 +44,9 @@ class FakePhone:
     def swipe_up(self) -> None:
         pass
 
+    def swipe_down(self) -> None:
+        pass
+
     def key(self, code: str) -> None:
         self.keys.append(code)
 
@@ -124,3 +127,70 @@ def test_품번_끝_글자가_없거나_상품명_낱말이_맞으면_같은_상
     assert same_product('', '매장정품 다이나핏 DYNAFIT YMM23342CT 남성 피스테 여름 냉감 기능성 슬림 조거', screen)
     assert not same_product('IF2894', '매장정품 나이키 아동 플렉스 러너 4 리틀키즈 IF2894 002', screen)
     assert same_product('', '', screen)  # 견줄 값이 없으면 막지 않는다
+
+
+class RoomPhone:
+    """채팅방을 상태 기계로 흉내 — 맨 아래(y=1318) 알림은 다른 상품, 그 위(y=600) 알림이 이 주문."""
+
+    def __init__(self, bottom: str = 'other_done') -> None:
+        self.mode = 'room'
+        self.bottom = bottom
+        self.taps: list[tuple[int, int]] = []
+        self.keys: list[str] = []
+
+    def nodes(self) -> list[Node]:
+        table = {
+            'room': ROOM,
+            'other_done': [n('선물 받기 완료, 믿고 사는 즐거움 SSG.COM', 118), n('언더아머 6009827-001 블랙', 500), n('', 131, CLOSE_ID)],
+            'gift_home': GIFT_HOME,
+            'form_top': FORM_TOP,
+            'form_bottom': FORM_BOTTOM,
+            'done': DONE,
+            'closed_page': AFTER,
+        }
+        return table.get(self.mode, [])
+
+    def tap(self, x: int, y: int) -> None:
+        self.taps.append((x, y))
+        if self.mode == 'room':
+            self.mode = self.bottom if y == 1318 else 'gift_home'
+        elif self.mode == 'gift_home':
+            self.mode = 'form_top'
+        elif self.mode == 'form_bottom' and y == 1375:
+            self.mode = 'done'
+        elif self.mode in ('other_done', 'done', 'closed_page') and y == 131:
+            self.mode = 'closed'
+        elif self.mode == 'done' and y == 1093:
+            self.mode = 'closed_page'
+
+    def swipe_up(self) -> None:
+        if self.mode == 'form_top':
+            self.mode = 'form_bottom'
+
+    def swipe_down(self) -> None:
+        pass
+
+    def key(self, code: str) -> None:
+        self.keys.append(code)
+
+    def launch(self, package: str) -> None:
+        self.mode = 'room'
+
+    def top_package(self) -> str:
+        return 'com.kakao.talk'
+
+
+def test_맨_아래_알림이_다른_상품의_이미_받은_선물이면_넘어가고_위_알림을_받는다():
+    phone = RoomPhone()
+    out = accept_ssg_gift(phone, 'IF1746-001', sleep=lambda s: None)  # type: ignore[arg-type]
+    assert '선물 받기 완료' in out
+    assert phone.taps[0] == (360, 1318)  # 맨 아래(다른 상품)를 먼저 열었다가
+    assert (360, 600) in phone.taps  # 그 위 알림으로 넘어가 이 주문을 받았다
+
+
+def test_다른_상품의_완료_화면을_이_주문의_성공으로_돌려주지_않는다():
+    phone = RoomPhone()
+    with pytest.raises(GiftAcceptError, match='못 찾았다'):
+        # 이 주문 품번이 어느 알림에도 없다 — 모든 알림이 다른 상품의 완료 화면
+        phone.bottom = 'other_done'
+        accept_ssg_gift(phone, 'ZZ9999-999', sleep=lambda s: None)  # type: ignore[arg-type]

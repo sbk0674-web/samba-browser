@@ -53,7 +53,9 @@ SSG_APP = 'kr.co.ssg'
 SCREEN_TOP = 150
 SCREEN_BOTTOM = 1500
 # 맨 아래 알림이 다른 주문의 선물이면 그 위 알림을 이만큼까지 본다(앞 주문 수락이 밀려 있을 때)
-MAX_NOTICES = 3
+# 알림을 열어 보는 최대 횟수(한 번에 약 15초)와 위로 스크롤하는 최대 쪽 수
+MAX_NOTICES = 12
+MAX_PAGES = 8
 # 상품명 낱말로 같은 상품인지 볼 때 세지 않는 말
 _GENERIC_WORDS = frozenset(
     {'매장정품', '정품', '남성', '여성', '공용', '아동', '키즈', '신발', '의류'}
@@ -173,6 +175,10 @@ class Phone:
 
     def swipe_up(self) -> None:
         self._run('shell', 'input', 'swipe', '360', '1300', '360', '500', '400')
+
+    def swipe_down(self) -> None:
+        """위로 스크롤(손가락을 아래로) — 채팅방의 오래된 알림을 본다."""
+        self._run('shell', 'input', 'swipe', '360', '500', '360', '1300', '400')
 
     def key(self, code: str) -> None:
         self._run('shell', 'input', 'keyevent', code)
@@ -309,7 +315,9 @@ def accept_ssg_gift(
     # 1) 카카오톡 채팅 목록에서 SSG닷컴 방 — 앱이 다른 방·브라우저에 있으면 뒤로 가며 목록을 찾는다
     phone.launch(KAKAO)
     sleep(3)
-    nodes = phone.nodes()
+    # 카카오톡은 새로 뜰 때 채팅 목록이 나오기까지 10~20초 걸린다(하얀·회색 빈 화면) — 그 사이 뒤로가기를 누르면
+    # 앱을 나가 버려 "SSG닷컴 방을 못 찾았다"가 된다(실기 2026-10-06). 목록·선물 버튼이 보일 때까지 기다린다
+    nodes = wait_for(lambda ns: bool(_go_buttons(ns)) or find_text(ns, CHANNEL) is not None, 30)
     for _ in range(4):
         if _go_buttons(nodes) or find_text(nodes, CHANNEL):
             break
@@ -329,16 +337,50 @@ def accept_ssg_gift(
             f'SSG닷컴 알림톡에 "{GO_GIFT}" 버튼이 {int(wait_message_s)}초 안에 안 왔다'
         )
     wanted = model_code or '이 주문'
-    for k in range(MAX_NOTICES):
+    # 이 주문의 알림이 맨 아래가 아닐 수 있다(앞선 주문 알림이 쌓임, 실기 2026-10-06) — 한 화면의 알림을 아래부터 보고,
+    # 다 봤으면 위로 스크롤해 더 오래된 알림을 본다. 방을 다시 열면 맨 아래라서 본 만큼(pages) 다시 올라간다
+    pages = 0
+    idx = 0
+    tried = 0
+
+    def reopen_room() -> list[Node]:
+        phone.launch(KAKAO)
+        sleep(2)
+        ns = wait_for(lambda x: bool(_go_buttons(x)), 25)
+        for _ in range(pages):
+            phone.swipe_down()
+            sleep(1.2)
+        return phone.nodes() if pages else ns
+
+    while True:
         gos = _go_buttons(nodes)
-        if k >= len(gos):
-            break
-        phone.tap(gos[k].x, gos[k].y)
+        if idx >= len(gos):
+            pages += 1
+            if pages > MAX_PAGES or tried >= MAX_NOTICES:
+                _close_browser(phone, sleep)
+                raise GiftAcceptError(f'알림 {tried}건을 봤지만 이 주문({wanted})의 선물을 못 찾았다')
+            phone.swipe_down()
+            sleep(1.2)
+            nodes = phone.nodes()
+            idx = 0
+            continue
+        tried += 1
+        if tried > MAX_NOTICES:
+            _close_browser(phone, sleep)
+            raise GiftAcceptError(f'알림 {MAX_NOTICES}건을 봤지만 이 주문({wanted})의 선물을 못 찾았다')
+        phone.tap(gos[idx].x, gos[idx].y)
+        idx += 1
         # 3) 선물받기 화면 → 옵션/배송지 확인(글자 뒤에 '10/9(금) 23:59까지 …' 기한이 붙는다)
         nodes = wait_for(lambda ns: _starts(ns, CHECK_BTN) is not None or has_text(ns, DONE), 40)
         if has_text(nodes, DONE):
-            _close_browser(phone, sleep)
-            return '이미 받은 선물(완료 화면) — 브라우저 닫음'
+            # 완료 화면은 그 알림의 상품이 이 주문일 때만 이 주문의 성공이다 — 맨 아래 알림(다른 주문)이 이미
+            # 받아진 것을 이 주문 성공으로 돌려줘 미수락 주문이 성공으로 기록됐다(실기 2026-10-06)
+            if same_product(model_code, sku, [n.text for n in nodes]):
+                _close_browser(phone, sleep)
+                return '이미 받은 선물(완료 화면) — 브라우저 닫음'
+            _close_browser(phone, sleep, home=False)
+            nodes = reopen_room()
+            continue
         check_btn = _starts(nodes, CHECK_BTN)
         if check_btn is None:
             raise GiftAcceptError(
@@ -355,12 +397,7 @@ def accept_ssg_gift(
             break
         # 다른 주문의 선물이다 — 받지 않고 닫은 뒤 방으로 돌아가 그 위 알림을 본다
         _close_browser(phone, sleep, home=False)
-        phone.launch(KAKAO)
-        sleep(2)
-        nodes = phone.nodes()
-    else:
-        _close_browser(phone, sleep)
-        raise GiftAcceptError(f'수락 화면 상품이 이 주문({wanted})이 아니다 — 받지 않고 닫음')
+        nodes = reopen_room()
     if not same_product(model_code, sku, [n.text for n in nodes]):
         _close_browser(phone, sleep)
         raise GiftAcceptError(f'수락 화면 상품이 이 주문({wanted})이 아니다 — 받지 않고 닫음')
