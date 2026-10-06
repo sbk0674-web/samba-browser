@@ -1268,11 +1268,11 @@ def test_cheapest_quotes_결제_가능한_수단만_싼_순으로():
         {'method': '휴대폰결제', 'card': None, 'cost': 26000},
         {'method': '카카오페이', 'card': None, 'cost': 0},
     ]
-    # 거르지 않으면 원가순(0 원은 뺀다). 현대카드 줄은 청구할인 ×0.973 이 반영된다
-    assert [q['cost'] for q in cheapest_quotes(quotes, None)] == [26000, 26758, 28000, 29000]
+    # 거르지 않으면 원가순(0 원은 뺀다). 현대카드 줄·토스페이(현대카드) 줄은 청구할인 ×0.973 이 반영된다
+    assert [q['cost'] for q in cheapest_quotes(quotes, None)] == [26000, 26758, 27244, 29000]
     # 키마스터에 무신사머니(site)·토스만 있으면 그 둘만, 휴대폰결제는 제공자를 몰라 뺀다
     got = cheapest_quotes(quotes, None, {'site', 'toss'})
-    assert [(q['method'], q['cost']) for q in got] == [('토스페이', 28000), ('무신사머니', 29000)]
+    assert [(q['method'], q['cost']) for q in got] == [('토스페이', 27244), ('무신사머니', 29000)]
     # 카드 직접 결제는 후보가 아니다 — 카드는 토스페이·네이버페이 창 안에서 고른다
     assert cheapest_quotes(quotes, None, {'site', 'toss', 'card'})[0]['method'] == '토스페이'
     assert quote_provider('무신사페이') == 'musinsapay'
@@ -1842,7 +1842,8 @@ def test_네이버페이는_현대카드_청구할인을_원가에_반영한다(
     assert effective_cost({'method': '네이버페이', 'card': None, 'cost': 97670, 'reward': 977}) == round(97670 * 0.973 - 977)
     assert effective_cost({'card': '네이버페이', 'cost': 100000}) == 97300  # 주문 상세의 결제수단 글자
     assert effective_cost({'card': '네이버페이 - 롯데카드', 'cost': 100000}) == 98000
-    assert effective_cost({'method': '토스페이', 'card': None, 'cost': 100000}) == 100000
+    # 토스페이도 현대카드(청구할인 2.7%) — 사용자 2026-10-06
+    assert effective_cost({'method': '토스페이', 'card': None, 'cost': 100000}) == 97300
 
 
 def test_목록에_없는_배송지는_스크립트_고장이_아니다():

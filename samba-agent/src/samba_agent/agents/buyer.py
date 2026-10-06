@@ -337,6 +337,10 @@ def cheapest_quotes(
             # 페이코는 PC 결제창 안에서 현대카드로 낸다 — 특별할인이 없어도 청구할인 2.7%(×0.973)가 붙는다
             # (사용자 2026-09-25). 견적 줄에 카드가 없으면 현대카드로 보고 원가를 낸다
             card = PAYCO_CARD
+        if card is None and quote_provider(method) == 'toss':
+            # 토스페이도 토스 앱에서 현대카드로 낸다 — 즉시할인 %가 카카오페이 머니와 같아도 청구할인만큼 더 싸다
+            # (실기 2026-10-06 롯데온 나이키: 둘 다 95,470 으로 보고 카카오페이를 골라 사용자 지적)
+            card = TOSS_CARD
         if card is None and easy_pay_card and '간편결제' in method:
             # 사이트 간편결제에 등록된 카드(슈마커 = 현대카드, 사용자 2026-09-26) — 청구할인을 원가에 반영한다
             card = easy_pay_card
@@ -418,6 +422,8 @@ NAVERPAY_POINT_RATE = 0.01
 NAVERPAY_CARD = '현대카드'
 # 페이코 결제 카드(사용자 2026-09-25: 페이코 = 현대카드, 청구할인 2.7%)
 PAYCO_CARD = '현대카드'
+# 토스페이 결제 카드(사용자 2026-10-06: 토스페이 = 현대카드, 청구할인 2.7%) — 토스 앱에서 현대카드를 고른다(card 힌트 '현대')
+TOSS_CARD = '현대카드'
 # 카드 청구할인(플레이북 §7): 결제창에 안 보이는 카드 대금 할인 — 원가 = 카드 결제액 × 계수 − 적립
 CARD_BILLING_FACTORS: tuple[tuple[tuple[str, ...], float], ...] = (
     (('현대',), 0.973),
@@ -563,6 +569,9 @@ def effective_cost(row: dict[str, object]) -> float:
         # 네이버페이는 그 안에 등록한 현대카드로 결제된다 — 카드 이름이 안 보여도 청구할인 2.7%가 붙는다
         # (사용자 2026-10-02). 다른 카드 이름이 적혀 있으면 그 카드 계수를 쓴다(위 billing_factor)
         factor = billing_factor(NAVERPAY_CARD)
+    if factor == 1.0 and '토스' in f'{card} {row.get("method") or ""}':
+        # 토스페이도 현대카드로 낸다(사용자 2026-10-06)
+        factor = billing_factor(TOSS_CARD)
     return round(paid * factor - reward + used)
 
 
