@@ -46,6 +46,12 @@ RETRY_S = 10 * 60  # 방을 못 열었을 때 다시 보기까지
 MAX_PAGES = 14
 # 새 알림이 없는 쪽이 이만큼 이어지면 그만 올린다
 QUIET_PAGES = 3
+# 검색 모드: '위로' 한 번에 알림 하나씩 거슬러 간다 — 아는 송장·송장 아닌 알림만 이만큼 이어지면 그만(한 번에 60개 넘게 쌓인다)
+MAX_STEPS = 400
+QUIET_STEPS = 6
+# 검색어 — 한글은 adb 가 못 치니 제목 '[롯데ON]' 의 ON 으로 모든 알림을 맞춘다
+SEARCH_WORD = 'ON'
+SEARCH_BOX = 'com.kakao.talk:id/edit_text'
 # 삼바가 '맞는 주문 없음'으로 건너뛴 송장을 다시 보내 보는 횟수(이름·품번이 안 맞는 건 다시 해도 같다)
 MAX_TRIES = 3
 SEEN_FILE = 'lotteon_gift_seen.json'
@@ -170,6 +176,79 @@ def _room_row(nodes: list[Node]) -> Node | None:
     return next((n for n in nodes if n.text == ROOM), None)
 
 
+def enter_search(
+    phone: Phone, word: str = SEARCH_WORD, *, sleep: Callable[[float], None] = time.sleep
+) -> bool:
+    """방 안에서 대화내용 검색을 켜고 word 를 쳐 넣는다(숫자·영문만 — 한글은 adb 가 못 친다). 검색 UI 가 없거나 적중 0이면 False."""
+    nodes = phone.nodes()
+    box = next((n for n in nodes if n.rid == SEARCH_BOX), None)
+    if box is None:
+        btn = next((n for n in nodes if n.desc == '검색' and n.y < 200), None)
+        if btn is None:
+            return False
+        phone.tap(btn.x, btn.y)
+        sleep(1.5)
+        box = next((n for n in phone.nodes() if n.rid == SEARCH_BOX), None)
+        if box is None:
+            return False
+    phone.tap(box.x, box.y)
+    sleep(0.8)
+    phone._run('shell', 'input', 'text', word)
+    sleep(0.5)
+    phone.key('66')  # Enter
+    sleep(2)
+    return any(n.desc == '위로' for n in phone.nodes())
+
+
+def product_codes(name: str) -> list[str]:
+    """상품명에서 검색할 품번 후보 — 글자와 숫자가 섞인 6자 이상 영숫자 토막('SC0MFCEY061_I' → SC0MFCEY061)."""
+    out: list[str] = []
+    for raw in re.findall(r'[A-Za-z0-9][A-Za-z0-9_-]{4,}', name):
+        part = re.split(r'[_-]', raw)[0]
+        if (
+            len(part) >= 6
+            and re.search(r'[A-Za-z]', part)
+            and re.search(r'\d', part)
+            and part not in out
+        ):
+            out.append(part)
+    return out
+
+
+def search_order(
+    phone: Phone, order_no: str, *, sleep: Callable[[float], None] = time.sleep
+) -> list[GiftNotice]:
+    """방에서 롯데ON 주문번호를 검색해 그 자리에 보이는 알림을 모은다(사용자 2026-10-06 "검색하면 바로 나온다").
+
+    보낸 사람 쪽 알림(주문번호)과 받는 사람 쪽 알림(송장)은 같은 때에 붙어 오므로 적중 화면에 둘이 같이 보인다.
+    실측: 2026100518180202 검색 → 적중 2, 화면에 주문번호 알림 + 송장 알림. 끝나면 검색을 닫는다(방 화면으로).
+    """
+    out: list[GiftNotice] = []
+    if not re.fullmatch(r'[A-Za-z0-9]{6,}', order_no):
+        return out
+    if not enter_search(phone, order_no, sleep=sleep):
+        phone.key('4')
+        return out
+    seen: set[str] = set()
+    for _ in range(3):  # 적중 자리 → '위로' 로 바로 옆 알림까지
+        for node in phone.nodes():
+            if node.text.startswith(PREFIX) and node.text not in seen:
+                seen.add(node.text)
+                notice = parse_notice(node.text)
+                if notice is not None:
+                    out.append(notice)
+        if any(n.order_no == order_no for n in out) and any(n.number for n in out):
+            break
+        up = next((n for n in phone.nodes() if n.desc == '위로'), None)
+        if up is None:
+            break
+        phone.tap(up.x, up.y)
+        sleep(1.0)
+    phone.key('4')
+    sleep(0.8)
+    return out
+
+
 def read_notices(
     phone: Phone,
     *,
@@ -179,18 +258,19 @@ def read_notices(
     known: Callable[[str], bool] = lambda number: False,
     sleep: Callable[[float], None] = time.sleep,
 ) -> list[GiftNotice] | None:
-    """방을 위로 올려 가며 선물 배송 알림을 모은다. 방을 못 열었거나 도중에 주문 작업이 시작되면 None.
+    """선물 배송 알림을 모은다. 방을 못 열었거나 도중에 주문 작업이 시작되면 None.
 
-    known(송장번호)가 참인 알림만 나오는 쪽이 quiet_pages 번 이어지면 멈춘다 — 이미 처리한 옛 알림이다.
+    기본은 대화내용 검색(사용자 2026-10-06 "그냥 검색하면 되잖아"): '위로' 를 눌러 알림 하나씩 거슬러 간다 —
+    손가락 끌기는 실기에서 화면이 안 움직여 최근 한두 개만 읽었다. 검색 UI 가 없으면 끌기로 돌아간다.
+    known(송장번호)가 참인 알림(또는 송장 아닌 알림)만 이어지면 멈춘다 — 이미 처리한 옛 알림이다.
     """
     if not open_room(phone, sleep=sleep):
         return None
     texts: set[str] = set()
     out: list[GiftNotice] = []
-    quiet = 0
-    for _ in range(max_pages):
-        if idle is not None and not idle():
-            return None
+
+    def collect() -> bool:
+        """지금 화면의 알림을 모은다. 모르는 송장이 있었으면 True."""
         fresh = False
         for node in phone.nodes():
             if not node.text.startswith(PREFIX) or node.text in texts:
@@ -202,7 +282,35 @@ def read_notices(
             out.append(notice)
             if notice.number and not known(notice.number):
                 fresh = True
-        quiet = 0 if fresh else quiet + 1
+        return fresh
+
+    if enter_search(phone, sleep=sleep):
+        quiet = 0
+        stale = 0
+        for _ in range(MAX_STEPS):
+            if idle is not None and not idle():
+                phone.key('4')
+                return None
+            before = len(texts)
+            fresh = collect()
+            quiet = 0 if fresh else quiet + 1
+            stale = 0 if len(texts) > before else stale + 1
+            # 아는 것만 이어지거나(옛 알림), 더 올라가도 새 글이 없으면(맨 위) 그만
+            if quiet >= QUIET_STEPS or stale >= quiet_pages:
+                break
+            up = next((n for n in phone.nodes() if n.desc == '위로'), None)
+            if up is None:
+                break
+            phone.tap(up.x, up.y)
+            sleep(1.0)
+        phone.key('4')  # 검색 닫기
+        return out
+
+    quiet = 0
+    for _ in range(max_pages):
+        if idle is not None and not idle():
+            return None
+        quiet = 0 if collect() else quiet + 1
         if quiet >= quiet_pages:
             break
         # 옛 알림 쪽으로 — 손가락을 아래로 끈다
@@ -251,10 +359,53 @@ def collect_lotteon_gift_tracking(
     quiet_pages: int = QUIET_PAGES,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, int] | None:
-    """알림을 읽어 새 송장을 삼바에 넣는다. 결과 {'read', 'sent', 'skipped'} — 폰을 못 읽었으면 None."""
-    notices = read_notices(
-        phone, idle=idle, max_pages=max_pages, quiet_pages=quiet_pages, known=seen.done, sleep=sleep
-    )
+    """송장 없는 선물 주문마다 방에서 주문번호를 검색해 송장을 삼바에 넣는다. 결과 {'read', 'sent', 'skipped'} — 폰을 못 읽었으면 None.
+
+    삼바가 송장 없는 주문 목록(GET /lotteon-gift-tracking/pending)을 주면 주문마다 검색한다(사용자 2026-10-06
+    "스크롤하니까 실패"). 목록을 못 받으면 예전처럼 방을 거슬러 읽는다.
+    """
+    pending: list[dict[str, object]] | None = None
+    lister = getattr(wave, 'list_lotteon_gift_pending', None)
+    if callable(lister):
+        try:
+            pending = list(lister())
+        except Exception:
+            log.exception('[롯데ON 선물 송장] 송장 없는 주문 목록 조회 실패 — 방을 거슬러 읽는다')
+    if pending is not None:
+        if not pending:
+            return {'read': 0, 'sent': 0, 'skipped': 0}
+        if not open_room(phone, sleep=sleep):
+            notices = None
+        else:
+            notices = []
+            for row in pending:
+                if idle is not None and not idle():
+                    notices = None
+                    break
+                order_no = str(row.get('sourcing_order_number') or '')
+                found = search_order(phone, order_no, sleep=sleep)
+                if not any(n.number for n in found):
+                    # 송장 알림이 주문번호 알림 옆에 없다(온 때가 다르다) — 상품 품번(영문·숫자)으로 한 번 더 찾는다
+                    for code in product_codes(str(row.get('product_name') or ''))[:2]:
+                        found += search_order(phone, code, sleep=sleep)
+                        if any(n.number for n in found):
+                            break
+                if not any(n.number for n in found):
+                    log.info(
+                        '[롯데ON 선물 송장] %s: 주문번호 %s·품번 검색에 송장 알림 없음',
+                        row.get('order_number'),
+                        order_no,
+                    )
+                notices.extend(found)
+    else:
+        notices = read_notices(
+            phone,
+            idle=idle,
+            max_pages=max_pages,
+            quiet_pages=quiet_pages,
+            known=seen.done,
+            sleep=sleep,
+        )
     phone.key('4')
     phone.key('3')  # HOME
     # 뒤에 남은 카카오톡이 다른 앱의 화면 덤프를 가로챈다(실기 2026-10-03) — 다 읽었으면 끝낸다

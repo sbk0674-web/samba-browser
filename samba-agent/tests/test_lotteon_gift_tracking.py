@@ -9,6 +9,8 @@ from samba_agent.ops.lotteon_gift_tracking import (
     name_key,
     pair_order_no,
     parse_notice,
+    product_codes,
+    read_notices,
 )
 from samba_agent.ops.ssg_gift_accept import Node
 
@@ -188,3 +190,129 @@ def test_방이_맨_밑_화면이어도_연다(tmp_path: Path):
         sleep=lambda s: None,
     )
     assert res == {'read': 1, 'sent': 1, 'skipped': 0}
+
+
+class _SearchPhone(_Phone):
+    """대화내용 검색이 있는 가짜 폰 — '위로' 를 누를 때마다 옛 알림 하나가 더 보인다."""
+
+    def __init__(self, pages: list[list[str]]) -> None:
+        super().__init__(pages)
+        self.searching = False
+        self.typed: list[str] = []
+
+    def nodes(self) -> list[Node]:
+        base = super().nodes()
+        if self.at < 0:
+            return base
+        if not self.searching:
+            return [Node('', '검색', '', 589, 104), *base]
+        return [
+            Node('대화내용 검색', '', 'com.kakao.talk:id/edit_text', 396, 104),
+            *base,
+            Node('', '위로', '', 576, 864),
+        ]
+
+    def tap(self, x: int, y: int) -> None:
+        if self.at < 0:
+            self.at = 0
+        elif (x, y) == (589, 104):
+            self.searching = True
+        elif (x, y) == (576, 864):
+            self.at += 1
+
+    def _run(self, *args: str) -> str:
+        if args[:3] == ('shell', 'input', 'text'):
+            self.typed.append(args[3])
+        return ''
+
+
+def test_검색으로_알림을_하나씩_거슬러_읽고_아는_것만_이어지면_멈춘다(tmp_path: Path):
+    phone = _SearchPhone([[TRACK], [ORDER], *([[TRACK]] * 20)])
+    out = read_notices(phone, known=lambda n: True, sleep=lambda s: None)
+    assert phone.typed == ['ON']
+    assert out is not None and len(out) == 2 and out[0].number
+    # 끌기(swipe)는 쓰지 않았고, 아는 송장만 이어져 몇 걸음 만에 멈췄다
+    assert phone.at < 10
+
+
+class _SearchByOrderPhone(_SearchPhone):
+    """주문번호를 치면 그 알림 짝(주문번호 알림 + 송장 알림)이 보이는 가짜 폰."""
+
+    def __init__(self, hits: dict[str, list[str]]) -> None:
+        super().__init__([[]])
+        self.hits = hits
+        self.query = ''
+
+    def nodes(self) -> list[Node]:
+        if self.at < 0:
+            return [Node('롯데ON', '', '', 100, 600)]
+        texts = self.hits.get(self.query, []) if self.searching and self.query else []
+        rows = [Node(t, '', '', 300, 400 + i * 300) for i, t in enumerate(texts)]
+        if not self.searching:
+            return [Node('[롯데ON] 아무 알림', '', '', 300, 500), Node('', '검색', '', 589, 104)]
+        return [
+            Node('대화내용 검색', '', 'com.kakao.talk:id/edit_text', 396, 104),
+            *rows,
+            Node('', '위로', '', 576, 864),
+        ]
+
+    def _run(self, *args: str) -> str:
+        if args[:3] == ('shell', 'input', 'text'):
+            self.query = args[3]
+            self.typed.append(args[3])
+        return ''
+
+    def key(self, code: str) -> None:
+        if code == '4':
+            self.searching, self.query = False, ''
+
+
+class _ListingWave(_Wave):
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        super().__init__()
+        self.rows = rows
+
+    def list_lotteon_gift_pending(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+def test_송장_없는_주문마다_주문번호로_검색해_송장을_넣는다(tmp_path: Path):
+    order_no = ORDER.split('주문번호 : ')[1].split()[0]
+    wave = _ListingWave(
+        [
+            {'order_number': '737', 'sourcing_order_number': order_no},
+            {'order_number': '738', 'sourcing_order_number': '2026100100000001'},
+        ]
+    )
+    phone = _SearchByOrderPhone({order_no: [ORDER, TRACK]})
+    res = collect_lotteon_gift_tracking(
+        wave, phone, SeenStore(tmp_path / 'seen.json'), sleep=lambda s: None
+    )
+    assert phone.typed == [order_no, '2026100100000001']
+    assert res == {'read': 1, 'sent': 1, 'skipped': 0}
+    assert wave.calls[0]['sourcing_order_number'] == order_no
+
+
+def test_품번_후보는_영숫자_섞인_토막만():
+    assert product_codes('스케쳐스 남성 아치 핏 모틀리 슬립인스 SC0MFCEY061_I') == ['SC0MFCEY061']
+    assert product_codes('제트 런 자켓 NJ3LS06J_BLK 2026') == ['NJ3LS06J']
+
+
+def test_주문번호_옆에_송장이_없으면_품번으로_다시_찾는다(tmp_path: Path):
+    order_no = ORDER.split('주문번호 : ')[1].split()[0]
+    wave = _ListingWave(
+        [
+            {
+                'order_number': '737',
+                'sourcing_order_number': order_no,
+                'product_name': '제트 런 자켓 NJ3LS06J_BLK',
+            }
+        ]
+    )
+    phone = _SearchByOrderPhone({order_no: [ORDER], 'NJ3LS06J': [TRACK]})
+    res = collect_lotteon_gift_tracking(
+        wave, phone, SeenStore(tmp_path / 'seen.json'), sleep=lambda s: None
+    )
+    assert phone.typed == [order_no, 'NJ3LS06J']
+    assert res == {'read': 1, 'sent': 1, 'skipped': 0}
+    assert wave.calls[0]['sourcing_order_number'] == order_no

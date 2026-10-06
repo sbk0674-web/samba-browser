@@ -482,6 +482,12 @@ class WaveClient:
         )
         return bool(body.get('rows')) if isinstance(body, dict) else False
 
+    def list_lotteon_gift_pending(self, *, days: int = 45) -> list[dict[str, object]]:
+        """송장이 아직 없는 롯데ON 선물 주문 — [{order_number, sourcing_order_number, customer_name, product_name, status}]."""
+        body = self._request('GET', '/lotteon-gift-tracking/pending', params={'days': days})
+        rows = body.get('rows') if isinstance(body, dict) else None
+        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
     def write_lotteon_gift_tracking(
         self,
         *,
