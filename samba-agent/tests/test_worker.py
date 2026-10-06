@@ -457,6 +457,59 @@ def test_작업이_끝나면_그_작업이_연_탭을_닫는다(setup):
     assert tabs.closed == ['t-order'] and 't-samba' in tabs.open
 
 
+def test_결제_시작_뒤_끝나지_못한_작업은_결제창_탭을_닫지_않는다(tmp_path):
+    """실기 2026-10-06 토스: 폰 승인 도중 하네스가 bridge_down 으로 접고 결제창 탭을 닫아, 폰에서는 승인됐는데
+    PC 쪽 주문이 마무리되지 않았다. 결제 단계에 들어간 뒤 done 이 아니면 탭을 남긴다(다음 작업 시작 때 정리)."""
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    tabs = _FakeTabs()
+    w = Worker(
+        WorkerDeps(
+            queue=q, graph=None, version='vtest', report=lambda j, s: None, parse_order=order_of
+        )
+    )
+    w.d.tabs = tabs
+
+    def payer_cut(_a):
+        tabs.open.add('t-pay-popup')  # 결제창이 떠 있는 채로
+        return AgentResult(
+            status='needs_human', reason='브릿지 끊김', fail_reason=FailReason.BRIDGE_DOWN
+        )
+
+    log: list[str] = []
+    w.d.graph = build_supervisor(
+        reg,
+        agents(log) | {'payer': payer_cut},
+        checkpointer=MemorySaver(),
+        gate=False,
+        on_stage_start=w.mark_stage,
+    )
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    assert w.tick().state == 'needs_human'
+    assert tabs.closed == [] and 't-pay-popup' in tabs.open
+
+    # 결제 전(구매 단계)에서 실패한 작업은 예전처럼 바로 닫는다
+    tabs2 = _FakeTabs()
+    w.d.tabs = tabs2
+    w.d.graph = build_supervisor(
+        reg,
+        agents(log, fail_at='buy'),
+        checkpointer=MemorySaver(),
+        gate=False,
+        on_stage_start=w.mark_stage,
+    )
+    orig = w.d.graph.invoke
+
+    def invoke_and_open_tab(*a, **k):
+        tabs2.open.add('t-order')
+        return orig(*a, **k)
+
+    w.d.graph.invoke = invoke_and_open_tab  # type: ignore[method-assign]
+    q.enqueue('A2', 'U1', {}, 'ts2')
+    assert w.tick().state in ('needs_human', 'failed', 'fail')
+    assert tabs2.closed == ['t-order']
+
+
 def test_승인_대기_중에는_탭을_닫지_않고_재개_뒤에_닫는다(setup):
     q, _log, _sent, make = setup
     w = make(gate=True)
@@ -501,7 +554,9 @@ def test_소싱처가_범위_밖으로_바뀐_주문은_돌리지_않는다(tmp_
             graph=graph,
             version='vtest',
             report=lambda job, line: sent.append(line),
-            parse_order=lambda job: OrderRef(order_no=job.order_no, source='LOTTEON', seller='포이즌', sku='티셔츠', qty=1),
+            parse_order=lambda job: OrderRef(
+                order_no=job.order_no, source='LOTTEON', seller='포이즌', sku='티셔츠', qty=1
+            ),
             sources=frozenset({'MUSINSA', '29CM'}),
         )
     )
@@ -563,7 +618,14 @@ def test_품절_실패는_자동으로_재고X_를_붙이지_않는다(setup, re
     )
     job, _ = q.enqueue('S1', 'U1', {}, 'ts1')
     result = AgentResult(status='fail', reason=reason, fail_reason=FailReason.OUT_OF_STOCK)
-    w._apply(job, {'outcome': 'needs_human', 'fail_reason': 'out_of_stock', 'results': {'buyer.musinsa': result}})
+    w._apply(
+        job,
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'out_of_stock',
+            'results': {'buyer.musinsa': result},
+        },
+    )
     assert (marked == [('S1', 'out_of_stock')]) is flagged
     if not flagged:
         assert any('재고X 보류' in s for s in sent)
@@ -589,7 +651,11 @@ def _auto_worker(setup, marked):
 
 def _ref(seller: str) -> OrderRef:
     return OrderRef(
-        order_no='X1', source='MUSINSA', seller=seller, sku='상품', revenue=43600,
+        order_no='X1',
+        source='MUSINSA',
+        seller=seller,
+        sku='상품',
+        revenue=43600,
         product_url='https://www.musinsa.com/products/1',
     )
 
@@ -600,11 +666,18 @@ def test_확정_품절은_근거를_적고_자동으로_취소중(setup):
     q, sent, w = _auto_worker(setup, marked)
     job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
     result = AgentResult(
-        status='fail', reason='확정 품절: a — a: 주문 옵션 품절 표시 [95 품절]', fail_reason=FailReason.OUT_OF_STOCK
+        status='fail',
+        reason='확정 품절: a — a: 주문 옵션 품절 표시 [95 품절]',
+        fail_reason=FailReason.OUT_OF_STOCK,
     )
     w._apply(
         job,
-        {'outcome': 'needs_human', 'fail_reason': 'out_of_stock', 'order': _ref('KT알파쇼핑'), 'results': {'buyer.musinsa': result}},
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'out_of_stock',
+            'order': _ref('KT알파쇼핑'),
+            'results': {'buyer.musinsa': result},
+        },
     )
     assert len(marked) == 1 and marked[0][1] == 'out_of_stock'
     assert '품절 확인' in marked[0][2] and '95 품절' in marked[0][2]
@@ -616,10 +689,17 @@ def test_포이즌_품절도_자동으로_취소중(setup):
     marked: list = []
     q, sent, w = _auto_worker(setup, marked)
     job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
-    result = AgentResult(status='fail', reason='확정 품절: a — a: 품절', fail_reason=FailReason.OUT_OF_STOCK)
+    result = AgentResult(
+        status='fail', reason='확정 품절: a — a: 품절', fail_reason=FailReason.OUT_OF_STOCK
+    )
     w._apply(
         job,
-        {'outcome': 'needs_human', 'fail_reason': 'out_of_stock', 'order': _ref('poison(x)'), 'results': {'buyer.musinsa': result}},
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'out_of_stock',
+            'order': _ref('poison(x)'),
+            'results': {'buyer.musinsa': result},
+        },
     )
     assert len(marked) == 1
     assert any('자동 취소중' in s for s in sent)
@@ -629,10 +709,19 @@ def test_마진_미달은_주문서_원가가_있으면_자동으로_취소중(s
     marked: list = []
     q, sent, w = _auto_worker(setup, marked)
     job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
-    buy = AgentResult(status='ok', reason='ok', payload={'cost': 48480, 'margin_pct': -9.0, 'account': 'buyer01', 'card': '무신사페이'})
+    buy = AgentResult(
+        status='ok',
+        reason='ok',
+        payload={'cost': 48480, 'margin_pct': -9.0, 'account': 'buyer01', 'card': '무신사페이'},
+    )
     w._apply(
         job,
-        {'outcome': 'needs_human', 'fail_reason': 'margin', 'order': _ref('KT알파쇼핑'), 'results': {'buyer.musinsa': buy}},
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'margin',
+            'order': _ref('KT알파쇼핑'),
+            'results': {'buyer.musinsa': buy},
+        },
     )
     assert len(marked) == 1 and marked[0][1] == 'margin'
     assert '48,480' in marked[0][2] and '43,600' in marked[0][2]
@@ -696,7 +785,6 @@ def test_검증_전_결제수단은_자동_승인하지_않는다(tmp_path):
     assert any('수동 승인 필요' in s for s in sent)
 
 
-
 def test_카카오페이_비밀번호_미입력이면_다른_수단으로_사지_않고_메모만_남긴다(tmp_path):
     """사용자 2026-10-01: 카카오페이 최저가면 결제 시도·알림 뒤 안 되면 네이버페이로 사지 말고 메모만 — 사람이 산다."""
     reg = Registry.load(DEFAULT_ROOT)
@@ -745,7 +833,9 @@ def test_폰_구매_소싱처는_그래프_없이_처리기로_끝낸다(setup):
     q, log, sent, make = setup
     w = make(gate=False)
     w.d.dry_run = False
-    w.d.parse_order = lambda job: OrderRef(order_no=job.order_no, source='SHIHUO', seller='크림', sku='S1', qty=1)
+    w.d.parse_order = lambda job: OrderRef(
+        order_no=job.order_no, source='SHIHUO', seller='크림', sku='S1', qty=1
+    )
     w.d.phone_sources = {'SHIHUO': lambda job, order: ('done', None, '得物 110 원가 117,439원')}
     q.enqueue('A1', 'U1', {}, 'ts1')
     assert w.tick().state == 'done'

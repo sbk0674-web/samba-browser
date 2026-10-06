@@ -108,6 +108,8 @@ class Worker:
         self._tab_marks: dict[int, frozenset[str]] = {}
         # keep_tabs 일 때 아직 안 닫은 지난 작업의 시작 시점 탭 목록(가장 오래된 것 하나면 충분하다)
         self._deferred_mark: frozenset[str] | None = None
+        # 결제 단계에 들어간 작업 id — 결제가 시작된 뒤 끝나지 못한(done 아닌) 작업은 결제창 탭을 닫지 않는다
+        self._pay_started: set[int] = set()
 
     def tick(self) -> Job | None:
         """queued 1건을 집어 끝까지(또는 승인 대기까지) 돌린다. 없으면 None."""
@@ -212,7 +214,17 @@ class Worker:
         if (job.step or '').startswith('승인 대기'):
             return job  # 결제 직전 주문서가 살아 있어야 한다
         before = self._tab_marks.pop(job.id, None)
+        paid = job.id in self._pay_started
+        self._pay_started.discard(job.id)
         if before is None:
+            return job
+        if paid and job.state != 'done':
+            # 결제가 시작된 뒤 끝내지 못했다(폰 승인 대기 중 끊김·검증 실패 등) — PC 결제창이 폰 승인 결과를 받아
+            # 주문을 마무리해야 하므로 절대 닫지 않는다(실기 2026-10-06 토스: 90초 만에 접고 결제창을 닫아
+            # 폰에서는 승인됐는데 무신사 주문이 생기지 않았다). 다음 작업 시작 때 정리된다
+            if self._deferred_mark is None:
+                self._deferred_mark = before
+            _log.info('%s 결제 시작 뒤 끝나지 못함 — 결제창 탭을 남겨 둔다', job.order_no)
             return job
         if self.d.keep_tabs:
             # 화면을 남긴다 — 다음 작업 시작 때 닫는다(가장 오래된 표식을 유지해야 그 뒤 탭이 전부 닫힌다)
@@ -283,6 +295,7 @@ class Worker:
         job_id = state.get('job_id')
         if job_id is None:
             return
+        self._pay_started.add(int(job_id))
         self.d.queue.progress(int(job_id), agent='payer', step=PAY_STARTED_STEP)
 
     def _reset_finished_thread(self, job_id: int) -> None:
