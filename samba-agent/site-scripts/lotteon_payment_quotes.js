@@ -59,8 +59,14 @@ for (const m of methods) {
       quotes.push({method:m, card:c, cost: ok ? await curCost() : null});
     }
   } else if (m === '간편결제') {
-    // L.PAY 카드 = 롯데카드 한 줄 — 카드선택에서 골라야 즉시할인이 금액에 반영된다
-    const ok = await pickCard('롯데카드');
+    // L.PAY 카드 = 롯데카드 한 줄 — 간편결제를 누른 뒤 'L.PAY 카드' 라디오를 켜야 카드선택 칸이 나온다
+    // (결제 진입 checkout_enter_lotteon 과 같은 순서, 2026-10-06 견적에 롯데카드 줄이 비어 카카오페이가 골라진 사고)
+    const rl = (await page.get({query:'L.PAY 카드'})).tree.split('\n').find(l=>/^\[\d+\] radio "L\.PAY 카드"/.test(l));
+    if (rl && !/value="on"/.test(rl)) { await page.click(parseInt(rl.slice(1))); await sleep(1200); }
+    // 이미 롯데카드가 골라져 있으면 다시 고르지 않는다(카드선택 칸 글자를 읽는다)
+    const P0 = (String((await page.get({})).tree||'').split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');
+    const cur = ((P0.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();
+    const ok = cur.includes('롯데') ? true : await pickCard('롯데카드');
     quotes.push({method:m, card: ok ? '롯데카드' : null, cost: ok ? await curCost() : null});
   } else {
     quotes.push({method:m, card:null, cost: await curCost()});
