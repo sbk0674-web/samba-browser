@@ -44,6 +44,10 @@ describe('실제 SDK 서버로', () => {
     const names = s.names()
     expect(names).toContain('get_page')
     expect(names).toContain('list_tabs')
+    // 브릿지 /health 의 tools[] 는 이 목록 그대로다
+    expect(names).toContain('upload_file')
+    expect(names).toContain('set_download_dir')
+    expect(names).toContain('list_downloads')
     expect(names).not.toContain('done')
     const out = await s.call('list_tabs', {})
     expect(typeof out).toBe('string')
