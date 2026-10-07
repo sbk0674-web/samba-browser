@@ -1,15 +1,9 @@
-// 29CM 결제수단 견적 — 라디오를 골라 결제금액·적립을 읽는다. 결제 안 함.
-// 탭: args.tab > 주문서 하나뿐 > args.expect 대조. 페이코·KB Pay 는 '다른 결제 방법' 하위 버튼.
-// reward = 적립 혜택(후기·삼성카드 제외). 무신사페이 기본 카드가 등록 카드 아니면 registered:false.
-// 누른 뒤 선택 표시를 확인 못 하면 그 수단 견적을 버린다.
-// args: profile, methods(이름 배열), tab, expect  반환 {quotes:[{method,card,cost,reward,points_used,registered,allowed,available}], base_cost, note}
 const lines = t => t.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d/.test(l))
 const idOf = l => parseInt(l.slice(1))
 const nameOf = l => (l.match(/^\[\d+\] \w+ "([^"]*)"/) || [])[1]
 const text = t => (t.split('PAGE TEXT:')[1] || '').replace(/\s+/g, ' ')
 const num = s => s ? parseInt(String(s).replace(/[^0-9]/g, ''), 10) || 0 : 0
 const norm = s => String(s || '').toLowerCase().replace(/[\s\-_/:().,[\]·]/g, '')
-// --- 주문서 탭 고르기(공통) ---
 async function formInfo() {
   const t = (await page.get({})).tree, tx = text(t)
   const nos = [...new Set([...t.matchAll(/\/product\/catalog\/(\d+)/g)].map(m => m[1]))]
@@ -49,12 +43,10 @@ async function pickForm() {
   await tabs.switch(ok[0].id)
   return ok[0]
 }
-// --- 결제수단 라디오 ---
 async function radios() {
   const r = (await page.get({ selector: 'label:has(input[type=radio])' })).tree
-  // 이름 없는 라디오만(현금영수증 라디오는 이름이 있다), 번호 순 = 화면 순
   const ids = lines(r).filter(l => /\] radio value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
-  const K = [['적립', /구매 적립금 받기/], ['선할인', /선할인 받기/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
+  const K = [['적립', /구매 적립/], ['선할인', /선할인/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
   const got = []
   let p = 0
   for (const [k, re] of K) { const i = tx.slice(p).search(re); if (i >= 0) { got.push(k); p += i + 1 } }
@@ -72,7 +64,6 @@ async function settle(prev) {
   }
   return tx
 }
-// 선택 표시(실측): 머니=보유 잔액, 페이=카드 목록·결제수단 추가, 기타=하위 버튼, 토스·카카오=현금영수증, 카드=없음
 const shown = tx => { const s = seg(tx); return { money: /보유 잔액 [\d,]+원/.test(s), pay: /결제수단 추가하기|\(\s*[\d*]{2,6}\s*\)\s*(신용|체크)카드/.test(s), etc: /PIN번호 결제|가상계좌|휴대폰결제/.test(s), cash: /현금 영수증/.test(s) } }
 const dsc = tx => (tx.match(/ㄴ 결제 즉시 할인 ([^ㄴ\d-]+?) ?-[\d,]+원/) || [])[1]
 const row = tx => {
@@ -89,9 +80,9 @@ if (F.err) return { quotes: [], base_cost: null, note: F.err + (F.why ? ': ' + F
 const R = await radios()
 if (!R) return { quotes: [], base_cost: null, note: '결제수단 라디오를 라벨과 맞추지 못함' }
 const t0 = F.f.tx
-// 수단과 무관한 기준 금액(결제 즉시 할인·제휴카드 할인을 되돌림)
 const base_cost = row(t0).cost + num((t0.match(/ㄴ 결제 즉시 할인 [^ㄴ]*?-([\d,]+)원/) || [])[1]) + num((t0.match(/ㄴ 제휴카드[^ㄴ]*?-([\d,]+)원/) || [])[1])
-const want = Array.isArray(args.methods) && args.methods.length ? args.methods : ['무신사머니', '무신사페이', '토스페이', '카카오페이', '페이코']
+let want = Array.isArray(args.methods) && args.methods.length ? args.methods.slice() : ['무신사머니', '무신사페이', '토스페이', '카카오페이', '페이코']
+if (R['무신사머니'] && !want.some(m => norm(m).includes('무신사머니'))) want.unshift('무신사머니')
 const quotes = [], notes = []
 let cur = seg(t0)
 const click = async id => { await page.click(id); const tx = await settle(cur); cur = seg(tx); return tx }
@@ -106,7 +97,6 @@ for (const m of want) {
   } else if (n.includes('무신사페이') && R['무신사페이']) {
     tx = await click(R['무신사페이'])
     const sec = (tx.split('무신사페이').slice(1).join('무신사페이').split('토스페이')[0]) || ''
-    // 금액은 맨 앞(기본) 카드로 읽힌다 — 그게 무신사 삼성카드거나 제휴카드 할인이 붙으면 등록 카드 견적이 아니다
     const first = (sec.match(/([가-힣A-Za-z]{2,12}카드)\s*\(\s*[\d*]{2,6}\s*\)/) || [])[1]
     const ti = tx.indexOf('결제 금액 총 주문')
     const reg = !!first && shown(tx).pay && ti >= 0 && !/무신사\s*삼성/.test(first) && !/제휴카드/.test(tx.slice(ti))
@@ -118,11 +108,9 @@ for (const m of want) {
   } else if (n === '카드' || n.includes('카드결제')) {
     if (R['카드']) { tx = await click(R['카드']); const s = shown(tx); if (!s.cash && !s.money && !s.pay && !s.etc && !dsc(tx)) q = { method: '카드 결제', card: null }; else notes.push('카드 결제 선택 확인 실패') }
   } else if (R['기타']) {
-    // 다른 결제 방법 → 하위 수단 버튼(이름이 정확히 같은 것 — 위쪽 '페이코 X 포인트' 배너는 이름이 다르다)
     await click(R['기타'])
     const sub = lines((await page.get({})).tree).find(l => /\] button "/.test(l) && norm(nameOf(l)) === n)
     if (sub) {
-      // 즉시 할인 줄이 다른 수단 이름이면 하위 수단이 안 바뀐 것이다(앞 수단 금액을 이 이름으로 적지 않는다)
       tx = await click(idOf(sub)); const d = dsc(tx)
       if (shown(tx).etc && !(d && !norm(d).includes(n))) q = { method: m, card: null }; else notes.push(m + ' 선택 확인 실패')
     } else notes.push(m + ' 하위 수단 없음')

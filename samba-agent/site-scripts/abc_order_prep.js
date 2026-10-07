@@ -1,4 +1,5 @@
-// ABC·GS 주문서 정돈 — 쿠폰 최대, 포인트 5만↑ 모두사용. 결제 안 누름.
+const START = Date.now()
+const late = ms => Date.now() - START > ms
 const num = s => Number(String(s || '').replace(/[^\d]/g, '') || 0)
 const lines = s => s.tree.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
 const valOf = l => ((l || '').match(/value="([^"]*)"/) || [])[1] || ''
@@ -73,42 +74,42 @@ const ls = await cbs()
 const i = ls.findIndex(l => l.includes(`label "${LABEL[n]}"`))
 const c = i < 0 ? null : ls.slice(i + 1).find(l => /\] clickable "/.test(l))
 if (!c || !(await clickId(parseInt(c.slice(1))))) return false
-for (let k = 0; k < 25; k++) { if ((await opts()).length) return true; await sleep(200) }
+for (let k = 0; k < 15; k++) { if ((await opts()).length) return true; await sleep(150) }
 return false
 }
-// 같은 쿠폰 사본 여럿 — 앞에서부터 누른다
+// 같은 쿠폰 사본 최대 2개까지 앞에서부터. 해당 칸 금액이 생겨야 성공
 const pick = async (label, n) => {
-const ls = (await opts()).filter(x => x.includes(`"${label}"`))
+const ls = (await opts()).filter(x => x.includes(`"${label}"`)).slice(0, 2)
 if (!ls.length) return false
 for (const l of ls) {
 await focus(); await page.clickNative(parseInt(l.slice(1)))
-for (let k = 0; k < 6; k++) { await sleep(400); if (label === '적용안함' || (await amounts()).discount) return true }
-if (n === undefined || !(await open(n))) break
+if (label === '적용안함') { await sleep(300); return true }
+for (let k = 0; k < 6; k++) {
+await sleep(250)
+const x = await amounts()
+if (n ? x.plus : x.general) return true
 }
-return label === '적용안함'
+if (!(await open(n))) break
+}
+return false
 }
 let generalBest = null
 for (const n of [0, 1]) {
+if (n && late(50000)) break
 if (!(await open(n))) continue
-// 일반에 고른 쿠폰은 플러스에서 뺀다
 const list = [...new Set((await opts()).map(l => l.match(/option "([^"]*)"/)[1]))].filter(o => o && o !== '적용안함' && o !== generalBest)
 if (!list.length) { await pick('적용안함', n); continue }
 let best = list.length === 1 ? list[0] : null, bestAmt = -1
 for (const o of list.length > 1 ? list : []) {
+if (late(55000)) break
 if (!(await open(n)) || !(await pick(o, n))) continue
 const x = await amounts()
 const amt = n === 0 ? x.general : x.plus
 if (amt > bestAmt) { bestAmt = amt; best = o }
 }
-if (best && (await open(n))) { await pick(best, n); notes.push(`${LABEL[n]} ${best}`); if (n === 0) generalBest = best }
-if (n === 1 && generalBest) {
-await sleep(500)
-const x = await amounts()
-if (x.general === 0 || x.plus === 0) {
-if (await open(1)) await pick('적용안함', 1)
-if (await open(0)) await pick(generalBest, 0)
-notes.push('플러스 제외')
-}
+if (best && (await open(n))) {
+if (await pick(best, n)) { notes.push(`${LABEL[n]} ${best}`); if (n === 0) generalBest = best }
+else if (n && (await open(1))) await pick('적용안함', 1)
 }
 }
 a = await amounts()

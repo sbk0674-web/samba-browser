@@ -993,6 +993,14 @@
     ]
   },
   {
+    "name": "snkrdunk_access_check",
+    "host": "snkrdunk.com",
+    "description": "스니덩 접근 가능 여부 확인(읽기만). 取引中 목록(기본 /orders/trading/)과 홈(/)을 차례로 열어 403 봇차단인지, 로그인 필요인지, 정상 목록인지 판정하고 연 탭은 모두 닫는다. {ok, blocked, needs_login, checked:[{url,title,blocked,sample}], note} 반환. 스니덩 점검 시작 전에 먼저 호출해 blocked 면 전수 확인을 건너뛰고 사용자에게 보고한다.",
+    "params": [
+      "path — 선택, 확인할 경로(기본 /orders/trading/)"
+    ]
+  },
+  {
     "name": "source_order_detail",
     "host": "",
     "description": "소싱처(MUSINSA) 계정 profile 의 주문 상세에서 주문번호 source_order_no 의 주문을 열어 {source_order_no, status, paid(결제 금액 숫자), points_used(사용한 적립금 숫자, 없으면 0), reward(후기 적립을 뺀 이번 주문 적립 합계 숫자 — 머니 결제 적립·등급 적립 등, 없으면 0), card(결제 수단 글자, 예: 무신사페이 - 롯데카드)} 를 돌려준다. 주문",

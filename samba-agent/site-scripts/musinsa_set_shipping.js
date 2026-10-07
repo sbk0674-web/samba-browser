@@ -1,8 +1,7 @@
-// 2026-09-26 점검: 주문서 탭을 '가장 최근 것'으로 고르지 않는다 — args.tab, 없으면 레인에 하나뿐인 무신사 주문서(여럿이면 멈춘다, 197←196 사고). 나머지 흐름은 실적(runs/fails 0) 그대로.
 async function G(){for(let i=0;i<8;i++){try{return await page.get({interactive:true});}catch(e){await sleep(800);}}throw new Error('page busy');}
 async function C(id){try{return await page.click(id);}catch(e){return 'warn';}}
+async function T(id,s){for(let i=0;i<3;i++){try{return await page.type(id,s,false);}catch(e){if(!/frame|gone|detach/i.test(''+e))throw e;await sleep(700);}}return 'warn';}
 async function W(t,ms){try{return await page.waitFor(t,ms||8000);}catch(e){return null;}}
-// 우편번호 창(iframe)은 글자 기다리기가 안 먹어 8초씩 헛기다렸다(run_js 30초 초과) — 트리를 짧게 다시 읽어 기다린다
 async function P(re,ms){const t0=Date.now();let g=await G();while(!re.test(g.tree)&&Date.now()-t0<(ms||5000)){await sleep(300);g=await G();}return g;}
 const nrm=s=>(s||'').replace(/[()\[\],]/g,' ').replace(/\s+/g,' ').trim();
 const toks=s=>nrm(s).split(' ').filter(t=>t.length>1);
@@ -29,19 +28,17 @@ let g=await G();
 if(!/name=address1/.test(g.tree)){
   let m=g.tree.match(/^\[(\d+)\] (?:link|button) "[^"]*배송지 추가[^"]*"/m);
   if(!m){out.note='배송지 추가하기 링크 없음';return out;}
-  C(parseInt(m[1]));g=await P(/name=address1/,8000); // 링크 클릭은 페이지 이동으로 20초 멈춘다 — 기다리지 않고 폼을 본다
+  C(parseInt(m[1]));g=await P(/name=address1/,8000);
 }
 const nM=g.tree.match(/^\[(\d+)\] textbox name=name/m);
 const mM=g.tree.match(/^\[(\d+)\] textbox name=(?:mobile|phone|tel)\b/m);
 if(mM)out.phone_field_ids.push(parseInt(mM[1]));
-if(nM)await page.type(parseInt(nM[1]),args.name,false);
-if(mM)await page.type(parseInt(mM[1]),'',false);
+if(nM)await T(parseInt(nM[1]),args.name);
+if(mM)await T(parseInt(mM[1]),'');
 await sleep(200);
 const at=toks(args.address);
 const qs=[at.slice(0,at.findIndex(t=>/^\d/.test(t))+1).join(' ')||args.address,args.address,args.postal_code].filter(q=>q&&(''+q).trim());
 const bad=/(취소|검색|영문보기|더보기|지도|확인|안내)/;
-// job 233: 하네스 실행에서만 '주소 입력 실패'(수동 재현 3/3 성공) — 결과 창이 늦게 뜨는 경우를 위해 검색어 목록을 한 번 더 돌고,
-// 단계별 결과(주소 원문 없이 숫자만)를 note 에 남긴다
 const dbg=[];
 for(const q of [...qs,...qs]){
   g=await G();
@@ -52,11 +49,11 @@ for(const q of [...qs,...qs]){
     if(sM){await C(parseInt(sM[1]));g=await P(/name=region_name/,5000);kM=g.tree.match(/\[(\d+)\] textbox "[^"]*" name=region_name/);}
   }
   if(!kM){dbg.push('검색창 없음');break;}
-  await page.type(parseInt(kM[1]),''+q,false);await sleep(200);
+  await T(parseInt(kM[1]),''+q);await sleep(200);
   g=await G();
   const sb=g.tree.match(/\[(\d+)\] button "검색"/);
   if(sb)await C(parseInt(sb[1]));
-  g=await P(/검색 결과 보기|검색 결과가 없|결과가 없습니다/,9000);
+  g=await P(/검색 결과 보기|검색 결과가 없|결과가 없습니다|name=address1 value="[^"]+"/,9000);
   const re=/\[(\d+)\] button "([^"]+)"/g;let bm,best=null;
   while((bm=re.exec(g.tree))){
     const id=parseInt(bm[1]),lb=bm[2];
@@ -72,13 +69,11 @@ for(const q of [...qs,...qs]){
   if(hit)break;
 }
 g=await G();
-// 우편번호 칸이 비어 있으면 args 값으로 채움
 const zM=g.tree.match(/\[(\d+)\] textbox name=(?:zipcode1|zipcode|postcode)[^\n]*value="([^"]*)"/);
-if(zM&&!zM[2]&&args.postal_code){await page.type(parseInt(zM[1]),''+args.postal_code,false);g=await G();}
+if(zM&&!zM[2]&&args.postal_code){await T(parseInt(zM[1]),''+args.postal_code);g=await G();}
 let aM=g.tree.match(/\[(\d+)\] textbox name=address1 value="([^"]*)"/);
-// 검색 결과 표기가 args 주소와 다르면(경기/경기도, (건물명) 부가) args 주소로 맞춤
 if(aM&&nrm(aM[2])!==nrm(args.address)&&args.address){
-  await page.type(parseInt(aM[1]),args.address,false);await sleep(200);g=await G();
+  await T(parseInt(aM[1]),args.address);await sleep(200);g=await G();
   aM=g.tree.match(/\[(\d+)\] textbox name=address1 value="([^"]*)"/);
 }
 let base=aM?aM[2]:'';
@@ -88,7 +83,7 @@ if(!dt&&base){
   dt=i>=0?args.address.replace(base,'').replace(/^[\s,]+/,'').trim():at.filter(t=>nrm(base).split(' ').indexOf(t)<0).join(' ');
 }
 const a2=g.tree.match(/^\[(\d+)\] textbox name=address2/m);
-if(a2)await page.type(parseInt(a2[1]),dt,false);
+if(a2)await T(parseInt(a2[1]),dt);
 await sleep(200);g=await G();
 const nV=g.tree.match(/\[(\d+)\] textbox name=name value="([^"]*)"/);
 const aV=g.tree.match(/\[(\d+)\] textbox name=address1 value="([^"]*)"/);

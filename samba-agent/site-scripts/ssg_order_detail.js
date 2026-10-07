@@ -1,9 +1,3 @@
-// SSG 주문 상세(2026-09-27, 로그인 실측): 계정 profile 로 주문 상세(pay.ssg.com/myssg/orderInfoDetail.ssg?orordNo=)를 새 탭에서 열어 결제 값을 읽고 탭을 닫는다.
-// 주문번호는 화면에 '20260925-C0E198', 주소에는 '-' 없이 '20260925C0E198'. 주문을 바꾸지 않는다. 로그인으로 튕기면 note 'login required'.
-// 실측 화면: '결제정보 주문금액 … 총 결제금액 134,640원 결제내역 SSGPAY-신용카드 134,640원 현대카드 5165-46**-… 일시불 … 구매혜택 신세계포인트 134P 받은 총 혜택 134원'
-// 원가 = paid × 카드 청구할인 − reward + points_used. reward = 구매혜택(신세계포인트 P·SSG MONEY 적립), points_used = 결제내역의 신세계포인트·적립머니 사용
-// (충전결제로 낸 SSG MONEY 는 현금이라 points_used 가 아니다 — money_paid 로 따로 준다)
-// 인자 {source_order_no, orderNo?, profile?}  반환 {source_order_no, status, paid, points_used, money_paid, reward, card, note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const raw = nz(args.source_order_no || args.orderNo).toUpperCase()
@@ -20,13 +14,11 @@ const done = async r => { if (id) { try { await tabs.close(id) } catch (e) {} } 
 if (/member\.ssg\.com|\/member\/login/.test(url)) return done({ ...R, note: 'login required' })
 const t = nz(((await page.get({})).tree || '').split('PAGE TEXT:')[1])
 if (!t.includes(shown) && !t.includes(no)) return done({ ...R, note: 'order ' + shown + ' not on page' })
-R.source_order_no = shown
-R.status = (t.match(/(결제완료|주문접수|상품준비중|배송준비중|배송중|배송완료|구매확정|취소완료|취소요청|반품\S*|교환\S*|선물\s*수락\s*대기)/) || [])[1] || ''
+R.status = (t.match(/(결제완료|주문접수|상품준비중|배송준비중|배송중|배송완료|구매[\s]*[확]정|취소완료|취소요청|반품\S*|교환\S*|선물\s*수락\s*대기)/) || [])[1] || ''
 const pi = t.search(/결제\s*정보/)
 const pay = pi >= 0 ? t.slice(pi, pi + 700) : ''
 R.paid = num((pay.match(/총\s*결제\s*금액\s*([\d,]+)\s*원/) || [])[1])
 const hist = (pay.match(/결제\s*내역\s*(.*?)(품절 시|구매혜택|받은 총 혜택|$)/) || [])[1] || ''
-// 결제내역 줄: 'SSGPAY-신용카드 134,640원 현대카드 …' · 'SSG MONEY 10,000원' · '신세계포인트 5,240원'
 R.points_used = [...hist.matchAll(/(신세계\s*포인트|적립\s*머니)\s*([\d,]+)\s*원/g)].reduce((a, m) => a + num(m[2]), 0)
 R.money_paid = [...hist.matchAll(/SSG\s*MONEY(?!\s*적립)\s*(?:충전결제)?\s*([\d,]+)\s*원/gi)].reduce((a, m) => a + num(m[1]), 0)
 const cm = hist.match(/(SSGPAY-?\s*\S+|SSG\s*MONEY|페이코|네이버페이|카카오페이|토스페이)\s*[\d,]+\s*원\s*((현대|KB국민|국민|롯데|신한|농협|NH|삼성|하나|우리|BC|비씨|씨티)\s*카드)?/i)

@@ -1,5 +1,6 @@
+const T0 = Date.now()
 const nop = () => {}
-const retry = async fn => { let e0; for (let i = 0; i < 4; i++) { try { return await fn() } catch (e) { e0 = e; if (!/did not respond|busy|dialog/i.test(String(e))) throw e; await sleep(1500) } } throw e0 }
+const retry = async (fn, i = 0) => { try { return await fn() } catch (e) { if (i > 3 || !/did not respond|busy|dialog/i.test(String(e))) throw e; await sleep(1500); return retry(fn, i + 1) } }
 const pg = new Proxy({}, { get: (_, k) => (...a) => retry(() => page[k](...a)) })
 const tabIdOf = r => (String(r).match(/tab (\S+)/) || [])[1] || null
 const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -16,7 +17,6 @@ const emailOnForm = async () => valOf(lines(await pg.get({ selector: 'input[name
 const sq = s => String(s).toLowerCase().replace(/\s/g, '')
 function pickOption(want, opts) {
 if (!want || !opts.length) return null
-if (opts.includes(want)) return want
 const w = want.toLowerCase()
 const kr = w.match(/kr\s*(\d+(?:\.\d+)?)/)
 const nums = (w.match(/\d+(?:\.\d+)?/g) || []).map(Number)
@@ -34,7 +34,7 @@ const want = String(args.size || '').trim()
 for (const t of (await tabs.list()) || []) {
 if (!isOrderUrl(t.url)) continue
 if (profile && String(t.profile || '').toLowerCase() === profile) { await tabs.close(t.id).catch(nop); continue }
-try { await tabs.switch(t.id); const em = await Promise.race([emailOnForm(), sleep(5000).then(() => null)]); if (em === null || sameAccount(em)) await tabs.close(t.id) } catch (e) {}
+try { await tabs.switch(t.id); const em = await Promise.race([emailOnForm(), sleep(3000).then(() => null)]); if (em === null || sameAccount(em)) await tabs.close(t.id) } catch (e) {}
 }
 const url = prdtNo ? `${HOST}/product?prdtNo=${prdtNo}` : /^https?:/.test(sku) ? sku : `${HOST}/display/search-word/result?searchWord=${encodeURIComponent(sku)}`
 const tid = tabIdOf(await tabs.open(withProfile(url)))
@@ -46,7 +46,7 @@ const first = lines(await pg.get({ selector: 'a[href*="/product?prdtNo="]' }))[0
 if (!first) { await tabs.close(tid); return { options: [], error: 'no_product' } }
 await pg.click(parseInt(first.slice(1)))
 }
-await pg.waitFor(/바로구매|판매\s*종료|일시\s*품절|SOLD OUT/, 8000).catch(nop)
+await pg.waitFor(/상품코드\s*:|판매\s*종료|일시\s*품절|SOLD OUT/, 8000).catch(nop)
 const product_url = await pg.url()
 const pt = await text()
 const pn = ((pt.match(/공유하기 (.{2,120}?) 상품코드 :/) || [])[1] || '').trim()
@@ -60,7 +60,9 @@ const stop = async (note, extra = {}) => { await tabs.close(tid).catch(nop); ret
 if (!/\bLOGOUT\b/.test(pt)) return await stop('로그인 안 됨', { error: 'login_required' })
 if (!all.length && /판매 종료 및 중지된 상품/.test(pt)) return await stop('판매 종료 및 중지된 상품', { options: want ? [`${want} 품절`] : [], sale_ended: true })
 if (!all.length && want) return await stop('사이즈 선택지를 읽지 못함')
+const WQ = Math.max(1, +args.qty || 1)
 let picked = null
+let orderUrl = ''
 if (all.length) {
 picked = pickOption(want, avail.map(o => o.t)) || (!want && avail.length === 1 ? avail[0].t : null)
 if (!picked) {
@@ -68,23 +70,23 @@ const s = pickOption(want, sold.map(o => o.t))
 return await stop(s ? `주문 사이즈 ${s} 품절 표시` : `주문 사이즈 "${want}" 선택지에 없음`)
 }
 await pg.click(avail.find(o => o.t === picked).id)
-await pg.waitFor(/총 결제금액\s*[1-9]/, 3000).catch(nop)
+for (let i = 0; i < 15 && !isOrderUrl(orderUrl); i++) { await sleep(300); orderUrl = await pg.url().catch(() => '') }
 }
-const WQ = Math.max(1, +args.qty || 1)
-if (WQ > 1) { const sp = +(((await pg.get({ interactive: 1 })).tree.match(/^\[(\d+)\] spinbutton value=/m) || [])[1] || 0); if (!sp) return await stop('수량 칸 없음'); await pg.type(sp, String(WQ), true); await sleep(800) }
+if (!isOrderUrl(orderUrl)) {
+if (WQ > 1) { const sp = +(((await pg.get({ interactive: 1 })).tree.match(/^\[(\d+)\] spinbutton value=/m) || [])[1] || 0); if (!sp) return await stop('수량 칸 없음'); await pg.type(sp, String(WQ), true) }
 const buy = await pg.idOf('바로구매')
 if (buy < 0) return await stop('바로구매 버튼 없음')
 await pg.click(buy)
-let orderUrl = ''
 for (let i = 0; i < 40 && !isOrderUrl(orderUrl) && !/login/i.test(orderUrl); i++) { await sleep(300); orderUrl = await pg.url().catch(() => '') }
-await pg.waitFor('결제예정금액', 6000).catch(nop)
+}
+await pg.waitFor('결제예정금액', 8000).catch(nop)
 if (/login/i.test(orderUrl)) return await stop('로그인 필요', { error: 'login_required' })
-if (!isOrderUrl(orderUrl)) return await stop('주문서로 못 감: ' + orderUrl.slice(0, 80), { error: 'no_checkout' })
+if (!isOrderUrl(orderUrl)) return await stop('주문서로 못 감', { error: 'no_checkout' })
 const t = await text()
 const email = await emailOnForm()
 const account = email.split('@')[0] || null
 if (!sameAccount(email)) return { ...base, account, order_tab: tid, note: `주문서 계정 ${account} ≠ profile` }
-const cost = num((t.match(/총\s*결제예정금액\s*([\d,]+)\s*원/) || [])[1]) || null
+const cost = num((t.match(/결제예정금액\s*([\d,]+)\s*원/) || [])[1]) || null
 const qty = +((t.match(/\/\s*(\d+)\s*개/) || [])[1] || 0) || null
 const reward = num((t.match(/([\d,]+)\s*P\s*적립\s*예정/) || [])[1])
 const line = t.match(/배송 상품 (.{2,160}?) ([^\s\/]{1,20})\s*\/\s*(\d+)\s*개/)
@@ -94,8 +96,8 @@ const ship = lines(await pg.get({ selector: '#tabAddress1' }))
 const addr = ship.filter(x => /\] textbox value="/.test(x)).map(valOf)
 const shipping = { name: valOf(ship.find(x => /textbox "이름"/.test(x))).trim(), address: (addr[0] || '').trim(), address_detail: (addr[1] || '').trim() }
 let already_ordered = null, existing_order_no = null, dup_note = '중복 확인 못 함'
-const nameKey = (pn.match(/[A-Z]{1,3}\d{4,}/) || [((pn.match(/^[^A-Za-z]{4,}/) || [pn])[0]).trim().split(' ').slice(0, 4).join(' ')])[0]
-if (nameKey && selected) {
+const nameKey = (pn.match(/[A-Z]{1,3}\d{4,}/) || [((pn.match(/^[^A-Za-z]{4,}/) || [pn])[0]).trim().split(' ').slice(0, 4).join(' ')])[0]
+if (nameKey && selected && Date.now() - T0 < 35000) {
 const hid = tabIdOf(await tabs.open(withProfile(`${HOST}/mypage/claim/claim-order-main`)))
 if (hid) {
 try {
@@ -117,4 +119,4 @@ await tabs.close(hid).catch(nop)
 }
 await tabs.switch(tid)
 }
-return { ...base, already_ordered, existing_order_no, methods, cost, qty, reward, selected, account, shipping, order_tab: tid, note: [cost ? null : '결제예정금액 못 읽음', dup_note].filter(Boolean).join(' · ') || null }
+return { ...base, already_ordered, existing_order_no, methods, cost, qty, reward, selected, account, shipping, order_tab: tid, note: cost ? dup_note : '결제예정금액 못 읽음' }
