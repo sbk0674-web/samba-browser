@@ -134,6 +134,13 @@ class Intake:
             seen += 1
             order = wave_order.to_order_ref()
             self._ask_lookup(wave_order)
+            if wave_order.inferred_product_prefix and not (wave_order.source_site or '').strip():
+                # 상품명이 잘려 소싱처를 추정 못 한 주문 — 접두어 연결만 한 번 부탁하고 접수하지 않는다
+                # (소싱처가 없어 살 수 없다). 연결되면 다음 주기에 소싱처가 채워져 들어온다
+                if order.wave_key not in self._linked_only:
+                    self._linked_only.add(order.wave_key)
+                    self._link_prefix(wave_order)
+                continue
             if not self._in_scope(wave_order):
                 # 이행 범위 밖이라도 소싱처 미등록 주문은 상품관리 상품에 연결만 해 둔다(사용자 2026-09-25 — ABC마트).
                 # 연결되면 소싱처가 채워져 다음 주기부터는 추정 주문이 아니다
@@ -179,6 +186,28 @@ class Intake:
                 wave_order.order_number,
                 target,
             )
+
+    def _link_prefix(self, wave_order: WaveOrder) -> None:
+        """상품명이 잘려 롯데온 상품번호 뒷자리가 없는 주문 — 접두어로 수집상품에 연결만 한다.
+
+        삼바웨이브가 접두어에 맞는 수집상품이 정확히 하나일 때만 잇는다(없거나 여럿이면 409). 실패는 근거만
+        남긴다 — 이 주문은 소싱처가 비어 있어 어차피 범위 밖이고, 판매자상품코드 읽기(_ask_lookup)가 따로 돈다.
+        """
+        prefix = wave_order.inferred_product_prefix or ''
+        key = (wave_order.id or '').strip() or wave_order.order_number
+        try:
+            out = self._wave.link_product(key, prefix, 'LOTTEON')
+        except WaveError as e:
+            log.info(
+                '잘린 상품번호 연결 실패 %s LOTTEON %s*: %s', wave_order.order_number, prefix, e
+            )
+            return
+        log.info(
+            '잘린 상품번호 연결 %s → LOTTEON %s* 상품관리 상품에 연결(주문 %s건)',
+            wave_order.order_number,
+            prefix,
+            out.get('linked_orders', 1),
+        )
 
     def _link_inferred(self, wave_order: WaveOrder, job_id: int | None, ts: str | None) -> bool:
         """소싱처 미등록 주문(상품명 숫자로 무신사·ABC마트 추정)을 수집상품에 연결한다. 이행을 이어 가면 True.

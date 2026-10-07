@@ -1,6 +1,11 @@
 """가격X·재고X 표시 — 토글 버튼이라 이미 붙어 있으면 누르지 않고, 누른 뒤 태그로 확인한다."""
 
-from samba_agent.wave.client import WaveOrderDetail, infer_musinsa_product_id, infer_source
+from samba_agent.wave.client import (
+    WaveOrderDetail,
+    infer_lotteon_prefix,
+    infer_musinsa_product_id,
+    infer_source,
+)
 from samba_agent.wave.flags import FlagMarker, flag_for
 
 
@@ -82,7 +87,10 @@ def test_상품명_끝_번호로_소싱처를_가른다():
         '3347853',
     )
     assert infer_source('티셔츠 123456789') == ('FashionPlus', '123456789')  # 9자리는 패션플러스
-    assert infer_source('수영복 A4FL1LH08 1000618616029') == ('SSG', '1000618616029')  # 13자리(1000…)는 SSG
+    assert infer_source('수영복 A4FL1LH08 1000618616029') == (
+        'SSG',
+        '1000618616029',
+    )  # 13자리(1000…)는 SSG
     assert infer_source('티셔츠 12345678901') is None  # 11자리는 모른다
     o = WaveOrderDetail(order_number='L', source_site='', product_name='팬츠 LE1215528857')
     assert (o.source_site, o.source_url, o.inferred_product_id) == (
@@ -90,3 +98,23 @@ def test_상품명_끝_번호로_소싱처를_가른다():
         'https://www.lotteon.com/p/product/LE1215528857',
         'LE1215528857',
     )
+
+
+def test_상품명이_잘려_롯데온_번호_뒷자리가_없으면_접두어만_둔다():
+    """실기 2026-10-07 현대H몰 '… 여자로퍼 LE122077228' → 수집상품 LE1220772281. 소싱처는 추정하지 않는다."""
+    assert (
+        infer_lotteon_prefix('스케쳐스 여성 클레오 플렉스 웨지 여성플랫슈즈 여자로퍼 LE122077228')
+        == 'LE122077228'
+    )
+    assert infer_lotteon_prefix('나이키 러닝 탑 LE12203144') == 'LE12203144'
+    assert infer_lotteon_prefix('팬츠 LE1215528857') is None  # 온전한 번호는 추정 쪽
+    assert infer_lotteon_prefix('LE122077228 차콜') is None  # 끝이 아니면 잘린 것이 아니다
+    assert infer_lotteon_prefix('티셔츠 LE12345') is None  # 너무 짧다
+    o = WaveOrderDetail(order_number='H', source_site='', product_name='여자로퍼 LE122077228')
+    assert (o.source_site, o.source_inferred, o.inferred_product_prefix) == (
+        '',
+        False,
+        'LE122077228',
+    )
+    kept = WaveOrderDetail(order_number='K', source_site='SSG', product_name='여자로퍼 LE122077228')
+    assert kept.inferred_product_prefix is None

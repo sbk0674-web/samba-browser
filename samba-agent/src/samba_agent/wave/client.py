@@ -130,6 +130,19 @@ def infer_source(product_name: str | None) -> tuple[str, str] | None:
     return None
 
 
+# 마켓이 상품명을 잘라 롯데온 상품번호 뒷자리가 떨어진 것 — 'LE' + 6~9자리로 끝난다
+# (실기 2026-10-07 현대H몰 '… 여자로퍼 LE122077228' → 수집상품 LE1220772281)
+_TRUNCATED_LOTTEON_NO = re.compile(r'(?<!\w)(LE\d{6,9})$')
+
+
+def infer_lotteon_prefix(product_name: str | None) -> str | None:
+    """상품명 끝의 잘린 롯데온 상품번호(접두어). 온전한 번호로 추정되는 상품명이면 None."""
+    if infer_source(product_name) is not None:
+        return None
+    found = _TRUNCATED_LOTTEON_NO.search((product_name or '').rstrip())
+    return found.group(1) if found else None
+
+
 def infer_musinsa_product_id(product_name: str | None) -> str | None:
     """무신사로 추정되면 그 상품번호, 아니면 None."""
     found = infer_source(product_name)
@@ -172,6 +185,8 @@ class WaveOrder(BaseModel):
     # 소싱처가 비어 있어 상품명 끝 숫자로 소싱처·상품번호를 추정했는가(infer_source)
     source_inferred: bool = False
     inferred_product_id: str | None = None
+    # 상품명 끝의 잘린 롯데온 상품번호 — 소싱처는 추정하지 않고 접두어로 수집상품 연결만 시도한다
+    inferred_product_prefix: str | None = None
 
     @model_validator(mode='after')
     def _infer_source(self) -> Self:
@@ -185,6 +200,8 @@ class WaveOrder(BaseModel):
             self.source_url = _INFER_URL[site].format(product_id)
             self.source_inferred = True
             self.inferred_product_id = product_id
+        else:
+            self.inferred_product_prefix = infer_lotteon_prefix(self.product_name)
         return self
 
     @property

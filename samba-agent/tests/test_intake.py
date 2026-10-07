@@ -321,6 +321,26 @@ def test_무신사에서_사라진_상품은_재고X_로_마감한다(tmp_path):
     assert any('재고X' in t for _, t in slack.lines)
 
 
+def test_상품명이_잘린_롯데온_주문은_접두어로_연결만_시도한다(tmp_path):
+    """소싱처도 추정 못 한 주문(LE+9자리) — 삼바웨이브에 접두어 연결을 한 번만 부탁하고 접수는 않는다."""
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    slack = _Slack()
+    order = wave_order(
+        'H1',
+        source='',
+        product_name='스케쳐스 여성 클레오 플렉스 웨지 여자로퍼 LE122077228',
+        product_option='차콜/240',
+    )
+    wave = _LinkWave([order], link_status=409)
+    intake = Intake(wave, q, reg, slack.post_new, slack.post_line, days=7)
+    assert intake.run_once().enqueued == 0
+    assert wave.linked == [('H1', 'LE122077228')]
+    assert q.get('H1') is None
+    intake.run_once()
+    assert len(wave.linked) == 1  # 되풀이하지 않는다
+
+
 def test_범위_밖_소싱처의_미등록_주문은_연결만_하고_접수하지_않는다(tmp_path):
     """ABC마트(10자리) — 이행 범위는 무신사·29CM 지만 상품관리 연결은 해 둔다(사용자 2026-09-25)."""
     reg = Registry.load(DEFAULT_ROOT)
