@@ -395,7 +395,7 @@ function ContextMenu({
             run: () => onEdit({ kind: 'newFolder', parentId: target.parentId, name: '' })
           }
         ]
-      : menu.target.kind === 'link'
+      : target.kind === 'link'
         ? [
             {
               label: t('bookmark.menu.openNewTab'),
@@ -426,7 +426,7 @@ function ContextMenu({
           ]
         : [
             // 북마크바 폴더는 이름을 바꾸거나 지우지 않는다(크롬과 같다)
-            ...(menu.target.folder.isToolbar
+            ...(target.folder.isToolbar
               ? []
               : [
                   {
@@ -448,7 +448,7 @@ function ContextMenu({
                 onEdit({ kind: 'newFolder', parentId: menu.target.folder.id, name: '' })
               }
             },
-            ...(menu.target.folder.isToolbar
+            ...(target.folder.isToolbar
               ? []
               : [
                   {
