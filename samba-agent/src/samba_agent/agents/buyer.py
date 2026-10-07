@@ -443,6 +443,8 @@ CARD_BILLING_FACTORS: tuple[tuple[tuple[str, ...], float], ...] = (
 # SSG 는 신세계몰(siteNo 6004) 상품만 산다(사용자 2026-09-27). 신세계백화점(6009)은 소싱처 allow_department 일 때만.
 # 이마트·트레이더스 등 그 밖의 몰은 금지 — 스냅샷 스크립트가 바로구매 전에 error:'not_shinsegaemall' 로 멈춘다
 NOT_MALL_ERROR = 'not_shinsegaemall'
+# 롯데온 직배 주문서가 1단계('/orders/N')에 멈췄다 — 받는 곳을 먼저 골라야 계속하기가 넘어간다(lotteon_wizard_ship)
+WIZARD_ERROR = 'orders-wizard'
 # 사이트 봇 차단(SSG PerimeterX 등) — 스크립트 잘못이 아니다. 재시도·AI 수리 없이 사람에게 넘긴다(돌릴수록 더 막힌다)
 BLOCKED_ERROR = 'blocked'
 # 진입 경로(다나와 이동 링크) 오류 — 링크 없음·도착 주소에 제휴(ReferCode) 없음·다른 상품 도착. 스크립트 잘못이 아니라
@@ -1360,6 +1362,40 @@ def learn_gift_blocked(address: str) -> str | None:
     return key
 
 
+# 롯데온 판매자(롯데백화점 입점)가 직배로도 못 보내는 지역 — 주문서에서 받는 곳을 골라도 '계속하기'가 안 넘어가는 곳.
+# 선물·직배 모두 막혀 롯데온으로는 살 수 없다(실기 2026-10-07 경북 문경시 동로면: 성남 주소로 바꾸면 넘어간다)
+UNDELIVERABLE_FILE = Path(__file__).resolve().parents[3] / 'lotteon_undeliverable_regions.json'
+
+
+def _read_regions(path: Path) -> list[str]:
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    return [str(x) for x in data if isinstance(x, str) and x]
+
+
+def learn_undeliverable(address: str) -> str | None:
+    key = region_key(address)
+    if not key:
+        return None
+    known = _read_regions(UNDELIVERABLE_FILE)
+    if key not in known:
+        known.append(key)
+        try:
+            UNDELIVERABLE_FILE.write_text(
+                json.dumps(known, ensure_ascii=False, indent=2), encoding='utf-8'
+            )
+        except OSError:
+            return None
+    return key
+
+
+def lotteon_undeliverable(address: str) -> bool:
+    squeezed = re.sub(r'\s+', '', address or '')
+    return any(k.replace(' ', '') in squeezed for k in _read_regions(UNDELIVERABLE_FILE))
+
+
 def gift_blocked_address(address: str) -> bool:
     """선물하기로 보낼 수 없는 주소(제주·주요 도서산간 + 롯데온이 거절해 학습한 지역)인가."""
     if _GIFT_BLOCKED_RE.search(address or ''):
@@ -1434,7 +1470,7 @@ def snapshot_problem(
             return None
         # 지정 몰(SSG 신세계몰)이 아닌 상품 — 스크립트가 규칙대로 멈췄다. 호출부가 그 몰의 같은 상품을 찾는다.
         # 봇 차단도 스크립트 잘못이 아니다 — 호출부가 사람에게 넘긴다
-        if out.get('error') in (NOT_MALL_ERROR, BLOCKED_ERROR):
+        if out.get('error') in (NOT_MALL_ERROR, BLOCKED_ERROR, WIZARD_ERROR):
             return None
         # 다나와 진입 실패(제휴 없음·링크 없음·다른 상품) — 고칠 스크립트가 아니다. 호출부가 사람에게 넘긴다
         if out.get('error') in ENTRY_ERRORS:
@@ -2106,6 +2142,21 @@ class BuyerAgent(AgentBase):
             # 롯데온: 포이즌 외에는 '선물하기' 주문서로 들어간다(사용자 2026-09-27). 제주·도서산간·배대지처럼 직배·까대기로
             # 판정된 주문은 바로구매 주문서로 연다(실기 2026-09-30 제주 선물 불가)
             args['gift'] = True
+        elif (
+            source.gift_unless_poison
+            and not is_poison_seller(a.order.seller)
+            and self._shipping_fn is not None
+            and self.order_type_of(a.order) == 'direct'
+        ):
+            # 롯데온 직배 주문서: 기본배송지가 판매자 배송 불가 지역이면 1단계 '계속하기'가 막힌다 — 받는 곳을 미리 알려 줘
+            # 스냅샷이 '변경' 목록에서 먼저 고르게 한다(실기 2026-10-07 아디다스 KA4340). 이름·주소만 넘긴다
+            try:
+                ship = self._shipping_fn(a.order.wave_key, 'direct')
+            except (WaveError, AgentFailure):
+                ship = {}
+            if ship.get('name') and ship.get('address'):
+                args['ship_name'] = ship['name']
+                args['ship_address'] = ship['address']
         args.update(extra or {})
         check = snapshot_problem(
             a.order.option, lambda sel: self._selected_matches(sel, a.order.option)
@@ -2140,6 +2191,7 @@ class BuyerAgent(AgentBase):
             goal=goal,
             check=lambda o: None if pick_failed(o) else base_check(o),
         )
+        snap = self._finish_orders_wizard(snap, args)
         if pick_failed(snap):
             # 하네스의 옵션 매칭(규칙·AI)이 하나로 정하면 그 선택지 글자로 한 번만 다시 연다
             # (실기 2026-09-28: AI 가 White-SM 으로 맞췄는데 스크립트에는 계속 '화이트 S' 를 줬다)
@@ -2170,6 +2222,7 @@ class BuyerAgent(AgentBase):
                 snap = self.script_json(
                     source.snapshot_script, {**args, 'size': chosen}, goal=goal, check=base_check
                 )
+                snap = self._finish_orders_wizard(snap, {**args, 'size': chosen})
         if snapshot_login_required(snap) and self._login_product_host(
             account, str(snap.get('product_url') or '')
         ):
@@ -3723,6 +3776,18 @@ class BuyerAgent(AgentBase):
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
         self._current_order_no = a.order.order_no
+        source0 = source_of(self.spec.name)
+        if source0.gift_unless_poison and self._shipping_fn is not None:
+            try:
+                ship0 = self._shipping_fn(a.order.wave_key, 'direct')
+            except (WaveError, AgentFailure):
+                ship0 = {}
+            if lotteon_undeliverable(str(ship0.get('address') or '')):
+                raise AgentFailure(
+                    'fail',
+                    '롯데온 판매자가 이 받는 곳으로 배송하지 못하는 지역(학습) — 건너뛴다',
+                    FailReason.UNKNOWN,
+                )
         # 주문마다 비교 기준을 비운다 — 앞 주문의 계정 원가(예: 89,000)가 남아 다음 주문 검사를 잘못 걸었다(실기 2026-09-25)
         self._expect_cost = {}
         self._issued = {}
@@ -4159,6 +4224,45 @@ class BuyerAgent(AgentBase):
         if self._gift_blocked_seen is None or order.order_no not in self._gift_blocked_seen:
             self._is_forwarder(order)
         return (self._gift_blocked_seen or {}).get(order.order_no, False)
+
+    def _finish_orders_wizard(
+        self, snap: dict[str, object], args: dict[str, object]
+    ) -> dict[str, object]:
+        """스냅샷이 직배 주문서 1단계(/orders/N)에서 멈췄으면 받는 곳을 고르고 계속해 결제 단계 값을 읽어 합친다.
+
+        기본배송지가 판매자 배송 불가 지역이면 '계속하기'가 넘어가지 않는다(실기 2026-10-07 아디다스 KA4340, 기본배송지 경주).
+        """
+        if snap.get('error') != WIZARD_ERROR:
+            return snap
+        wiz_args = {
+            k: args[k] for k in ('ship_name', 'ship_address', 'profile', 'account') if k in args
+        }
+        out = self.script_json(
+            'lotteon_wizard_ship',
+            wiz_args,
+            goal=(
+                '롯데온 직배 주문서 1단계에서 받는 곳(ship_name·ship_address)을 변경 목록에서 골라 계속하기로 결제 단계에 들어가 '
+                'methods·cost·selected·qty·coupons 를 돌려준다. 결제하기는 누르지 않는다.'
+            ),
+            check=lambda o: (
+                None
+                if o.get('error') == 'delivery-impossible'
+                or (o.get('cost') and o.get('methods') and not o.get('error'))
+                else f'결제 단계 값을 못 읽었다: {o.get("error") or o.get("note")}'
+            ),
+        )
+        if out.get('error') == 'delivery-impossible':
+            key = learn_undeliverable(str(args.get('ship_address') or ''))
+            # 다음부터는 주문서를 열기 전에 건너뛴다. 이번 주문은 짝 사이트(SSG 등)로 넘어간다
+            raise AgentFailure(
+                'fail',
+                f'롯데온 판매자가 이 받는 곳({key or "지역 미상"})으로 배송하지 못한다 — 선물·직배 모두 막힘',
+                FailReason.UNKNOWN,
+            )
+        merged = {**snap, **{k: v for k, v in out.items() if v not in (None, [], {}, '')}}
+        merged.pop('error', None)
+        self.note('배송지', '직배 주문서 1단계에서 받는 곳을 먼저 골라 결제 단계로 넘어갔다')
+        return merged
 
     def _fetch_shipping(self, a: Assignment, snap: dict[str, object]) -> dict[str, object]:
         """배송지 출처 — 삼바웨이브(공급자) > 스냅샷에 실려 온 값 > 전용 스크립트 순.

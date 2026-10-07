@@ -44,8 +44,11 @@ if(R.direct){
   const on=(await els(null,'[role=dialog]')).find(e=>e.id===rid||e.id===lid);
   const chk=(await els(null,'[role=dialog]')).filter(e=>e.role==='radio'&&e.value==='on');
   if(!chk.some(e=>e.id>=Math.min(rid,lid)-1&&e.id<=lid+1))return{...R,note:'직배 배송지 라디오가 안 켜졌다'};
+  // 결제 단계(/payments)의 배송지 창은 '확인' 을 눌러야 반영되고(실기 2026-10-07), 1단계(/orders/N)는 바로 반영돼 닫기만 있다
+  const ok=(await els(null,'[role=dialog]')).find(e=>e.role==='button'&&e.text==='확인');
   const cl=(await els(null,'[role=dialog]')).find(e=>e.role==='button'&&e.text==='닫기')||(await els('닫기')).find(e=>e.role==='button'&&e.text==='닫기');
-  if(cl){await page.click(cl.id);await sleep(2500);}
+  if(ok){await page.click(ok.id);await sleep(2500);}
+  else if(cl){await page.click(cl.id);await sleep(2500);}
   const dt=(await text()).replace(/\s/g,'');
   if(!dt.includes(road))return{...R,note:'직배 주문서에 고른 배송지가 안 보인다'};
   return{ok:true,name:name0,address:addr,address_detail:det||null,note:null,direct:true,picked_existing:true};

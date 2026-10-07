@@ -84,6 +84,7 @@ await wf('배송',8000);
 let t='';
 for(let i=0;i<12;i++){
 t=await tx('결제');
+if(i>=1&&args.ship_name&&/\/orderSheet\/[^?#]*\/orders\/\d/.test(await page.url()))return{...r,error:'orders-wizard',order_tab:(await tabs.list()).find(x=>/orderSheet/.test(x.url||''))?.id||null};
 if(/결제수단/.test(t)&&/총\s*\d+\s*건|총\s*결제\s*금액/.test(t))break;
 const cb=pe(await tx('계속하기')).find(x=>x.text==='계속하기');
 if(cb){await page.click(cb.id);await wf('결제수단',6000);}else await sleep(800);

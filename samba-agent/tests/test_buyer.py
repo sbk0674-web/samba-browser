@@ -2130,3 +2130,15 @@ def test_롯데온이_거절한_선물_불가_지역은_기억해_다음부터_�
     assert b.learn_gift_blocked(addr) == '문경시 동로면'  # 두 번 넣어도 한 줄
     assert len(b._learned_gift_blocked()) == 1
     assert b.gift_blocked_address('제주특별자치도 제주시 1')  # 기존 규칙도 그대로
+
+
+def test_롯데온_배송_불가_지역은_학습해_다음에_건너뛴다(tmp_path, monkeypatch):
+    """실기 2026-10-07 경북 문경시 동로면 — 받는 곳을 골라도 계속하기가 안 넘어간다(성남 주소로 바꾸면 넘어간다)."""
+    from samba_agent.agents import buyer as b
+
+    monkeypatch.setattr(b, 'UNDELIVERABLE_FILE', tmp_path / 'lotteon_undeliverable_regions.json')
+    addr = '경상북도 문경시 동로면 노은리 155-2 동로초등학교'
+    assert not b.lotteon_undeliverable(addr)
+    assert b.learn_undeliverable(addr) == '문경시 동로면'
+    assert b.lotteon_undeliverable('경북 문경시 동로면 노은2길 4(동로면, 동로초등학교)')
+    assert not b.lotteon_undeliverable('경기 성남시 수정구 성남대로 1254')

@@ -720,6 +720,16 @@
     ]
   },
   {
+    "name": "lotteon_wizard_ship",
+    "host": "lotteon.com",
+    "description": "롯데온 직배 주문서 1단계(/orders/N)에서 받는 곳을 먼저 골라 계속하기로 결제 단계에 들어가 견적 값을 읽는다",
+    "params": [
+      "ship_name",
+      "ship_address",
+      "profile"
+    ]
+  },
+  {
     "name": "musinsa_confirm_shipping",
     "host": "",
     "description": "배송지 팝업 폼 저장 → 배송지 선택 → 주문서 되읽기(무신사)",
