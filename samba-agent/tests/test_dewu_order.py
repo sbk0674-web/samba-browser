@@ -106,7 +106,7 @@ def test_검색부터_알리페이_결제와_주문번호까지():
     assert (420, 316) in phone.taps  # 쿠폰 받기
     assert paid == [round(564 * 1.03 * 202.16)]
     assert (res.order_no, res.paid_cny, res.item_cny) == ('110213474374883854', 580.92, 564)
-    assert res.cost_krw == round(580.92 * 202.16)
+    assert res.cost_krw == round(580.92 * 202.16 * 0.973)
 
 
 def test_상한을_넘으면_결제하지_않는다():
@@ -161,7 +161,7 @@ def test_성공하면_원가와_배송비_8500을_기록한다(monkeypatch):
     assert outcome == 'done'
     assert recorded['sourcing_order_number'] == '110' and recorded['shipping_fee'] == 8500
     assert recorded['sourcing_account_id'] == 'sa_DEWU'  # 주문계정이 있어야 배송대기중으로 넘어간다
-    assert recorded['cost'] == round(580.92 * 202.16)
+    assert recorded['cost'] == round(580.92 * 202.16 * 0.973)
 
 
 def test_판매처가_得物이_아니면_품절이어도_재고X_하지_않고_사람에게_넘긴다(monkeypatch):
@@ -255,8 +255,8 @@ def test_정산이_판매가_그대로면_크림_수수료를_빼고_마진을_�
     )
     handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 200.0)
     handle(None, SimpleNamespace(order_no='A1'))
-    # (92,000 × 0.92 − 8,500) / 200 / 1.03
-    assert round(seen['max_cny'], 1) == round((92000 * 0.92 - 8500) / 200 / 1.03, 1)
+    # (92,000 × 0.92 − 8,500) / (200 × 0.973) / 1.03
+    assert round(seen['max_cny'], 1) == round((92000 * 0.92 - 8500) / (200 * 0.973) / 1.03, 1)
 
 
 def test_상품_머리글이_暂时缺货면_확정_품절로_멈춘다():

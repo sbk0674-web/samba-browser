@@ -4,7 +4,7 @@
 得物 검색(품번) → 상품 → 立即购买 → EU 사이즈 칸 → '再领¥N' 쿠폰 → 하단 결제 → 알리페이 결제창('CVV를 입력하세요' =
 6자리 결제 비밀번호) → phone_approve_payment(provider='alipay') → '支付成功' → 완료 → 我·订单의 주문 상세 '订单编号'.
 
-원가 = 알리페이 청구 위안(상품 + 국제카드 수수료 3%) × CNY/KRW 환율(크림 엔진과 같은 frankfurter), 배송비 8,500원 고정.
+원가 = 알리페이 청구 위안(상품 + 국제카드 수수료 3%) × CNY/KRW 환율(크림 엔진과 같은 frankfurter) × 현대카드 청구할인 0.973, 배송비 8,500원 고정.
 판매처가 得物이 아니면(唯品会·淘宝 …) 사람에게 넘긴다 — 그 앱 흐름은 아직 없다.
 """
 
@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 DEWU = 'com.shizhuang.duapp'
 ALIPAY = 'com.eg.android.AlipayGphone'
 CN_SHIPPING_FEE = 8500
+# 알리페이 국제카드 = 현대카드(Mastercard 8503) — 원가 공식의 카드 청구할인 ×0.973 (사용자 지시, 전 소싱처 공통 [cost-formula-all-sources])
+HYUNDAI_BILLING_FACTOR = 0.973
 # 크림 판매 수수료 — 삼바 정산금(revenue)이 판매가와 같으면(수수료 미계산) 이 비율을 빼고 마진을 본다
 KREAM_FEE_RATE = 0.08
 FX_URL = 'https://api.frankfurter.dev/v1/latest?base=CNY&symbols=KRW'
@@ -50,7 +52,8 @@ class DewuResult:
 
     @property
     def cost_krw(self) -> int:
-        return round(self.paid_cny * self.rate)
+        # 원가 = 알리페이 최종 청구 위안 × 환율 × 카드 청구할인(현대 ×0.973)
+        return round(self.paid_cny * self.rate * HYUNDAI_BILLING_FACTOR)
 
 
 def cny_krw_rate() -> float:
@@ -482,8 +485,12 @@ def make_shihuo_handler(
             # 삼바 정산금이 판매가 그대로면 수수료가 안 빠진 값이다 — 크림 수수료(8%)를 빼고 본다
             # (실기 2026-10-06 뉴발란스 880: 92,000 그대로 보고 사서 실제 정산 84,640 < 원가 90,883 역마진)
             revenue = round(sale * (1 - KREAM_FEE_RATE))
-        # 마진 > 0: 청구 위안(상품 × 1.03) × 환율 + 배송비 8,500 < 정산금
-        max_cny = (revenue - CN_SHIPPING_FEE) / rate / 1.03 if revenue > 0 else 0
+        # 마진 > 0: 청구 위안(상품 × 1.03) × 환율 × 청구할인 0.973 + 배송비 8,500 < 정산금
+        max_cny = (
+            (revenue - CN_SHIPPING_FEE) / (rate * HYUNDAI_BILLING_FACTOR) / 1.03
+            if revenue > 0
+            else 0
+        )
         if max_cny <= 0:
             return 'needs_human', 'margin', '정산금을 몰라 마진을 볼 수 없다 — 결제하지 않음'
         serial = find_phone_serial(adb_path, want)
@@ -526,7 +533,7 @@ def make_shihuo_handler(
             fail = 'margin' if '마진' in str(e) else ('pay_interrupted' if e.paid else 'unknown')
             return 'needs_human', fail, str(e)
         note = (
-            f'得物 앱(임성희폰) 결제 ¥{res.paid_cny:g}(상품 ¥{res.item_cny:g}+알리페이 카드수수료) × {res.rate:g}'
+            f'得物 앱(임성희폰) 결제 ¥{res.paid_cny:g}(상품 ¥{res.item_cny:g}+알리페이 카드수수료) × {res.rate:g} × 현대카드 청구할인 {HYUNDAI_BILLING_FACTOR}'
             f' · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
         )
         # 주문계정(得物 계정)을 같이 넣어야 삼바 상태가 배송대기중으로 넘어간다(사용자 2026-10-01: 계정을 안 골라
