@@ -14,15 +14,12 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime, timedelta
 
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.failures import FailReason
 from samba_agent.queue.db import JobQueue
 from samba_agent.wave.client import WaveClient, WaveError, WaveOrder, flag_text
-
-if TYPE_CHECKING:
-    from datetime import datetime
 
 log = logging.getLogger(__name__)
 
@@ -150,6 +147,10 @@ class Intake:
                 continue
             # 작업은 삼바웨이브 행(id) 단위다 — 같은 상품주문번호라도 행(사이즈)이 다르면 따로 산다
             if order.wave_key in handled or self._already_queued(order):
+                # 앱이 죽어(bridge_down) 사러 가기도 전에 멈춘 건은 사람이 이어서 하기를 기다리지 않고 한 번 다시 넣는다
+                # (실기 2026-10-06 탑텐 청자켓: bridge_down 으로 멈춘 채 20시간+ 방치). 미이행 목록에 아직 있는 주문만 —
+                # 취소·기입된 주문은 목록에 없다
+                self._retry_bridge_down(order)
                 skipped_live += 1
                 continue
             if enqueued + unsupported >= self._max_new:
@@ -276,6 +277,25 @@ class Intake:
         막되 done 이면 막지 않는다(이미 기입한 다른 행 — 실기 20261005DFA7D9 230 done 뒤 210 이 안 들어갔다).
         """
         return self._queue.find(order.order_no, order.wave_id) is not None
+
+    def _retry_bridge_down(self, order: OrderRef) -> None:
+        """bridge_down 으로 사람에게 넘어간 작업을 5분 뒤 한 번 다시 넣는다(결제 단계 진입 전 끊김만 — 결제 중 끊김은 pay_interrupted)."""
+        job = self._queue.find(order.order_no, order.wave_id)
+        if job is None or job.state != 'needs_human' or (job.error or '') != 'bridge_down':
+            return
+        if job.attempts >= 1:
+            return
+        try:
+            idle = datetime.now(UTC) - datetime.fromisoformat(job.updated_at)
+        except ValueError:
+            return
+        if idle < timedelta(minutes=5):
+            return
+        try:
+            self._queue.retry(job.id)
+        except ValueError:
+            return
+        log.info('bridge_down 으로 멈춘 작업을 다시 넣었다: %s', order.order_no)
 
     def _supported(self, order: OrderRef) -> bool:
         """이 소싱처를 맡을 구매 에이전트가 있는가.

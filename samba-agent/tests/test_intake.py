@@ -422,3 +422,29 @@ def test_소싱처_미등록_주문_연결은_행_id_로_부른다(tmp_path):
     Intake(wave, q, reg, slack.post_new, slack.post_line, days=7).run_once()
     assert wave.linked == [('ord_G1', '3347853')]
     assert q.get('ord_G1').order_no == 'G1'
+
+
+def test_bridge_down_으로_멈춘_작업은_5분_뒤_한_번_다시_넣는다(tmp_path):
+    """실기 2026-10-06 탑텐 청자켓 — 앱이 죽어 bridge_down 으로 멈춘 채 20시간+ 방치됐다."""
+    from datetime import UTC, datetime, timedelta
+
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    slack = _Slack()
+    order = wave_order('T1', source='MUSINSA', product_name='탑텐 청자켓', product_option='95')
+    wave = _FakeWave([order])
+    intake = Intake(wave, q, reg, slack.post_new, slack.post_line, days=7)
+    intake.run_once()
+    job = q.get('T1')
+    q.finish(job.id, 'needs_human', error='bridge_down')
+    intake.run_once()  # 방금 멈췄다 — 5분 안에는 두지 않는다
+    assert q.get('T1').state == 'needs_human'
+    old = (datetime.now(UTC) - timedelta(minutes=6)).isoformat(timespec='seconds')
+    q._db.execute('UPDATE jobs SET updated_at=? WHERE id=?', (old, job.id))
+    intake.run_once()
+    again = q.get('T1')
+    assert again.state == 'queued' and again.attempts == 1
+    q.finish(job.id, 'needs_human', error='bridge_down')
+    q._db.execute('UPDATE jobs SET updated_at=? WHERE id=?', (old, job.id))
+    intake.run_once()  # 두 번째는 자동으로 하지 않는다
+    assert q.get('T1').state == 'needs_human'
