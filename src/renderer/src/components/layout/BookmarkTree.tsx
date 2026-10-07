@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type React from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronRight, Folder, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderPlus, X } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useBookmarkStore } from '@renderer/stores/bookmarkStore'
 import { useBrowserStore } from '@renderer/stores/browserStore'
@@ -67,6 +67,8 @@ type DropSpot = 'before' | 'into' | null
 type MenuTarget =
   | { kind: 'link'; link: BookmarkLinkDto; parentId: number | null }
   | { kind: 'folder'; folder: BookmarkFolderDto }
+  // 행이 아닌 빈 자리에서 우클릭 — 최상위(북마크바가 있으면 그 안)에 새 폴더만 만든다
+  | { kind: 'root'; parentId: number | null }
 
 interface MenuState {
   x: number
@@ -384,72 +386,80 @@ function ContextMenu({
     }
   }, [onClose])
 
+  const target = menu.target
   const items: { label: string; danger?: boolean; run: () => void }[] =
-    menu.target.kind === 'link'
+    target.kind === 'root'
       ? [
           {
-            label: t('bookmark.menu.openNewTab'),
-            run: () =>
-              void window.samba.tabs.create({
-                url: menu.target.kind === 'link' ? menu.target.link.url : ''
-              })
-          },
-          {
-            label: t('bookmark.menu.edit'),
-            run: () => {
-              if (menu.target.kind !== 'link') return
-              onEdit({
-                kind: 'link',
-                id: menu.target.link.id,
-                title: menu.target.link.title,
-                folderId: menu.target.parentId
-              })
-            }
-          },
-          {
-            label: t('bookmark.menu.delete'),
-            danger: true,
-            run: () => {
-              if (menu.target.kind === 'link') void remove(menu.target.link.id)
-            }
+            label: t('bookmark.menu.newFolder'),
+            run: () => onEdit({ kind: 'newFolder', parentId: target.parentId, name: '' })
           }
         ]
-      : [
-          // 북마크바 폴더는 이름을 바꾸거나 지우지 않는다(크롬과 같다)
-          ...(menu.target.folder.isToolbar
-            ? []
-            : [
-                {
-                  label: t('bookmark.menu.rename'),
-                  run: () => {
-                    if (menu.target.kind !== 'folder') return
-                    onEdit({
-                      kind: 'folder',
-                      id: menu.target.folder.id,
-                      name: menu.target.folder.name
-                    })
-                  }
-                }
-              ]),
-          {
-            label: t('bookmark.menu.newFolder'),
-            run: () => {
-              if (menu.target.kind !== 'folder') return
-              onEdit({ kind: 'newFolder', parentId: menu.target.folder.id, name: '' })
+      : menu.target.kind === 'link'
+        ? [
+            {
+              label: t('bookmark.menu.openNewTab'),
+              run: () =>
+                void window.samba.tabs.create({
+                  url: menu.target.kind === 'link' ? menu.target.link.url : ''
+                })
+            },
+            {
+              label: t('bookmark.menu.edit'),
+              run: () => {
+                if (menu.target.kind !== 'link') return
+                onEdit({
+                  kind: 'link',
+                  id: menu.target.link.id,
+                  title: menu.target.link.title,
+                  folderId: menu.target.parentId
+                })
+              }
+            },
+            {
+              label: t('bookmark.menu.delete'),
+              danger: true,
+              run: () => {
+                if (menu.target.kind === 'link') void remove(menu.target.link.id)
+              }
             }
-          },
-          ...(menu.target.folder.isToolbar
-            ? []
-            : [
-                {
-                  label: t('bookmark.menu.delete'),
-                  danger: true,
-                  run: () => {
-                    if (menu.target.kind === 'folder') void removeFolder(menu.target.folder.id)
+          ]
+        : [
+            // 북마크바 폴더는 이름을 바꾸거나 지우지 않는다(크롬과 같다)
+            ...(menu.target.folder.isToolbar
+              ? []
+              : [
+                  {
+                    label: t('bookmark.menu.rename'),
+                    run: () => {
+                      if (menu.target.kind !== 'folder') return
+                      onEdit({
+                        kind: 'folder',
+                        id: menu.target.folder.id,
+                        name: menu.target.folder.name
+                      })
+                    }
                   }
-                }
-              ])
-        ]
+                ]),
+            {
+              label: t('bookmark.menu.newFolder'),
+              run: () => {
+                if (menu.target.kind !== 'folder') return
+                onEdit({ kind: 'newFolder', parentId: menu.target.folder.id, name: '' })
+              }
+            },
+            ...(menu.target.folder.isToolbar
+              ? []
+              : [
+                  {
+                    label: t('bookmark.menu.delete'),
+                    danger: true,
+                    run: () => {
+                      if (menu.target.kind === 'folder') void removeFolder(menu.target.folder.id)
+                    }
+                  }
+                ])
+          ]
 
   const x = Math.min(menu.x, window.innerWidth - MENU_WIDTH - 8)
   const y = Math.min(menu.y, window.innerHeight - items.length * MENU_ITEM_HEIGHT - 16)
@@ -637,7 +647,11 @@ export function BookmarkTree(): React.JSX.Element {
       <div className={cn('flex flex-col', open && 'min-h-0 flex-1')}>
         <SectionHeader sectionKey="bookmarks" label={t('bookmark.title')} />
         {open && (
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div
+            className="min-h-0 flex-1 overflow-auto"
+            // 행 바깥 빈 자리 우클릭 → 새 폴더(행 안의 우클릭은 행이 먼저 받아 전파를 멈춘다)
+            onContextMenu={(e) => openMenu(e, { kind: 'root', parentId: toolbar?.id ?? null })}
+          >
             {!loading && isEmpty && (
               <div className="px-2.5 py-2 text-[12px] text-[var(--text3)]">
                 {t('bookmark.emptyAll')}
@@ -673,6 +687,18 @@ export function BookmarkTree(): React.JSX.Element {
             {(tree?.links ?? []).map((l) => (
               <LinkRow key={l.id} link={l} depth={0} parentId={null} siblingIds={rootLinkIds} />
             ))}
+            {!loading && (
+              <button
+                type="button"
+                onClick={() =>
+                  setEdit({ kind: 'newFolder', parentId: toolbar?.id ?? null, name: '' })
+                }
+                className="flex h-7 w-full items-center gap-1.5 px-2.5 text-[12px] text-[var(--text3)] hover:bg-black/5 hover:text-[var(--text)]"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                {t('bookmark.menu.newFolder')}
+              </button>
+            )}
           </div>
         )}
         {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} onEdit={setEdit} />}

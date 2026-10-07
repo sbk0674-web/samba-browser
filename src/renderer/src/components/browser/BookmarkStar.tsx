@@ -62,6 +62,8 @@ export function BookmarkStar({
   const [justAdded, setJustAdded] = useState(false)
   const [name, setName] = useState('')
   const [folderId, setFolderId] = useState<number | null>(null)
+  // 팝오버 안 "새 폴더" — null 이면 닫힘, 문자열이면 입력 중인 이름(고른 폴더 아래에 만든다)
+  const [newFolderName, setNewFolderName] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const setView = useUiStore((s) => s.setView)
   const reloadTree = useBookmarkStore((s) => s.load)
@@ -117,7 +119,25 @@ export function BookmarkStar({
     setName(e.title)
     setFolderId(e.folderId)
     setJustAdded(added)
+    setNewFolderName(null)
     setOpen(true)
+  }
+
+  // 새 폴더를 지금 고른 폴더 아래에 만들고 바로 그 폴더를 고른다(크롬의 '새 폴더'와 같다)
+  const createFolder = async (): Promise<void> => {
+    const folderName = (newFolderName ?? '').trim()
+    if (!folderName || busy) return
+    setBusy(true)
+    try {
+      const r = await window.samba.bookmarks.createFolder(folderId, folderName)
+      if (!r.ok) return
+      void reloadTree()
+      await refresh()
+      setFolderId(r.data)
+      setNewFolderName(null)
+    } finally {
+      setBusy(false)
+    }
   }
 
   // 별 클릭: 없으면 북마크바에 바로 넣고 편집 팝오버, 있으면 편집 팝오버
@@ -234,6 +254,51 @@ export function BookmarkStar({
               ))}
             </select>
           </label>
+          {newFolderName === null ? (
+            <button
+              type="button"
+              onClick={() => setNewFolderName('')}
+              className="self-start text-[12.5px] text-[var(--accent,#2563eb)] hover:underline"
+            >
+              {t('bookmark.popover.newFolder')}
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <Input
+                autoFocus
+                value={newFolderName}
+                placeholder={t('bookmark.popover.newFolderName')}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void createFolder()
+                  }
+                  if (e.key === 'Escape') {
+                    e.stopPropagation()
+                    setNewFolderName(null)
+                  }
+                }}
+                className="h-8 flex-1 rounded-[9px] text-[12.5px]"
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void createFolder()}
+                disabled={busy || !newFolderName.trim()}
+              >
+                {t('bookmark.popover.newFolderCreate')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setNewFolderName(null)}
+              >
+                {t('bookmark.popover.newFolderCancel')}
+              </Button>
+            </div>
+          )}
         </div>
         <div className="mt-4 flex items-center gap-2">
           <button

@@ -484,7 +484,11 @@
       "otherFolder": "기타 북마크",
       "more": "더 보기",
       "done": "완료",
-      "delete": "삭제"
+      "delete": "삭제",
+      "newFolder": "새 폴더",
+      "newFolderName": "새 폴더 이름",
+      "newFolderCreate": "만들기",
+      "newFolderCancel": "취소"
     }
   },
   "bookmarksPage": {

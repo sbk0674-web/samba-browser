@@ -484,7 +484,11 @@
       "otherFolder": "Other bookmarks",
       "more": "More",
       "done": "Done",
-      "delete": "Remove"
+      "delete": "Remove",
+      "newFolder": "New folder",
+      "newFolderName": "New folder name",
+      "newFolderCreate": "Create",
+      "newFolderCancel": "Cancel"
     }
   },
   "bookmarksPage": {
