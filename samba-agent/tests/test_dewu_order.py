@@ -164,6 +164,34 @@ def test_성공하면_원가와_배송비_8500을_기록한다(monkeypatch):
     assert recorded['cost'] == round(580.92 * 202.16)
 
 
+def test_판매처가_得物이_아니면_품절이어도_재고X_하지_않고_사람에게_넘긴다(monkeypatch):
+    flagged: list = []
+    wave = SimpleNamespace(
+        get_order=lambda no: SimpleNamespace(
+            source_seller='淘宝',
+            source_price_cny=240.0,
+            registered_option='36',
+            source_product_code='1203A547-020',
+            revenue=100000,
+        ),
+        only_sourcing_account_id=lambda site: None,
+    )
+
+    def soldout(*a, **k):
+        raise dewu_order.DewuOrderError('暂时缺货', out_of_stock=True)
+
+    monkeypatch.setattr(dewu_order, 'buy_on_dewu', soldout)
+    monkeypatch.setattr(
+        'samba_agent.wave.flags.FlagMarker',
+        lambda w: SimpleNamespace(mark=lambda *a, **k: flagged.append(a)),
+    )
+    monkeypatch.setattr('samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'S1')
+    handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 202.16)
+    outcome, _fail, line = handle(None, SimpleNamespace(order_no='A1'))
+    assert outcome == 'needs_human' and '淘宝' in line
+    assert flagged == []
+
+
 def test_구매_확인_화면의_결제수단을_읽는다():
     from samba_agent.ops.dewu_order import pay_method_of
     from samba_agent.ops.ssg_gift_accept import Node

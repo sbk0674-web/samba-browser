@@ -496,6 +496,17 @@ def make_shihuo_handler(
                     Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate
                 )
         except DewuOrderError as e:
+            seller = str(getattr(detail, 'source_seller', '') or '').strip()
+            if e.out_of_stock and not e.paid and seller and '得物' not in seller:
+                # 이 주문의 실제 판매처는 得物이 아니다(淘宝·唯品会·天猫 등) — 得物 품절은 재고X 근거가 못 된다. 사람이 그 판매처에서
+                # 사거나 확인하게 넘긴다(크림 중국 세션 지적 2026-10-07: 淘宝 가게 ¥240 인데 得物만 보고 버릴 뻔)
+                price = float(getattr(detail, 'source_price_cny', 0) or 0)
+                return (
+                    'needs_human',
+                    'unknown',
+                    f'판매처가 {seller}{f" ¥{price:g}" if price else ""} 이다 — 得物 품절({e})은 근거가 못 돼 재고X 로 처리하지 않았다. '
+                    '그 판매처에서 사람이 구매·확인',
+                )
             if e.out_of_stock and not e.paid:
                 # 得物 화면에서 확인한 품절 — 재고X·취소중 으로 마감하고 근거를 메모에 남긴다(사용자 2026-10-07:
                 # 리복 재고가 없는 걸 네 번 unknown 으로 돌렸다)
