@@ -2231,6 +2231,14 @@ class BuyerAgent(AgentBase):
             if snap.get('product_tab'):
                 self._close_product_tabs(account, str(snap.get('product_url') or ''))
             snap = self.script_json(source.snapshot_script, args, goal=goal, check=base_check)
+        elif snapshot_login_required(snap) and 'siteNo=6009' in str(snap.get('product_url') or ''):
+            # 신세계백화점 상품은 같은 호스트(www.ssg.com)여도 siteNo=6009 로 열면 로그인이 풀려 있을 수 있다 — 홈에서 다시
+            # 로그인하고 한 번 더 연다(실기 2026-10-07 다이나핏 M: login_required 로 끝남, L 은 통과)
+            self.note('로그인', f'{account}: 신세계백화점 상품이 로그인을 요구해 다시 로그인한다')
+            if snap.get('product_tab'):
+                self._close_product_tabs(account, str(snap.get('product_url') or ''))
+            self._login_as(account)
+            snap = self.script_json(source.snapshot_script, args, goal=goal, check=base_check)
         if snap.get('product_tab'):
             # 주문서가 안 열리면 스크립트는 사이트 알림(구매 한도 등)이 결과에 붙도록 상품 탭을 남긴다 — 여기서 닫는다
             self._close_product_tabs(account, str(snap.get('product_url') or ''))
