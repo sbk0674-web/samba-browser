@@ -2113,3 +2113,20 @@ def test_한_자리_사이즈는_세_자리_코드_선택지와_맞춘다():
     # 두 자리 이상 사이즈(95·260)나 소수(7.5)는 이 규칙 밖
     assert single_digit_code_options(opts, '블랙 95') == []
     assert single_digit_code_options(opts, '7.5') == []
+
+
+def test_롯데온이_거절한_선물_불가_지역은_기억해_다음부터_직배로_본다(tmp_path, monkeypatch):
+    """실기 2026-10-07 경북 문경시 동로면 — 제주·도서가 아닌 산간 읍면도 '선물 보내기 불가'로 거절된다."""
+    from samba_agent.agents import buyer as b
+
+    monkeypatch.setattr(b, 'GIFT_BLOCKED_FILE', tmp_path / 'gift_blocked_regions.json')
+    addr = '경상북도 문경시 동로면 노은리 155-2 동로초등학교 행정실'
+    assert not b.gift_blocked_address(addr)
+    assert b.region_key(addr) == '문경시 동로면'
+    assert b.learn_gift_blocked(addr) == '문경시 동로면'
+    assert b.gift_blocked_address(addr)
+    assert b.gift_blocked_address('경북 문경시 동로면 노은2길 4')  # 표기가 달라도 같은 지역
+    assert not b.gift_blocked_address('경북 문경시 문경읍 새재로 1')  # 다른 읍면은 그대로
+    assert b.learn_gift_blocked(addr) == '문경시 동로면'  # 두 번 넣어도 한 줄
+    assert len(b._learned_gift_blocked()) == 1
+    assert b.gift_blocked_address('제주특별자치도 제주시 1')  # 기존 규칙도 그대로

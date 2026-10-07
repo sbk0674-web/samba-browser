@@ -11,6 +11,7 @@ import os
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import urlparse
 
 from samba_agent import local_aliases
@@ -1319,9 +1320,52 @@ SSG_CART_URL = 'https://pay.ssg.com/cart/dmsShpp.ssg'
 _GIFT_BLOCKED_RE = re.compile(r'^\s*(제주|울릉|옹진군)|울릉군|옹진군|신안군|백령|연평')
 
 
+# 롯데온이 '선물 보내기 불가한 지역입니다' 라고 거절한 곳 — 실제로 눌러 보고 알게 된 지역을 파일에 쌓는다
+# (실기 2026-10-07 경북 문경시 동로면: 제주·도서가 아닌 산간 읍면도 막힌다. 막힌 주소를 선물 주문서에서
+# 신규 입력으로 되풀이해 같은 이름의 배송지만 늘었다)
+GIFT_BLOCKED_FILE = Path(__file__).resolve().parents[3] / 'gift_blocked_regions.json'
+_REGION_KEY = re.compile(r'([가-힣]+(?:시|군)\s+[가-힣]+(?:읍|면))')
+_REGION_CITY = re.compile(r'([가-힣]+(?:시|군|구))')
+
+
+def _learned_gift_blocked() -> list[str]:
+    try:
+        data = json.loads(GIFT_BLOCKED_FILE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    return [str(x) for x in data if isinstance(x, str) and x]
+
+
+def region_key(address: str) -> str | None:
+    """주소에서 선물 불가를 기억할 지역 키('문경시 동로면'). 읍면이 없으면 시군구까지. 못 뽑으면 None."""
+    text = re.sub(r'\s+', ' ', address or '').strip()
+    found = _REGION_KEY.search(text) or _REGION_CITY.search(text)
+    return re.sub(r'\s+', ' ', found.group(1)) if found else None
+
+
+def learn_gift_blocked(address: str) -> str | None:
+    """선물 불가로 거절된 주소의 지역을 파일에 남긴다. 남긴 키(이미 있으면 그대로)를 돌려준다."""
+    key = region_key(address)
+    if not key:
+        return None
+    known = _learned_gift_blocked()
+    if key not in known:
+        known.append(key)
+        try:
+            GIFT_BLOCKED_FILE.write_text(
+                json.dumps(known, ensure_ascii=False, indent=2), encoding='utf-8'
+            )
+        except OSError:
+            return None
+    return key
+
+
 def gift_blocked_address(address: str) -> bool:
-    """선물하기로 보낼 수 없는 주소(제주·주요 도서산간)인가."""
-    return bool(_GIFT_BLOCKED_RE.search(address or ''))
+    """선물하기로 보낼 수 없는 주소(제주·주요 도서산간 + 롯데온이 거절해 학습한 지역)인가."""
+    if _GIFT_BLOCKED_RE.search(address or ''):
+        return True
+    squeezed = re.sub(r'\s+', '', address or '')
+    return any(k.replace(' ', '') in squeezed for k in _learned_gift_blocked())
 
 
 # 계정 견적 건너뜀 사유 중 확정 품절 표시(_quote 가 붙인다)
@@ -1541,6 +1585,10 @@ DRY_RUN_BLOCKED_TOOLS = frozenset(
 )
 
 
+class GiftBlockedRegion(AgentFailure):
+    """롯데온이 이 받는 곳을 '선물 보내기 불가'로 거절했다 — 지역을 기억했으니 직배 주문서로 한 번 더 산다."""
+
+
 class BuyerAgent(AgentBase):
     """등록부의 buyer.* 한 행에 대응한다."""
 
@@ -1567,7 +1615,16 @@ class BuyerAgent(AgentBase):
         self._quote_errors: list[AgentFailure] = []
         self._option_ai: dict[tuple[str, tuple[str, ...]], list[str]] = {}
         self.reset_repairs()
-        return run_agent(lambda: self._buy(assignment), lambda: self.evidence)
+
+        def attempt() -> AgentResult:
+            try:
+                return self._buy(assignment)
+            except GiftBlockedRegion as e:
+                # 선물 주문서로는 못 보낸다 — 방금 기억한 지역이라 이번엔 직배 주문서로 열린다
+                self.note('배송 종류', mask_text(f'{e.reason} — 직배 주문서로 다시 연다'))
+                return self._buy(assignment)
+
+        return run_agent(attempt, lambda: self.evidence)
 
     def tool(self, name: str, /, **args: object) -> str:
         """dry_run 이면 부수효과 도구는 허용 목록에 있어도 아예 부르지 않는다(불변조건)."""
@@ -3665,6 +3722,7 @@ class BuyerAgent(AgentBase):
 
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
+        self._current_order_no = a.order.order_no
         # 주문마다 비교 기준을 비운다 — 앞 주문의 계정 원가(예: 89,000)가 남아 다음 주문 검사를 잘못 걸었다(실기 2026-09-25)
         self._expect_cost = {}
         self._issued = {}
@@ -4310,6 +4368,19 @@ class BuyerAgent(AgentBase):
                     '배송지', mask_text(f'기존 항목 선택 불가({e.reason[:60]}) — 신규 입력으로')
                 )
                 return False
+        if out.get('gift_blocked') or '선물 보내기 불가' in str(out.get('note') or ''):
+            # 새 배송지를 또 만들지 않는다 — 같은 이름의 배송지가 시도마다 하나씩 늘었다(사용자 2026-10-07)
+            key = learn_gift_blocked(str(shipping.get('address') or ''))
+            order_no = getattr(self, '_current_order_no', '')
+            if self._gift_blocked_seen is None:
+                self._gift_blocked_seen = {}
+            if order_no:
+                self._gift_blocked_seen[order_no] = True
+            raise GiftBlockedRegion(
+                'needs_human',
+                f'롯데온이 선물 보내기 불가 지역으로 거절({key or "지역 미상"})',
+                FailReason.UNKNOWN,
+            )
         if not out.get('ok') or not shipping_matches(shipping, out):
             self.note(
                 '배송지',
