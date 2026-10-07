@@ -399,6 +399,18 @@ def buy_on_dewu(
                 again = find_text(phone.nodes(), '立即支付')
                 if again is not None:
                     phone.tap(again.x, again.y)
+            # 지난 시도가 남긴 같은 사이즈의 미결제 주문이 있으면 그 주문을 去支付 로 결제한다(새 주문을 또 만들지 않는다)
+            if phone.top_package() == DEWU:
+                waiting = phone.nodes()
+                if has_text(waiting, '未支付的订单'):
+                    if not has_text(waiting, eu_size):
+                        raise DewuOrderError(
+                            f'得物에 다른 사이즈의 미결제 주문이 남아 있다 — 사람이 취소해야 한다(EU {eu_size} 아님)'
+                        )
+                    go_pay = find_text(waiting, '去支付')
+                    if go_pay is not None:
+                        phone.tap(go_pay.x, go_pay.y)
+                        sleep(2)
         if phone.top_package() != ALIPAY:
             raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
     paid_hint = round(price * 1.03 * rate)
