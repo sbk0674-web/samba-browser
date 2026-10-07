@@ -106,6 +106,8 @@ class Intake:
         # 소싱처를 추정도 못 한 주문 — 샵마인·EMP 의 판매자상품코드를 읽어 달라고 넘긴다(주문번호, 판매처)
         self._on_unlinked = on_unlinked
         self._lookup_asked: set[str] = set()
+        # 마켓 취소로 이미 취소중 정리를 끝낸 주문 행 id
+        self._cancel_settled: set[str] = set()
         # 슬랙 `수집 중지` 가 세우는 깃발. 세워져 있으면 run_once 는 아무것도 하지 않는다
         self.paused = False
 
@@ -125,6 +127,7 @@ class Intake:
             log.warning('자동 수집 실패 — 다음 주기에 다시 해본다: %s', e)
             return IntakeReport()
 
+        self._settle_market_cancelled()
         seen = enqueued = skipped_live = unsupported = 0
         handled: set[str] = set()
         for wave_order in sorted(orders, key=_paid_key):
@@ -277,6 +280,41 @@ class Intake:
         막되 done 이면 막지 않는다(이미 기입한 다른 행 — 실기 20261005DFA7D9 230 done 뒤 210 이 안 들어갔다).
         """
         return self._queue.find(order.order_no, order.wave_id) is not None
+
+    def _settle_market_cancelled(self) -> None:
+        """마켓이 이미 취소로 돌린 미이행 주문을 취소중으로 넘겨 정리한다(삼바웨이브가 마켓 취소완료와 맞춰 마감한다).
+
+        /pending-orders 는 이런 주문을 일부러 빼서 주문접수로 영영 남는다(실기 2026-10-06 탑텐 청자켓 20시간+).
+        소싱처에서 산 게 없는 주문(목록이 소싱번호 없는 것만 준다)이고, 하네스가 지금 그 주문을 처리 중이면 건너뛴다.
+        """
+        fetch = getattr(self._wave, 'market_cancelled_pending', None)
+        if fetch is None:
+            return
+        try:
+            items = fetch(self._days)
+        except WaveError as e:
+            log.info('마켓 취소 주문 조회 실패 — 다음 주기에 다시: %s', e)
+            return
+        for item in items:
+            key = item['id']
+            if key in self._cancel_settled:
+                continue
+            job = self._queue.find(item['order_number'], key)
+            if job is not None and job.state in ('running', 'queued'):
+                continue
+            try:
+                changed = self._wave.set_cancel_requested(
+                    key,
+                    f'마켓 배송상태 {item["shipping_status"] or "취소"} — 미이행(소싱처 구매 없음) 상태로 남아 취소중으로 정리',
+                )
+            except WaveError as e:
+                log.info('마켓 취소 주문 정리 실패 %s: %s', item['order_number'], e)
+                continue
+            self._cancel_settled.add(key)
+            if changed:
+                line = f'{item["order_number"]} 마켓 {item["shipping_status"] or "취소"} — 미이행 주문을 취소중으로 정리'
+                log.info(line)
+                self._post_new(line)
 
     def _retry_bridge_down(self, order: OrderRef) -> None:
         """bridge_down 으로 사람에게 넘어간 작업을 5분 뒤 한 번 다시 넣는다(결제 단계 진입 전 끊김만 — 결제 중 끊김은 pay_interrupted)."""

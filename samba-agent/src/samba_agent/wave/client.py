@@ -340,6 +340,28 @@ class WaveClient:
         items = body.get('items') if isinstance(body, dict) else None
         return [WaveOrder.model_validate(i) for i in items or []]
 
+    def market_cancelled_pending(self, days: int = 14) -> list[dict[str, str]]:
+        """마켓이 이미 취소로 돌린 미이행(주문접수·소싱번호 없음) 주문 — /pending-orders 가 일부러 빼는 것들.
+
+        삼바웨이브가 아직 이 경로를 모르면(404) 빈 목록이다.
+        """
+        try:
+            body = self._request('GET', '/market-cancelled-pending', params={'days': days})
+        except WaveError as e:
+            if e.status == 404:
+                return []
+            raise
+        items = body.get('items') if isinstance(body, dict) else None
+        return [
+            {
+                'id': str(i.get('id') or ''),
+                'order_number': str(i.get('order_number') or ''),
+                'shipping_status': str(i.get('shipping_status') or ''),
+            }
+            for i in (items or [])
+            if isinstance(i, dict) and i.get('id')
+        ]
+
     def sourcing_numbers(self, days: int = 14) -> set[str]:
         """최근 주문에 적힌 소싱주문번호 전부 — 교차 검증이 소싱처 주문 내역과 견준다(삼바에 없는 소싱 주문 찾기)."""
         body = self._request('GET', '/sourcing-numbers', params={'days': str(days)})

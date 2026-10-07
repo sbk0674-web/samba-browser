@@ -448,3 +448,37 @@ def test_bridge_down_으로_멈춘_작업은_5분_뒤_한_번_다시_넣는다(t
     q._db.execute('UPDATE jobs SET updated_at=? WHERE id=?', (old, job.id))
     intake.run_once()  # 두 번째는 자동으로 하지 않는다
     assert q.get('T1').state == 'needs_human'
+
+
+class _CancelWave(_FakeWave):
+    """마켓 취소 정리까지 흉내 낸다."""
+
+    def __init__(self, orders, cancelled) -> None:
+        super().__init__(orders)
+        self.cancelled = cancelled
+        self.set_calls: list[tuple[str, str]] = []
+
+    def market_cancelled_pending(self, days: int = 14):
+        return list(self.cancelled)
+
+    def set_cancel_requested(self, order_no: str, reason: str, flag=None) -> bool:
+        self.set_calls.append((order_no, reason))
+        return True
+
+
+def test_마켓이_취소로_돌린_미이행_주문은_취소중으로_정리한다(tmp_path):
+    """실기 2026-10-06 탑텐 청자켓 — 마켓 취소완료인데 주문접수로 20시간+ 방치됐다."""
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    slack = _Slack()
+    wave = _CancelWave(
+        [],
+        [{'id': 'ord_T1', 'order_number': '3475968284 2906047682', 'shipping_status': '취소완료'}],
+    )
+    intake = Intake(wave, q, reg, slack.post_new, slack.post_line, days=7)
+    intake.run_once()
+    assert [k for k, _ in wave.set_calls] == ['ord_T1']
+    assert '취소완료' in wave.set_calls[0][1]
+    assert any('취소중으로 정리' in t for t in slack.tops)
+    intake.run_once()  # 한 번 정리한 주문은 다시 건드리지 않는다
+    assert len(wave.set_calls) == 1
