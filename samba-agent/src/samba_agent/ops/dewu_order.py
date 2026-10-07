@@ -34,9 +34,11 @@ _ORDER_NO = re.compile(r'^\d{15,22}$')
 class DewuOrderError(Exception):
     """사람에게 넘길 사유(개인정보 없음). paid=True 면 결제는 끝났다(재결제 금지)."""
 
-    def __init__(self, reason: str, paid: bool = False) -> None:
+    def __init__(self, reason: str, paid: bool = False, out_of_stock: bool = False) -> None:
         super().__init__(reason)
         self.paid = paid
+        # 得物 화면에서 품절을 직접 확인했다 — 재고X·취소중 으로 마감해도 되는 사유
+        self.out_of_stock = out_of_stock
 
 
 @dataclass
@@ -253,7 +255,14 @@ def buy_on_dewu(
         raise DewuOrderError('상품 화면에서 立即购买 를 못 찾았다')
     phone.tap(buy.x, buy.y)
     # 3) 사이즈 칸 — 글자가 EU 값과 똑같은 칸, 가격이 '¥--' 면 판매 없음
-    nodes = wait_for(lambda ns: size_cell(ns, eu_size) is not None, 10)
+    nodes = wait_for(lambda ns: size_cell(ns, eu_size) is not None or has_text(ns, '暂时缺货'), 10)
+    if has_text(nodes, '暂时缺货'):
+        # 상품 전체가 품절이면 사이즈 칸은 모두 '¥--' 이고 가격 글자가 칸과 따로 잡히지 않아 '가격을 못 읽었다'(unknown)로
+        # 끝났다(실기 2026-10-07 리복 클럽씨 85 EU 43: 네 번 같은 사유) — 화면 머리글 '暂时缺货' 로 품절을 확정한다
+        raise DewuOrderError(
+            f'得物 확정 품절 — 상품 머리글 暂时缺货(EU {eu_size} 포함 전 사이즈 ¥--)',
+            out_of_stock=True,
+        )
     cell = size_cell(nodes, eu_size)
     if cell is None:
         raise DewuOrderError(f'得物 사이즈 목록에 EU {eu_size} 가 없다')
@@ -268,7 +277,7 @@ def buy_on_dewu(
         None,
     )
     if below is not None and '--' in below.text:
-        raise DewuOrderError(f'得物 EU {eu_size} 판매 없음(¥--)')
+        raise DewuOrderError(f'得物 확정 품절 — EU {eu_size} 판매 없음(¥--)', out_of_stock=True)
     phone.tap(cell.x, cell.y)
     sleep(2)
     nodes = phone.nodes()
@@ -487,6 +496,22 @@ def make_shihuo_handler(
                     Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate
                 )
         except DewuOrderError as e:
+            if e.out_of_stock and not e.paid:
+                # 得物 화면에서 확인한 품절 — 재고X·취소중 으로 마감하고 근거를 메모에 남긴다(사용자 2026-10-07:
+                # 리복 재고가 없는 걸 네 번 unknown 으로 돌렸다)
+                flagged = ''
+                try:
+                    from samba_agent.wave.flags import FlagMarker
+
+                    flagged = (
+                        FlagMarker(wave).mark(  # type: ignore[arg-type]
+                            wave_key, 'out_of_stock', f'{e} (임성희폰 得物 앱 직접 확인)'
+                        )
+                        or ''
+                    )
+                except Exception as exc:  # noqa: BLE001 — 표시 실패가 보고를 막으면 안 된다
+                    flagged = f'재고X 표시 실패: {type(exc).__name__}'
+                return 'needs_human', 'out_of_stock', f'{e} · {flagged}'.strip(' ·')
             fail = 'margin' if '마진' in str(e) else ('pay_interrupted' if e.paid else 'unknown')
             return 'needs_human', fail, str(e)
         note = (

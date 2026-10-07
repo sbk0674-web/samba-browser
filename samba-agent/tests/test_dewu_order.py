@@ -191,7 +191,12 @@ def test_size_cell_의류는_설명이_붙고_2XL은_XXL로_표기된다():
     def node(t, x=100, y=100):
         return Node(text=t, desc='', rid='', x=x, y=y)
 
-    nodes = [node('XL(身高182-185cm)'), node('L(身高178-182cm)', 447, 1170), node('XXL(身高185-188cm)', 466, 1263), node('42.5')]
+    nodes = [
+        node('XL(身高182-185cm)'),
+        node('L(身高178-182cm)', 447, 1170),
+        node('XXL(身高185-188cm)', 466, 1263),
+        node('42.5'),
+    ]
     assert size_cell(nodes, 'L').x == 447
     assert size_cell(nodes, '2XL').x == 466
     assert size_cell(nodes, 'XXL').x == 466
@@ -208,13 +213,42 @@ def test_정산이_판매가_그대로면_크림_수수료를_빼고_마진을_�
         raise DewuOrderError('시험 중단')
 
     monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', fake_buy)
-    monkeypatch.setattr('samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL')
+    monkeypatch.setattr(
+        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
+    )
     wave = SimpleNamespace(
         get_order=lambda no: SimpleNamespace(
-            source_seller='淘宝', registered_option='40', source_product_code='MW880BD7', revenue=92000, sale_price=92000
+            source_seller='淘宝',
+            registered_option='40',
+            source_product_code='MW880BD7',
+            revenue=92000,
+            sale_price=92000,
         )
     )
     handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 200.0)
     handle(None, SimpleNamespace(order_no='A1'))
     # (92,000 × 0.92 − 8,500) / 200 / 1.03
     assert round(seen['max_cny'], 1) == round((92000 * 0.92 - 8500) / 200 / 1.03, 1)
+
+
+def test_상품_머리글이_暂时缺货면_확정_품절로_멈춘다():
+    """실기 2026-10-07 리복 클럽씨 85 EU 43 — 전 사이즈 ¥-- 인데 '가격을 못 읽었다'(unknown)로 네 번 끝났다."""
+    sold_out = [
+        n('暂时缺货', 560, 300),
+        n('43', 1120, 790),
+        n('¥--', 1170, 790),
+        n('请选择', 1800, 460),
+    ]
+    phone = FakePhone([HOME, SEARCH, RESULT, PRODUCT, sold_out], [DEWU])
+    with pytest.raises(DewuOrderError, match='확정 품절') as err:
+        buy_on_dewu(
+            phone,  # type: ignore[arg-type]
+            'GZ1605',
+            '43',
+            max_cny=900,
+            approve=lambda krw: pytest.fail('결제하면 안 된다'),
+            rate=199.68,
+            sleep=lambda s: None,
+        )
+    assert err.value.out_of_stock is True
+    assert err.value.paid is False
