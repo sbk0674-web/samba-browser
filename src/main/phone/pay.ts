@@ -63,6 +63,11 @@ export interface PayProviderSpec {
    * 다른 앱(得物)이 띄운 결제창처럼 이미 앞에 떠 있으면 앱을 다시 열지 않는다 — 다시 열면 결제창이 앱 홈에 가린다
    */
   keepIfForeground?: boolean
+  /**
+   * 이 결제창을 자기 프로세스 안에 품은 다른 앱의 패키지(淘宝: 알리페이 SDK 결제창이 com.taobao.taobao 안에서 뜬다).
+   * 그 앱이 앞에 있어도 알리페이 화면으로 본다 — 알리페이 앱을 따로 열면 결제창이 가려져 'stuck' 이 된다(실기 2026-10-07)
+   */
+  hostPackages?: string[]
   /** 웹 결제창 없이 앱 안에서 끝나는 결제(식화·得物 → 알리페이) — 웹 성공 확인을 하지 않는다 */
   appOnly?: boolean
   /**
@@ -153,6 +158,7 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     successHint: /결제 ?(?:완료|성공)|支付成功|付款成功|完成|Payment Successful|Paid/,
     openBy: 'app',
     keepIfForeground: true,
+    hostPackages: ['com.taobao.taobao'],
     appOnly: true,
     multiStep: true,
     // 'CVV를 입력하세요' 제목 화면은 실제로는 6자리 결제 비밀번호 키패드다 — 실기 2026-10-03 唯品会: 결제 비밀번호 6자리를
@@ -413,6 +419,11 @@ function stepInApp(
   return tapElementId === undefined ? { state: 'app_steps' } : { state: 'app_steps', tapElementId }
 }
 
+/** 앞에 뜬 앱이 이 결제 앱(또는 그 결제창을 품은 앱)인가 */
+function isSpecApp(app: string | undefined, spec: PayProviderSpec): boolean {
+  return app === spec.packageName || (spec.hostPackages ?? []).includes(app ?? '')
+}
+
 /** 화면을 보고 다음 상태를 정하는 순수 전이 함수 */
 export function nextPayState(
   state: PayState,
@@ -424,7 +435,7 @@ export function nextPayState(
       return { state: 'await_app' }
     case 'await_app':
       // 앱이 앞으로 나오기 전에는 아무것도 누르지 않는다
-      return screen.app === spec.packageName ? stepInApp(screen, spec) : { state: 'await_app' }
+      return isSpecApp(screen.app, spec) ? stepInApp(screen, spec) : { state: 'await_app' }
     case 'app_steps':
       return stepInApp(screen, spec)
     case 'password':
@@ -715,7 +726,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
       await deps.launchApp(req.serial, spec.deepLink)
     }
   } else if (!(
-    spec.keepIfForeground && (await deps.phones.screen(req.serial)).app === spec.packageName
+    spec.keepIfForeground && isSpecApp((await deps.phones.screen(req.serial)).app, spec)
   )) {
     await deps.launchApp(req.serial, spec.deepLink)
   }

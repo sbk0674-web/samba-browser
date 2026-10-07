@@ -362,6 +362,24 @@ describe('runPayApproval', () => {
     expect(h.tapPassword.mock.calls[0][0]).toMatchObject({ provider: 'alipay' })
   })
 
+  it('淘宝 안에 뜬 알리페이 결제창이 앞에 있으면 알리페이 앱을 다시 열지 않는다', async () => {
+    // 실기 2026-10-07: 淘宝 결제창(MspContainerActivity)은 com.taobao.taobao 안에서 뜬다 — 알리페이 앱을 열면 가려져 stuck
+    const tb = 'com.taobao.taobao'
+    const h = harness({
+      screens: [
+        screen(tb, [el(2, 'CVV를 입력하세요', { clickable: false })]),
+        screen(tb, [el(2, 'CVV를 입력하세요', { clickable: false })]),
+        screen(tb, [el(3, '결제 성공', { clickable: false })]),
+        screen(tb, [el(3, '결제 성공', { clickable: false })])
+      ],
+      webSuccess: false
+    })
+    const r = await runPayApproval(h.deps, request({ provider: 'alipay' }))
+
+    expect(r).toEqual({ ok: true })
+    expect(h.deps.launchApp).not.toHaveBeenCalled()
+  })
+
   it('결제앱에 맞는 금고 결제 수단을 비밀번호 입력기에 넘긴다', async () => {
     const h = harness({ screens: okScreens })
     await runPayApproval(h.deps, request({ provider: 'toss' }))
