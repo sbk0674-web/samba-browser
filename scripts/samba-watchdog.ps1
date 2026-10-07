@@ -17,7 +17,8 @@ if (-not $created) { exit 0 }
 
 function AppRunning {
   @(Get-CimInstance Win32_Process -Filter "Name='electron.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match 'samba_browser' }).Count -gt 0
+    Where-Object { $_.CommandLine -match 'samba_browser' -and $_.CommandLine -notmatch '--type=' -and
+      $_.CommandLine -notmatch 'remote-debugging-port=9503' }).Count -gt 0
 }
 function HarnessRunning {
   @(Get-CimInstance Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue |
