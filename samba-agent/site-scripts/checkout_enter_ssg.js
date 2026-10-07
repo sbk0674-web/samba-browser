@@ -96,7 +96,7 @@ R.total = num((tx.match(/결제\s*예정\s*금액\s*([\d,]{3,})\s*원/) || [])[1
 if (!R.total) return fail('total-not-read', '결제 예정금액을 읽지 못함')
 if (amt > 0 && R.total > amt) return fail('amount-exceeded', `total ${R.total} > expected ${amt}`)
 // 5) 결제 버튼(name=processOrderButton) — 아래쪽 '동의하고 N원 결제하기'(약관 동의 포함)
-const pls = (await L()).filter(l => /^\[\d+\] button "[^"]*결제하기" name=processOrderButton/.test(l))
+const pls = (await L()).filter(l => /^\[\d+\] button "[^"]*결제하기[^"]*" name=processOrderButton/.test(l))
 const pl = pls.find(l => /동의하고/.test(l)) || pls[0]
 if (!pl) return fail('pay-button-not-found')
 const payId = parseInt(pl.slice(1))

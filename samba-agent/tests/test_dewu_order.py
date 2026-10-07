@@ -280,3 +280,24 @@ def test_상품_머리글이_暂时缺货면_확정_품절로_멈춘다():
         )
     assert err.value.out_of_stock is True
     assert err.value.paid is False
+
+
+def test_보조금_실명인증_팝업은_再想想로_닫고_去实名은_누르지_않는다():
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    taps: list[tuple[int, int]] = []
+    nodes = [
+        Node('领取补贴', '', '', 360, 672),
+        Node('再想想', '', '', 241, 872),
+        Node('去实名', '', '', 478, 872),
+    ]
+    phone = SimpleNamespace(nodes=lambda: nodes, tap=lambda x, y: taps.append((x, y)))
+    assert dewu_order.dismiss_subsidy_dialog(phone, lambda s: None) is True  # type: ignore[arg-type]
+    assert taps == [(241, 872)]
+    # 팝업이 없으면 아무것도 누르지 않는다
+    taps.clear()
+    phone2 = SimpleNamespace(
+        nodes=lambda: [Node('立即支付', '', '', 360, 1450)], tap=lambda x, y: taps.append((x, y))
+    )
+    assert dewu_order.dismiss_subsidy_dialog(phone2, lambda s: None) is False  # type: ignore[arg-type]
+    assert taps == []

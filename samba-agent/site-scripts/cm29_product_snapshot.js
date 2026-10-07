@@ -20,8 +20,10 @@ await tabs.switch(tid)
 const bye = async r => { await tabs.close(tid).catch(() => {}); return r }
 if (!pno) return bye({...base, error: 'no_product' })
 let product_url = base.product_url = U + 'products/' + pno
-await page.waitFor(/보유중|보유 적립금|판매 ?종료|품절된 상품/, 10000).catch(() => {})
+await page.waitFor(/보유중|보유 적립금|판매 ?종료|품절된 상품|판매 ?중지된 상품/, 10000).catch(() => {})
 let t = await tree(), tx = text(t)
+// 판매 중지 상품(product-discontinued)은 로그인 문제가 아니라 품절
+if (/판매 ?중지된 상품|현재 판매되지 않는 상품/.test(tx)) return bye({...base, sold_out: true })
 if (!OUT.test(t)) return bye({...base, error: 'login_required' })
 const ob = async () => { const b0 = !btn(t, BUY) && btn(t, /\] button "구매하기"/); if (b0) { await page.click(idOf(b0)); await sleep(1800); t = await tree(); tx = text(t) } }
 await ob()

@@ -1,6 +1,6 @@
 // 무신사 결제창 진입: 결제수단 고르고 결제하기 직전(또는 결제)까지
 // 인자 {card, profile?, dryRun?, expect:{name, option, selected, product_no}, amount?, tab?}
-// dry 면 누르기 직전까지. expect 없으면 결제 안 함. 탭은 args.tab
+// dry 면 누르기 직전까지. expect 없으면 결제 안 함
 // 총액 못 읽으면 실패, amount+배송비 초과면 멈춤
 // 반환 {ok, method, popup_url, dry?, points_only?, total, order_item, note, error?}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
@@ -27,7 +27,7 @@ const mismatch = (seg, tree) => {
   if (!ex) return null
   const low = lc(seg)
   const words = String(ex.name || '').split(/[\s/()[\],·_:-]+/).filter(w => w && !/^\d+$/.test(w) && !GEN.has(w.toLowerCase()) && !w.startsWith('옵션') && ((/[가-힣]/.test(w) && w.length >= 2) || w.length >= 4))
-  const sizes = (String(ex.option || '') + ' ' + String(ex.selected || '')).match(/(?<![\d.])\d{2,3}(?:\.5)?(?![\d.])/g) || []
+  const sizes = (String(ex.option || '') + ' ' + String(ex.selected || '')).match(/(?<![\d.A-Za-z])\d{2,3}(?:\.5)?(?![\d.A-Za-z])/g) || []
   const segNums = seg.split(/[^\d.]+/).filter(Boolean)
   if (words.length && !words.some(w => low.includes(w.toLowerCase()))) return `name words ${words.slice(0, 5).join(',')} not in order form`
   if (sizes.length && !sizes.some(x => segNums.includes(x))) return `size ${sizes.join('/')} not in order form`

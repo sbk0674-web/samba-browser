@@ -145,6 +145,23 @@ def order_no_after_label(nodes: list[Node]) -> str | None:
     return None
 
 
+def dismiss_subsidy_dialog(phone: Phone, sleep: Callable[[float], None]) -> bool:
+    """'领取补贴 — 실명인증(去实名)' 팝업이 떠 있으면 '再想想'(다시 생각)으로 닫는다. 닫았으면 True.
+
+    국가 보조금 안내 팝업이다 — 실명인증을 하지 않고 보조금 없이 그대로 결제한다(실기 2026-10-08: 이 팝업이 결제 단추를 막아
+    '알리페이 결제창이 안 떴다'로 6시간 멈췄다). 去实名 은 절대 누르지 않는다.
+    """
+    nodes = phone.nodes()
+    if not has_text(nodes, '去实名'):
+        return False
+    later = find_text(nodes, '再想想')
+    if later is None:
+        return False
+    phone.tap(later.x, later.y)
+    sleep(2)
+    return True
+
+
 def buy_on_dewu(
     phone: Phone,
     model: str,
@@ -374,6 +391,11 @@ def buy_on_dewu(
         end = time.monotonic() + 20
         while phone.top_package() != ALIPAY and time.monotonic() < end:
             sleep(1.5)
+            # 보조금 실명인증 팝업이 가렸으면 닫고 立即支付 를 한 번 더 누른다
+            if phone.top_package() == DEWU and dismiss_subsidy_dialog(phone, sleep):
+                again = find_text(phone.nodes(), '立即支付')
+                if again is not None:
+                    phone.tap(again.x, again.y)
         if phone.top_package() != ALIPAY:
             raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
     paid_hint = round(price * 1.03 * rate)
@@ -511,8 +533,10 @@ def make_shihuo_handler(
                 return (
                     'needs_human',
                     'unknown',
-                    f'판매처가 {seller}{f" ¥{price:g}" if price else ""} 이다 — 得物 품절({e})은 근거가 못 돼 재고X 로 처리하지 않았다. '
-                    '그 판매처에서 사람이 구매·확인',
+                    (
+                        f'판매처가 {seller}{f" ¥{price:g}" if price else ""} 이다 — 得物 품절({e})은 근거가 못 돼 '
+                        '재고X 로 처리하지 않았다. 그 판매처에서 사람이 구매·확인'
+                    ),
                 )
             if e.out_of_stock and not e.paid:
                 # 得物 화면에서 확인한 품절 — 재고X·취소중 으로 마감하고 근거를 메모에 남긴다(사용자 2026-10-07:
