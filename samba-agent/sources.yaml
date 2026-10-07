@@ -26,6 +26,7 @@ sources:
     cross_with: MUSINSA   # 같은 상품을 무신사에서도 비교해 싼 쪽에서 산다
     pay_card_quote: true    # cm29_pay_card_quote — 29CM 주문서도 무신사페이 등록 기본 카드로 결제한다
     money_in_pay: true    # 29CM 무신사머니는 무신사페이 안의 결제 항목이다(2026-09-25)
+    excluded_pay_providers: [toss]  # 29CM 토스페이 결제수단 목록에서 현대·LOCA 카드가 '가맹점 미지원' — 삼성(SSG.COM) 무이자만 된다(2026-10-07 실기). 현대 청구할인 견적이 틀려 K2(1267) 가 card_missing 반복
     normal_price: true  # 2026-09-25 cm29_normal_price(정가 → 포이즌 외 마켓 직배/까대기 판정)
     payment_quotes: true  # 2026-09-23 cm29_payment_quotes
     shipping_confirm: true  # 2026-09-26 cm29_set_shipping 은 저장하지 않는다 — 전화 채운 뒤 cm29_confirm_shipping 이 저장·선택

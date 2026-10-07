@@ -172,3 +172,8 @@ def test_경로_이름은_정해진_것만_받는다(tmp_path):
     )
     with pytest.raises(ValueError):
         Sources.load(tmp_path)
+
+
+def test_29cm_는_토스페이를_결제_후보에서_뺀다():
+    """실기 2026-10-07: 29CM 토스페이는 현대·LOCA 카드가 '가맹점 미지원' — 현대 견적이 틀려 결제가 card_missing 으로 반복됐다."""
+    assert source_of('buyer.cm29').excluded_pay_providers == ['toss']

@@ -75,6 +75,8 @@ class Source(BaseModel):
     # 이 소싱처는 이 결제 제공자로만 결제한다(예: ABC마트·그랜드스테이지 = naver 네이버페이, 사용자 2026-09-24).
     # 전역 허용 수단(SAMBA_ALLOWED_PAY_PROVIDERS)보다 우선한다
     pay_provider: str | None = None
+    # 이 소싱처에서 결제 후보로 쓰지 않는 결제 제공자(예: 29CM 토스페이 — 현대·LOCA 카드 가맹점 미지원). 전역 허용 수단에서 뺀다
+    excluded_pay_providers: list[str] = []
     # 이 소싱처의 주문은 항상 이 배송 종류로 본다(예: ABC마트는 전부 까대기 = 사무실 배송).
     # None 이면 주문(삼바웨이브 action_tag)이 정한 종류를 따른다
     order_type: Literal['direct', 'kkadaegi', 'gift'] | None = None

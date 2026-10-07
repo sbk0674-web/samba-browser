@@ -2726,8 +2726,11 @@ class BuyerAgent(AgentBase):
 
         계정이 결제수단을 하나로 정해 뒀으면(ACCOUNT_PAY_ONLY) 그것과 겹치는 것만 — buyer02 는 무신사머니만.
         """
-        fixed = source_of(self.spec.name).pay_provider
+        spec = source_of(self.spec.name)
+        fixed = spec.pay_provider
         allowed = {fixed} if fixed else self.allowed_pay_providers
+        if allowed is not None and spec.excluded_pay_providers:
+            allowed = set(allowed) - set(spec.excluded_pay_providers)
         only = ACCOUNT_PAY_ONLY.get((account or '').split('@')[0].lower())
         if only:
             allowed = set(only) if allowed is None else (set(allowed) & set(only))
