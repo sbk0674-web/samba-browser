@@ -44,6 +44,7 @@ R.ckwhere=(R.product_url.match(/[?&]ckwhere=([^&]+)/)||[])[1]||null
 const mallOk=u=>/shinsegaemall\.ssg\.com|siteNo=6004(?!\d)/.test(u)||(AD&&/department\.ssg\.com|siteNo=6009(?!\d)/.test(u))
 let t=await text()
 R.mall_ok=mallOk(R.product_url)||(!/siteNo=/.test(R.product_url)&&(/판매자스토어 신세계몰/.test(t)||(AD&&/판매자스토어 신세계 ?백화점/.test(t))))
+if(!R.mall_ok&&AD&&!/siteNo=/.test(R.product_url)&&/브랜드 매장\s*:/.test(t)){const o2=tabId;tabId=await op(R.product_url+(R.product_url.includes('?')?'&':'?')+'siteNo=6009');if(tabId)await tabs.switch(tabId);try{await tabs.close(o2)}catch(e){}try{await page.waitFor(RDY,25000)}catch(e){}R.product_url=await page.url();t=await text();R.mall_ok=mallOk(R.product_url)}
 R.product_name=nz(String(await page.title()).replace(/\s*-\s*(SSG\.COM|신세계백화점|신세계몰|이마트몰)\s*$/,''))||null
 if(/접속이 잠시 제한|자동화된 환경/.test(t))return{...R,error:'blocked',note:'SSG 봇 차단'}
 if(/member\.ssg\.com/.test(R.product_url))return{...R,error:'login_required'}
