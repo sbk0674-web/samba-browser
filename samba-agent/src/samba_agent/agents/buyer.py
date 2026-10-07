@@ -306,6 +306,10 @@ def payable_methods(
     return [m for m in methods if method_providers(m, money_in_pay, direct_card) & payable]
 
 
+# 폰 앱 승인이 필요한 결제 제공자 — 같은 원가면 PC 에서 끝나는 수단보다 뒤로 둔다(사용자 2026-10-07)
+PHONE_APPROVAL_PROVIDERS = frozenset({'toss', 'kakao'})
+
+
 def cheapest_quotes(
     raw: object,
     wanted_card: str | None,
@@ -382,11 +386,15 @@ def cheapest_quotes(
                 'cost': effective_cost({**q, 'cost': cost, 'card': card, 'reward': reward}),
             }
         )
-    # 같은 원가면 페이코를 뒤로 — 무신사페이(같은 현대카드)가 결제창·로그인 없이 절차가 간편하다(사용자 2026-09-25)
-    return sorted(
-        rows,
-        key=lambda r: (float(r['cost']), quote_provider(str(r['method']), r['card']) == 'payco'),  # type: ignore[arg-type]
-    )
+
+    # 같은 원가면 ① 폰 승인 수단(토스·카카오)을 뒤로 — PC 에서 끝나는 수단을 무조건 먼저 쓴다(사용자 2026-10-07:
+    # "같은 원가면 무조건 PC 결제수단"; 폰이 끊기면 폰 승인 건은 보류된다), ② 페이코를 뒤로 — 무신사페이(같은 현대카드)가
+    # 결제창·로그인 없이 절차가 간편하다(사용자 2026-09-25)
+    def rank(r: dict[str, object]) -> tuple[float, bool, bool]:
+        provider = quote_provider(str(r['method']), r['card'])  # type: ignore[arg-type]
+        return (float(r['cost']), provider in PHONE_APPROVAL_PROVIDERS, provider == 'payco')  # type: ignore[arg-type]
+
+    return sorted(rows, key=rank)
 
 
 # 포이즌 외 마켓의 까대기 건 배송비(삼바웨이브 기록, 원). 사무실 경유 재발송비 — poizon-sourcing 스킬 규칙
@@ -1021,7 +1029,9 @@ def quotes_problem(
         easy = [
             _as_float(r.get('cost'))
             for r in rows
-            if isinstance(r, dict) and '간편결제' in str(r.get('method') or '') and _as_float(r.get('cost')) > 0
+            if isinstance(r, dict)
+            and '간편결제' in str(r.get('method') or '')
+            and _as_float(r.get('cost')) > 0
         ]
         if easy and min(easy) >= base:
             # 간편결제 줄이 할인 전 금액 그대로다 — 주문서 '할인변경' 창의 카드 즉시할인(롯데카드 N%)을 안 읽었다.
@@ -2841,7 +2851,9 @@ class BuyerAgent(AgentBase):
                     'points_used 에는 사용한 적립금·포인트를 넣는다 — 원가 = cost × 카드 청구할인 − reward + points_used. '
                     '결제하기는 누르지 않는다.'
                 ),
-                check=lambda o: quotes_problem(o, offered, allowed, src.direct_card, src.easy_pay_card),
+                check=lambda o: quotes_problem(
+                    o, offered, allowed, src.direct_card, src.easy_pay_card
+                ),
             )
         except AgentFailure as e:
             self.note('결제수단 견적', mask_text(f'못 읽음({e.reason[:80]}) — 스냅샷 원가로 진행'))
