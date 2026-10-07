@@ -361,6 +361,9 @@ def buy_on_dewu(
     if phone.top_package() != ALIPAY:
         # 주문 확인 화면 — 결제수단이 알리페이가 아니면(云闪付) 바꾸고 '立即支付' 를 누른다
         # (실기 2026-10-03: 云闪付 가 골라져 있어 알리페이 창이 영영 안 떴다)
+        # 보조금 실명인증 팝업이 주문 확인 화면을 가리고 있으면 먼저 닫는다(가려진 동안은 确认订单·立即支付 가 안 보인다)
+        if dismiss_subsidy_dialog(phone, sleep):
+            sleep(1.5)
         nodes = phone.nodes()
         if find_text(nodes, '确认订单') is None and find_text(nodes, '立即支付') is None:
             raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
