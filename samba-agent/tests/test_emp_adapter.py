@@ -161,3 +161,24 @@ def test_원가_칸이_실패해도_넣다_만_메모를_버린다():
     with pytest.raises(AdapterRetry):
         ui.write('E1', 72418, 2300, '2026100700955')
     assert ui.calls == ['edit 한줄메모', 'edit 원가', 'close_editor', 'reload']
+
+
+def test_교환주문_행은_읽는_단계에서_거절한다():
+    """사용자 2026-10-07: 교환주문은 입력할 필요가 없다(원주문을 고쳐야 한다)."""
+    from samba_agent.export.adapters import AdapterReject
+    from samba_agent.export.desktop.emp_ui import PywinautoEmpUi
+
+    class Row:
+        def __init__(self) -> None:
+            self.values = {
+                '상품명': '[★교환주문]매장정품 반스 VANS VN000CRRCJJ1',
+                '원가': '0',
+                '배송비': '0',
+                '한줄메모': '',
+            }
+
+    ui = object.__new__(PywinautoEmpUi)
+    ui.find_row = lambda order_no: Row()  # type: ignore[method-assign]
+    with pytest.raises(AdapterReject) as err:
+        ui.read('20261005H22417:1137314933')
+    assert err.value.reason is ExportFail.EXCHANGE_ORDER

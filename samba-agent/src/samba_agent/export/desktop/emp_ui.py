@@ -69,6 +69,9 @@ _WM_RBUTTONDOWN, _WM_RBUTTONUP = 0x0204, 0x0205
 DIALOG_CLASS = '#32770'
 COL_STATE = '상태'
 COL_SELLER_CODE = '판매자상품코드'
+COL_PRODUCT_NAME = '상품명'
+# 교환주문 행의 상품명 머리표('[★교환주문]…') — 이 행에는 원가·소싱주문번호를 입력하지 않는다
+EXCHANGE_MARK = '교환주문'
 STATE_CANCELLED = '취소'
 # 행 메뉴(우클릭 메뉴) 항목 — 이름 뒤에 단축 글자가 붙는다('상태변경 (Q)')
 MENU_STATE = '상태변경'
@@ -296,6 +299,13 @@ class PywinautoEmpUi:
 
     def read(self, order_no: str) -> CellValues:
         row = self.find_row(order_no)
+        if EXCHANGE_MARK in (row.values.get(COL_PRODUCT_NAME) or ''):
+            # 교환주문은 입력할 필요가 없다 — 원주문을 고쳐야 한다(사용자 2026-10-07, 20261005H22417 에 소싱주문번호가
+            # 찍혔다). 읽기 단계에서 막아 쓰기까지 가지 않는다
+            raise AdapterReject(
+                ExportFail.EXCHANGE_ORDER,
+                'EMP 교환주문 행이다 — 입력하지 않았다(원주문에 입력해야 한다)',
+            )
         return CellValues(
             parse_won(row.values.get(COL_COST)),
             parse_won(row.values.get(COL_SHIPPING)),

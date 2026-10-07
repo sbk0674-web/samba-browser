@@ -18,4 +18,7 @@ class ExportFail(StrEnum):
     AMBIGUOUS = 'ambiguous'  # 검색 결과가 1건이 아니다
     VALUE_CONFLICT = 'value_conflict'  # 이미 다른 값이 들어 있다
     VERIFY_MISMATCH = 'verify_mismatch'  # 입력 뒤 되읽은 값이 다르다
+    EXCHANGE_ORDER = (
+        'exchange_order'  # 교환주문 행이다 — 입력하지 않는다(원주문에 입력, 사용자 2026-10-07)
+    )
     UNKNOWN = 'unknown'
