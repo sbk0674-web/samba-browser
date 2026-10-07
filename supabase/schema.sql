@@ -196,3 +196,20 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ---------------------------------------------------------------------------
+-- Realtime (2026-10-06): 다른 PC 의 변경을 1분 폴링이 아니라 즉시 받으려면 동기화 표가 supabase_realtime
+-- publication 에 들어 있어야 한다. 앱은 postgres_changes 로 이 표들을 구독한다(src/main/sync/supabase-backend.ts).
+-- 이미 들어 있으면 오류가 나므로 예외를 삼키고 넘어간다.
+do $$
+declare t text;
+begin
+  for t in select unnest(array['settings_sync','accounts_sync','vault_items_sync','bookmarks_sync','chats_sync','chat_messages_sync']) loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then null;
+    end;
+    -- 삭제 이벤트에 행 전체(id 외 열)가 실리도록
+    execute format('alter table public.%I replica identity full', t);
+  end loop;
+end $$;

@@ -78,6 +78,8 @@ class ScriptedAdb implements AdbRunner {
       return ok(xml)
     }
     if (key.includes('content://sms/inbox')) return ok(this.smsStdout)
+    // 결제 앱 설치 확인(pm path) — 이 가짜 폰에는 결제 앱이 다 깔려 있다
+    if (key.includes('pm path ')) return ok(`package:/data/app/${args[args.length - 1]}/base.apk`)
     return ok('')
   }
 
@@ -604,6 +606,29 @@ describe('통합 ② 결제 도구 → 확인 카드 → 앱 승인 → 키패�
     expect(r.ok === false && r.reason === 'no-account').toBe(false)
     // 같은 이름이 둘이면 결제 비밀번호를 가진 계정(13)이다
     expect(asked.every((id) => id === 13)).toBe(true)
+  })
+
+  it('레인 호출은 ctx.page(레인 작업 탭)로 계정을 찾는다 — 전역 작업 탭이 다른 사이트여도 거부하지 않는다', async () => {
+    // 실기 2026-10-06: 수동 레인에서 롯데온 주문서를 띄워 놓고 토스 승인을 불렀는데, 배선이 사람이 보던
+    // 탭(구글)의 호스트로 계정을 찾아 "계정을 특정할 수 없음"으로 거부됐다
+    const h = harness(db, {
+      vault: { listAccounts: (host: string) => (host.endsWith(HOST) ? [ACCOUNT] : []) }
+    })
+    h.deps.page.host = () => 'www.google.com'
+    scriptPayScreens(h.adb)
+    const bridge = createPhoneAgentBridge(h.deps)
+    const req = {
+      provider: 'toss',
+      amountKrw: 9000,
+      merchant: '삼바상회',
+      methodLabel: '토스페이'
+    } as const
+    expect(await bridge.approvePayment(h.ctx, req)).toEqual({ ok: false, reason: 'no-account' })
+    const r = await bridge.approvePayment(
+      { ...h.ctx, page: { ...h.deps.page, host: () => HOST } },
+      req
+    )
+    expect(r.ok === false && r.reason === 'no-account').toBe(false)
   })
 
   it('네이버페이: 구매 사이트 계정에 항목이 없으면 네이버 계정에서 고른다 — 여럿이면 목록을 돌려주고, payAccount 로 지목하면 그 계정', async () => {

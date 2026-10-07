@@ -9,6 +9,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
 from samba_agent.export.adapters import (
@@ -23,6 +24,16 @@ from samba_agent.export.store import ExportQueue, ExportRequest
 
 log = logging.getLogger(__name__)
 
+# 사람·창 상태를 기다리는 사유 — 시도 횟수에 넣지 않는다(5번 만에 실패로 끝나 몇 시간 방치되지 않게).
+# 대화상자(BLOCKED)·인증 창은 윈도우 알림으로 사람에게 알린다
+_WAIT_REASONS = (
+    ExportFail.BUSY,
+    ExportFail.AUTH_REQUIRED,
+    ExportFail.BLOCKED,
+    # 프로그램이 꺼져 있다(밤사이 EMP 종료, 2026-10-01) — 켜질 때까지 기다리고 알린다
+    ExportFail.WINDOW_MISSING,
+)
+
 
 @dataclass(frozen=True)
 class _Outcome:
@@ -36,9 +47,27 @@ class _Outcome:
     reason: ExportFail | None = None
 
 
+# 화면에서 못 찾은 주문을 포기하기까지의 시간 — 그 전에는 횟수를 넘겨도 다시 본다
+NOT_FOUND_GIVE_UP_S = 24 * 3600
+
+
+def _age_s(req: ExportRequest) -> float:
+    try:
+        created = datetime.fromisoformat(req.created_at)
+    except ValueError:
+        return float('inf')
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - created).total_seconds()
+
+
 def _same(current: CellValues, req: ExportRequest) -> bool:
-    """이미 기입할 값이 들어 있는가. 빈 셀과 0 은 같게 본다."""
-    return (current.cost or 0) == req.cost and (current.shipping_fee or 0) == req.shipping_fee
+    """이미 기입할 값이 들어 있는가. 빈 셀과 0 은 같게 본다. 메모는 그 글이 들어 있으면 된다."""
+    return (
+        (current.cost or 0) == req.cost
+        and (current.shipping_fee or 0) == req.shipping_fee
+        and (not req.memo or req.memo in (current.memo or ''))
+    )
 
 
 def _conflict(current: CellValues, req: ExportRequest) -> str | None:
@@ -61,6 +90,9 @@ class ExportWorker:
         *,
         user_idle_s: Callable[[], float],
         min_idle_s: float = 20.0,
+        min_idle_by_target: Mapping[str, float] | None = None,
+        on_auth_required: Callable[[str, str], object] | None = None,
+        still_cancelling: Callable[[str], bool | None] | None = None,
         max_attempts: int = 5,
         retry_delay_s: float = 60.0,
     ) -> None:
@@ -68,6 +100,14 @@ class ExportWorker:
         self._adapters = dict(adapters)
         self._user_idle_s = user_idle_s
         self._min_idle_s = min_idle_s
+        # 대상마다 다른 기준 — 화면을 앞으로 가져오는 프로그램(EMP)은 사람이 자리를 비웠을 때만 만진다
+        self._min_idle_by_target = dict(min_idle_by_target or {})
+        # 인증 창이 떠 있을 때 사람에게 알리는 함수(프로그램 이름, 설명). 같은 프로그램은 30분에 한 번만
+        self._on_auth_required = on_auth_required
+        self._auth_alerted: dict[str, float] = {}
+        # 취소 연동 직전 확인 — 그 주문이 지금도 취소 상태인가(True/False, 확인 못 하면 None).
+        # 취소중으로 돌렸다가 나중에 이행된 주문을 외부 프로그램에서 취소해 버리지 않게 한다(실기 2026-10-01)
+        self._still_cancelling = still_cancelling
         self._max_attempts = max_attempts
         self._retry_delay_s = retry_delay_s
 
@@ -75,20 +115,49 @@ class ExportWorker:
     def targets(self) -> tuple[str, ...]:
         return tuple(self._adapters)
 
+    def ready_targets(self) -> tuple[str, ...]:
+        """지금 만져도 되는 대상 — 사람이 입력을 멈춘 지 그 대상의 기준 시간 이상 지난 것."""
+        idle = self._user_idle_s()
+        return tuple(
+            t for t in self._adapters if idle >= self._min_idle_by_target.get(t, self._min_idle_s)
+        )
+
     def run_once(self) -> ExportRequest | None:
         """요청 1건을 처리하고 그 최종 상태를 돌려준다. 할 일이 없으면 None."""
         if not self._adapters:
             return None
         # 사람이 PC 를 쓰는 중이면 집지도 않는다 — 시도 횟수를 헛되이 쓰지 않는다
-        if self._user_idle_s() < self._min_idle_s:
+        ready = self.ready_targets()
+        if not ready:
             return None
-        req = self._queue.claim_next(self.targets)
+        req = self._queue.claim_next(ready)
         if req is None:
             return None
         self._process(req, self._adapters[req.target])
         return self._queue.get(req.id)
 
+    def _cancel_ok(self, order_no: str) -> bool | None:
+        if self._still_cancelling is None:
+            return True
+        try:
+            return self._still_cancelling(order_no)
+        except Exception:  # noqa: BLE001 — 확인 실패는 "모름"이다(취소를 밀어붙이지 않는다)
+            return None
+
     def _process(self, req: ExportRequest, adapter: Adapter | BatchAdapter) -> None:
+        if req.target.endswith('_cancel'):
+            ok = self._cancel_ok(req.order_no)
+            if ok is False:
+                self._queue.fail(
+                    req.id, ExportFail.BLOCKED, '취소 연동 중단 — 삼바웨이브에서 이 주문이 취소 상태가 아니다'
+                )
+                return
+            if ok is None:
+                self._queue.retry_later(
+                    req.id, ExportFail.BLOCKED, '삼바웨이브 상태를 확인하지 못해 취소 연동을 미룬다',
+                    self._retry_delay_s, count_attempt=False,
+                )
+                return
         batch = isinstance(adapter, BatchAdapter)
         completed: set[str] = set()
         if batch:
@@ -108,10 +177,33 @@ class ExportWorker:
             self._queue.done(req.id, outcome.detail)
         elif outcome.kind == 'retry':
             assert outcome.reason is not None
-            self._queue.retry_later(req.id, outcome.reason, outcome.detail, self._retry_delay_s)
+            self._queue.retry_later(
+                req.id,
+                outcome.reason,
+                outcome.detail,
+                self._retry_delay_s,
+                count_attempt=outcome.reason not in _WAIT_REASONS,
+            )
+            if outcome.reason in (
+                ExportFail.AUTH_REQUIRED,
+                ExportFail.BLOCKED,
+                ExportFail.WINDOW_MISSING,
+            ):
+                self._alert_auth(req.target, outcome.detail)
         else:
             assert outcome.reason is not None
             self._queue.fail(req.id, outcome.reason, outcome.detail)
+
+    def _alert_auth(self, target: str, detail: str) -> None:
+        program = target.split('_', 1)[0]
+        now = time.monotonic()
+        if self._on_auth_required is None or now - self._auth_alerted.get(program, -1e9) < 1800:
+            return
+        self._auth_alerted[program] = now
+        try:
+            self._on_auth_required(program, detail)
+        except Exception:
+            log.exception('인증 창 알림 실패')
 
     def _decide(self, req: ExportRequest, adapter: Adapter) -> _Outcome:
         """어댑터를 불러 결과를 정한다. 큐는 건드리지 않는다(어댑터 계약 밖 예외만 여기서 잡는다)."""
@@ -122,7 +214,10 @@ class ExportWorker:
             conflict = _conflict(current, req)
             if conflict is not None:
                 return _Outcome('fail', f'덮어쓰지 않았다 — {conflict}', ExportFail.VALUE_CONFLICT)
-            adapter.write(req.order_no, req.cost, req.shipping_fee)
+            if req.memo:
+                adapter.write(req.order_no, req.cost, req.shipping_fee, memo=req.memo)
+            else:
+                adapter.write(req.order_no, req.cost, req.shipping_fee)
             after = adapter.read(req.order_no)
             if not _same(after, req):
                 return _Outcome(
@@ -130,9 +225,12 @@ class ExportWorker:
                     f'되읽은 값이 다르다 — 원가 {after.cost} · 배송비 {after.shipping_fee}',
                     ExportFail.VERIFY_MISMATCH,
                 )
-            return _Outcome('done', f'원가 {req.cost:,} · 배송비 {req.shipping_fee:,} 기입 확인')
+            memo = f' · 메모 {req.memo}' if req.memo else ''
+            return _Outcome(
+                'done', f'원가 {req.cost:,} · 배송비 {req.shipping_fee:,}{memo} 기입 확인'
+            )
         except AdapterRetry as e:
-            if req.attempts >= self._max_attempts:
+            if e.reason not in _WAIT_REASONS and req.attempts >= self._max_attempts:
                 return _Outcome('fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason)
             return _Outcome('retry', e.detail, e.reason)
         except AdapterReject as e:
@@ -150,11 +248,19 @@ class ExportWorker:
         집은 요청의 주문번호가 처리 집합에 없으면(아직 화면에 수집되지 않음) 시간을 두고 다시 한다.
         실패 분류는 _decide 와 같다. 돌려주는 집합은 호출부가 다른 대기 요청을 끝내는 데 쓴다.
         """
-        order_nos = [req.order_no, *self._queue.pending_order_nos(req.target)]
+        # 주문 1건 단위로 도는 어댑터는 집은 주문만 넘긴다 — 하네스가 그 주문의 결과를 기다리고,
+        # 한 건 때문에 묶음 전체가 실패하지 않는다(사용자 결정 2026-09-29)
+        if getattr(adapter, 'one_at_a_time', False):
+            order_nos = [req.order_no]
+        else:
+            order_nos = [req.order_no, *self._queue.pending_order_nos(req.target)]
+            if req.target.endswith('_cancel'):
+                # 묶음에 같이 태우는 다른 대기 주문도 지금 취소 상태인 것만 넘긴다(확인 못 한 것은 이번엔 뺀다)
+                order_nos = [req.order_no, *[o for o in order_nos[1:] if self._cancel_ok(o) is True]]
         try:
             completed = set(adapter.complete_pending(order_nos))
         except AdapterRetry as e:
-            if req.attempts >= self._max_attempts:
+            if e.reason not in _WAIT_REASONS and req.attempts >= self._max_attempts:
                 return _Outcome(
                     'fail', f'재시도 {req.attempts}회 모두 실패 — {e.detail}', e.reason
                 ), set()
@@ -164,11 +270,22 @@ class ExportWorker:
         except Exception as e:
             log.exception('외부 일괄 처리 중 오류: %s(%s)', req.order_no, req.target)
             return _Outcome('fail', f'{type(e).__name__}: {e}'[:200], ExportFail.UNKNOWN), set()
-        detail = f'일괄 완료됨 {len(completed)}건'
+        detail = f'처리 {len(completed)}건'
+        # 묶음으로 같이 봤는데 화면에 없던 다른 주문도 같은 시간만큼 미룬다 — 하나씩 다시 집혀 묶음을 되풀이하지 않게
+        missing = [o for o in order_nos if o != req.order_no and o not in completed]
+        if missing:
+            self._queue.defer_orders(
+                req.target, missing, ExportFail.NOT_FOUND, '화면(필터)에 아직 없다 — 나중에 다시', self._retry_delay_s
+            )
+        # 읽기 작업은 읽은 값을 결과로 남긴다(하네스가 그 값으로 다음 일을 한다)
+        found = getattr(adapter, 'detail_for', None)
+        if callable(found) and req.order_no in completed:
+            detail = str(found(req.order_no) or detail)
         if req.order_no in completed:
             return _Outcome('done', detail), completed
-        # 화면(필터)에 아직 없는 주문 — 수집이 늦을 수 있으니 시간을 두고 다시 본다
-        if req.attempts >= self._max_attempts:
+        # 화면(필터)에 아직 없는 주문 — 수집이 늦을 수 있으니 시간을 두고 다시 본다.
+        # 쇼핑몰 수집이 몇 시간 늦기도 해서(2026-10-01: 5분 만에 실패로 끝나 미지정 18건 방치) 하루는 계속 본다
+        if req.attempts >= self._max_attempts and _age_s(req) >= NOT_FOUND_GIVE_UP_S:
             return (
                 _Outcome(
                     'fail',
@@ -193,8 +310,9 @@ class ExportWorker:
             try:
                 # 살아 있다는 표시는 실제로 집을 수 있을 때만 남긴다 — 사람이 PC 를 쓰는 중에도
                 # beat 를 남기면 export 단계가 alive() 만 보고 주문마다 대기 시간을 통째로 쓴다
-                if self._user_idle_s() >= self._min_idle_s:
-                    self._queue.beat(self.targets)
+                ready = self.ready_targets()
+                if ready:
+                    self._queue.beat(ready)
                 worked = self.run_once() is not None
             except Exception:
                 log.exception('입력 작업자 고리 오류 — 계속한다')

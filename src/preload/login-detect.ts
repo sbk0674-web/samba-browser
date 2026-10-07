@@ -79,6 +79,9 @@ export const SOCIAL_RE =
   /naver|kakao|google|facebook|apple|line|github|twitter|wechat|payco|toss|sns|oauth|social|네이버|카카오|구글|페이스북|애플|라인|깃허브|트위터|간편/i
 
 // 제출 버튼 텍스트
+// 버튼 표시가 없는 요소는 글자가 이것과 정확히 같을 때만 제출 버튼으로 본다
+const EXACT_LOGIN_TEXT_RE = /^(로그인|로그인하기|log ?in|sign ?in)$/i
+
 export const SUBMIT_TEXT_RE = /로그인하기|로그인|login|log.?in|sign.?in|계속|다음|continue|next/i
 
 // 허니팟(봇 함정) 이름 패턴
@@ -411,6 +414,13 @@ export function findSubmit(
     if (isSocialButton(el)) continue
     if (!SUBMIT_TEXT_RE.test(buttonTextOf(el))) continue
     return idOf(el)
+  }
+  // 버튼 태그·role 이 없는 화면(Nexacro 는 div 로 버튼을 그린다 — 실기 2026-09-29 partner.hmall.com: 칸은 채웠는데
+  // 제출할 버튼을 못 찾아 아무 일도 없었다) — 글자가 정확히 '로그인'인 누를 수 있는 요소를 쓴다
+  for (const el of registry) {
+    if (el.tagName === 'INPUT' || el.tagName === 'A') continue
+    const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim()
+    if (EXACT_LOGIN_TEXT_RE.test(text)) return idOf(el)
   }
   return undefined
 }

@@ -5,6 +5,8 @@ let sw=(await tabs.list()).find(t=>/samba-wave\.vercel\.app\/samba\/orders/.test
 if(sw){await tabs.switch(sw.id);await sleep(500)}else{await tabs.open({url:'https://samba-wave.vercel.app/samba/orders'});await sleep(6000)}
 // 오래된 주문(7일 넘음)도 찾도록 올해 기간을 먼저 쓴다(실기 2026-09-25: 7일 조회에 행이 없어 상태를 못 바꿈)
 for(const k of ['올해','7일']){const i=await page.idOf(k);if(i!==-1){await page.click(i);await sleep(1500);break}}
+// 주문상태 필터 기본값은 취소중·배송중 행을 숨긴다(실기 2026-09-29: 결제했는데 '주문 행 없음') — 전체로 둔다
+{const f=(await page.get({interactive:true})).tree.match(/^\[(\d+)\] combobox "전체 주문상태 /m);if(f){await page.select(+f[1],'전체 주문상태');await sleep(800)}}
 const ts=await page.idOf('상품명 고객명 상품ID 주문번호 소싱주문번호 송장번호');
 if(ts<0)return{ok:false,note:'검색칸 없음'};
 await page.select(ts,'주문번호');await sleep(300);await page.type(ts+1,no,true);

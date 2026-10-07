@@ -25,9 +25,9 @@ describe('DEFAULT_TASK_MODELS', () => {
   it('내 API 키 경로는 정식 모델 ID 를 쓴다', () => {
     expect(DEFAULT_TASK_MODELS.api_key).toEqual({
       fast: 'claude-haiku-4-5-20251001',
-      standard: 'claude-sonnet-5',
-      deep: 'claude-opus-5',
-      visual: 'claude-sonnet-5'
+      standard: 'claude-sonnet-5-5',
+      deep: 'claude-opus-5-5',
+      visual: 'claude-sonnet-5-5'
     })
   })
 })
@@ -70,11 +70,11 @@ describe('remapOnProviderChange', () => {
     const current: TaskModels = {
       fast: 'haiku',
       standard: 'sonnet',
-      deep: 'claude-opus-5',
+      deep: 'claude-opus-5-5',
       visual: 'sonnet'
     }
     const { models, changed } = remapOnProviderChange(current, 'claude_subscription', 'api_key')
-    expect(models.deep).toBe('claude-opus-5')
+    expect(models.deep).toBe('claude-opus-5-5')
     expect(changed).not.toContain('deep')
     expect(changed.sort()).toEqual(['fast', 'standard', 'visual'])
   })
@@ -120,9 +120,9 @@ describe('설정 스키마', () => {
     expect(DEFAULT_SETTINGS.aiProvider).toBe('claude_subscription')
     expect(DEFAULT_SETTINGS.taskModels).toEqual({
       fast: 'claude-haiku-4-5-20251001',
-      standard: 'claude-sonnet-5',
-      deep: 'claude-opus-5',
-      visual: 'claude-sonnet-5'
+      standard: 'claude-sonnet-5-5',
+      deep: 'claude-opus-5-5',
+      visual: 'claude-sonnet-5-5'
     })
   })
 
@@ -137,8 +137,8 @@ describe('설정 스키마', () => {
       aiProvider: 'api_key',
       taskModels: {
         fast: 'claude-haiku-4-5-20251001',
-        standard: 'claude-sonnet-5',
-        deep: 'claude-opus-5',
+        standard: 'claude-sonnet-5-5',
+        deep: 'claude-opus-5-5',
         visual: 'claude-fable-5-1'
       }
     })
@@ -150,8 +150,27 @@ describe('설정 스키마', () => {
 describe('canonicalModel', () => {
   it('별칭을 정식 ID 로 바꾸고 모르는 값은 그대로 둔다', async () => {
     const { canonicalModel } = await import('../src/shared/ai')
-    expect(canonicalModel('sonnet')).toBe('claude-sonnet-5')
+    expect(canonicalModel('sonnet')).toBe('claude-sonnet-5-5')
     expect(canonicalModel('claude-sonnet-5')).toBe('claude-sonnet-5')
     expect(canonicalModel('gpt-5.6')).toBe('gpt-5.6')
+  })
+})
+
+describe('옛 모델 ID 승격', () => {
+  it('저장된 Opus 5·Sonnet 5 는 5.5 로 올려 읽고 나머지는 그대로 둔다', () => {
+    const s = parseSettings({
+      taskModels: {
+        fast: 'claude-haiku-4-5-20251001',
+        standard: 'claude-opus-5',
+        deep: 'claude-opus-5',
+        visual: 'claude-sonnet-5'
+      }
+    })
+    expect(s.taskModels).toEqual({
+      fast: 'claude-haiku-4-5-20251001',
+      standard: 'claude-opus-5-5',
+      deep: 'claude-opus-5-5',
+      visual: 'claude-sonnet-5-5'
+    })
   })
 })

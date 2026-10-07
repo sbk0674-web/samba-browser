@@ -275,7 +275,13 @@
     "empty": "열린 탭이 없습니다",
     "untitled": "제목 없음",
     "popup": "팝업",
-    "profileOf": "계정 프로필: {{profile}} (이 탭의 로그인 세션은 이 계정 전용)"
+    "profileOf": "계정 프로필: {{profile}} (이 탭의 로그인 세션은 이 계정 전용)",
+    "profiles": "프로필로 새 탭 열기",
+    "profileHint": "프로필마다 로그인·쿠키가 따로입니다",
+    "profileDefault": "기본 프로필",
+    "profileNamePlaceholder": "새 프로필 이름",
+    "profileCreate": "새 프로필로 열기",
+    "profileInvalid": "영문·숫자·한글과 . _ @ - 만, {{max}}자까지 쓸 수 있습니다"
   },
   "newtab": {
     "title": "새 탭",
@@ -452,7 +458,34 @@
     "delete": "삭제",
     "deleteFolder": "폴더 삭제",
     "emptyAll": "저장된 북마크가 없어요",
-    "manage": "관리"
+    "manage": "관리",
+    "dropInto": "{{name}} 폴더로 옮기기",
+    "menu": {
+      "openNewTab": "새 탭에서 열기",
+      "edit": "수정",
+      "rename": "이름 변경",
+      "newFolder": "새 폴더",
+      "delete": "삭제"
+    },
+    "edit": {
+      "linkTitle": "북마크 수정",
+      "folderTitle": "폴더 이름 변경",
+      "newFolderTitle": "새 폴더",
+      "name": "이름",
+      "folder": "폴더",
+      "save": "저장",
+      "cancel": "취소"
+    },
+    "popover": {
+      "addedTitle": "북마크 추가됨",
+      "editTitle": "북마크 수정",
+      "name": "이름",
+      "folder": "폴더",
+      "otherFolder": "기타 북마크",
+      "more": "더 보기",
+      "done": "완료",
+      "delete": "삭제"
+    }
   },
   "bookmarksPage": {
     "title": "북마크",
@@ -794,6 +827,8 @@
       "phone": "연락처",
       "passport": "여권번호",
       "idCard": "신분증번호",
+      "bizName": "사업자명",
+      "bizNo": "사업자번호",
       "note": "메모",
       "paymentProvider": "결제 수단",
       "paymentAccount": "결제할 앱 계정"
@@ -805,6 +840,8 @@
       "kakao": "카카오페이",
       "naver": "네이버페이",
       "payco": "페이코",
+      "alipay": "알리페이(식화·더우)",
+      "lottecard": "롯데카드 앱카드(로카페이)",
       "samsung": "삼성페이",
       "apple": "애플페이",
       "other": "기타"
@@ -1176,7 +1213,8 @@
     },
     "transport": {
       "usb": "USB",
-      "wifi": "와이파이"
+      "wifi": "와이파이",
+      "relay": "중계(다른 PC)"
     },
     "badge": {
       "still": "간이 화면",
@@ -1233,6 +1271,10 @@
       "fps": "초당 프레임",
       "autoReconnect": "자동 재연결",
       "autoReconnectDesc": "연결이 끊기면 한 번만 다시 붙여 봐요",
+      "relay": "이 PC 의 폰을 다른 PC 에 중계",
+      "relayDesc": "같은 계정의 다른 PC 가 이 PC 에 USB 로 붙은 폰을 쓸 수 있게 해요. 아래 브로커 주소가 있으면 인터넷 너머에서도 되고, 없으면 같은 네트워크(adb 5037)만",
+      "relayBroker": "중계 브로커 주소",
+      "relayBrokerDesc": "삼바웨이브 API 의 폰 중계 WebSocket 주소. 계정의 모든 PC 에 함께 적용돼요",
       "settingsOpen": "폰 설정",
       "settingsClose": "폰 설정 닫기"
     },
@@ -1299,6 +1341,13 @@
     "limitNoAutoUpdate": "확장 자동 업데이트가 없어요. 새 버전은 다시 설치하거나 폴더를 다시 불러와야 해요",
     "limitMv2": "MV2(Manifest V2) 확장은 웹스토어에서 설치할 수 없어요",
     "limitPartition": "프로필별 분리는 작업공간(세션 파티션) 단위로만 이뤄져요",
+    "scopeTitle": "프로필별 사용",
+    "scopeDesc": "확장을 어느 프로필 탭에서 쓸지 골라요. 바꾼 뒤에는 앱을 다시 켜야 적용돼요",
+    "scopeAll": "모든 프로필",
+    "scopeDefault": "일반 탭만",
+    "scopeList": "일반 탭 + 고른 프로필",
+    "scopePlaceholder": "프로필 이름(쉼표로 구분)",
+    "scopeSaved": "저장했어요. 앱을 다시 켜면 적용돼요",
     "pageTitle": "확장 프로그램",
     "searchPlaceholder": "확장 프로그램 검색",
     "devMode": "개발자 모드",

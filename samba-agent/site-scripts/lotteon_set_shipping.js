@@ -18,6 +18,8 @@ const query=cut?cut[1]:(jb?jb[1]:addr);
 const rest=(jb?jb[2]:'').trim();
 const detail=(det0&&!det0.startsWith(addr)&&!joined)?((rest&&!det0.includes(rest)?rest+' ':'')+det0):(cut?cut[2]:rest).trim();
 // 선물 주문서?
+// 주문서가 다 그려진 뒤에 선물·직배를 가린다 — 일찍 보면 선물 주문서를 직배로 잘못 본다
+await page.waitFor(/받는 분 주소로 보내기|새 ?배송지 ?추가|변경/,8000).catch(()=>{});
 const rr=(await E('받는 분 주소로 보내기')).filter(e=>e.role==='radio'&&/주소로/.test(e.text));
 let add=null;
 if(rr.length){
@@ -28,8 +30,22 @@ if(rr.length){
   add=L(await E('새 배송지 등록'),e=>e.role==='button'&&/새 ?배송지 ?등록/.test(e.text));
   if(!add)return{...R,error:'gift-add-button-nf'};
 }else{
-  add=L(await E('새 배송지 추가'),e=>/새 ?배송지 ?추가/.test(e.text)&&e.role==='button');
-  if(!add){const ch=L(await E('변경'),e=>e.text==='변경');if(!ch)return{...R,error:'change-button-nf'};await page.click(ch.id);await page.waitFor('새 배송지 추가',8000);add=L(await E('새 배송지 추가'),e=>/새 ?배송지 ?추가/.test(e.text)&&e.role==='button');}
+  // 주문서가 늦게 그려지면 버튼이 아직 없다 — 몇 초 다시 찾는다(실기 2026-09-29: change-button-nf 2건)
+  const fa=async()=>(await E('새 배송지 추가')).filter(e=>/새 ?배송지 ?추가/.test(e.text)&&e.role==='button')[0]||null;
+  // '변경'은 배송지·배송요청사항 두 개 — 첫 번째(배송지)를 누른다(마지막 것은 요청사항 창, 실기 2026-09-30)
+  const fc=async()=>(await E('변경')).filter(e=>/^(배송지\s*)?변경$/.test(String(e.text).trim())&&e.role==='button').sort((a,b)=>a.id-b.id)[0]||null;
+  let ch=null;
+  for(let i=0;i<8&&!add&&!ch;i++){add=await fa();if(!add)ch=await fc();if(!add&&!ch)await sleep(1000);}
+  if(!add){
+    if(!ch){
+      // 못 찾았으면 어느 화면이었는지 남긴다 — 다음에 원인을 바로 알 수 있게
+      const seen=(await E(null,'button,a')).filter(e=>e.text).map(e=>String(e.text).slice(0,12)).slice(0,12);
+      const at=String(await page.url()).replace(/^https?:\/\//,'').split('?')[0].slice(0,60);
+      return{...R,error:'change-button-nf @'+at+' ['+seen.join('|')+']'};
+    }
+    // '새 배송지 추가'는 글자가 아니라 버튼 이름에만 있어 waitFor(글자)로는 못 기다린다 — 버튼을 몇 번 다시 찾는다
+    await page.click(ch.id);for(let i=0;i<8&&!add;i++){await sleep(800);add=await fa();}
+  }
   if(!add)return{...R,error:'add-address-button-nf'};
 }
 await page.click(add.id);await sleep(1500);
@@ -45,17 +61,24 @@ await page.click(z.id);await sleep(1200);
 const nums=s=>(String(s).match(/[0-9]+/g)||[]);const want=nums(query);
 let si=L(await E('올림픽로 300'),e=>e.role==='textbox');
 if(!si)return{...R,error:'address-search-input-nf'};
+// 결과는 도로명(또는 지번 동·리)과 시·군·구가 같은 줄만 후보다 — 숫자만 맞는 다른 도시 주소를 골라 엉뚱한 곳으로 보냈다(실기 2026-10-02 나주→경주)
+const NS=s=>String(s).replace(/\s+/g,'');const roadKey=((full.match(/[가-힣A-Za-z0-9.]+(?:로|길)(?=\s*\d)/)||full.match(/[가-힣]+(?:동|리|가)(?=\s+\d)/)||[''])[0]);
+const guKeys=(full.match(/[가-힣]{1,6}(?:시|군|구)(?=\s)/g)||[]).filter(k=>!/(특별자치|광역|특별)시$/.test(k)&&!/^(서울|부산|대구|인천|광주|대전|울산|세종)시$/.test(k));
+const okLine=t=>{const n=NS(t);if(roadKey&&!n.includes(NS(roadKey)))return false;if(guKeys.length&&!guKeys.some(k=>n.includes(k)))return false;return true;};
 async function search(q){
   await page.type(si.id,q,true);
   for(let i=0;i<8;i++){await sleep(600);
     const ls=(await E('[',null)).filter(e=>e.role==='link'&&/^\[\d{5}\]/.test(e.text));
-    if(ls.length){let b=null,sc=-1;for(const l of ls){const s=nums(l.text).filter(x=>want.includes(x)).length;if(s>sc){sc=s;b=l;}}return{hit:b,count:ls.length};}
+    if(ls.length){let b=null,sc=-1;for(const l of ls.filter(l=>okLine(l.text))){const s=nums(l.text).filter(x=>want.includes(x)).length;if(s>sc){sc=s;b=l;}}return{hit:b,count:ls.length};}
   }
   return{hit:null,count:0};
 }
 let {hit,count}=await search(query);
 if(!hit){const sh=query.replace(/^\S*(특별자치도|특별시|광역시|특별자치시|도|시)\s+/,'');if(sh&&sh!==query)({hit,count}=await search(sh));}
-if(!hit)return{...R,error:'address-result-nf',note:'주소 검색 결과 없음: '+query};
+// 도로명과 건물번호가 붙어 온 주소('○○로167')는 검색이 안 된다(실기 2026-09-29) — 띄워서, 그래도 없으면 도로명+번호만으로 찾는다
+if(!hit){const sp=query.replace(/([가-힣])(\d)/g,'$1 $2');if(sp!==query)({hit,count}=await search(sp));
+  if(!hit){const rd=sp.match(/[가-힣0-9]+(?:로|길)\s?\d+(?:-\d+)?/);if(rd)({hit,count}=await search(rd[0]));}}
+if(!hit)return{...R,error:'address-result-nf',note:'주소 검색 결과 없음(도로명·시군구 일치 줄 없음): '+query};
 R.address_results=count;
 await page.click(hit.id);await sleep(1200);
 const lt=hit.text;const mz=lt.match(/\[(\d{5})\]/);R.zip=mz?mz[1]:(A.postal_code||null);
@@ -72,5 +95,6 @@ if(!R.gift){
   if(sv){await page.click(sv.id);await sleep(1000);}
   R.saved=true;
 }
-R.name=name0;R.address=addr;
+// 되읽기 대조용 — 넣으려던 주소가 아니라 실제로 고른 검색 결과 줄을 돌려준다(예전엔 입력값을 그대로 돌려줘 검증이 늘 통과했다)
+R.name=name0;R.address=lt.replace(/^\[\d{5}\]\s*/,'');R.address_input=addr;
 return R;

@@ -1,4 +1,4 @@
-import { clipboard } from 'electron'
+import { clipboard, webContents } from 'electron'
 import type { WebContents, WebFrameMain } from 'electron'
 import { z } from 'zod'
 import type {
@@ -400,6 +400,16 @@ function opToCode(op: AgentOp): string {
       return `__samba.rectOf(${op.id})`
     case 'valueLength':
       return `__samba.valueLength(${op.id})`
+    case 'hasFocus':
+      return `__samba.hasFocus(${op.id})`
+    case 'focusEl':
+      return `__samba.focusEl(${op.id})`
+    case 'ancestorsOf':
+      return `__samba.ancestorsOf(${op.id})`
+    case 'idOfRowCell':
+      return `__samba.idOfRowCell(${op.id},${op.index})`
+    case 'idOfExactText':
+      return `__samba.idOfExactText(${JSON.stringify(op.text)},${op.nth})`
     case 'keypadSignals':
       return '__samba.keypadSignals()'
     case 'keypadLayout':
@@ -420,6 +430,9 @@ function opToCode(op: AgentOp): string {
 // 슈마커: 비밀번호 칸(NPwd)에 값만 넣으면 제출돼도 로그인되지 않았다(실기 2026-09-26)
 // 현대홈쇼핑 파트너센터(Nexacro): 비밀번호 칸은 컴포넌트가 키 입력으로만 값을 받는다 — 값만 넣으면 화면에는
 // 글자가 보이는데(가려지지도 않는다) 컴포넌트 값은 비어 로그인이 안 된다(실기 2026-09-29)
+// 클릭이 포커스로 안 이어질 때 다시 누르는 횟수·간격(시험에서는 기다리지 않는다)
+const FOCUS_RETRIES = 2
+const FOCUS_RETRY_MS = process.env['VITEST'] ? 0 : 600
 const HUMAN_TYPING_HOSTS = ['gsshop.com', 'payco.com', 'shoemarker.co.kr', 'partner.hmall.com']
 
 function safeHost(wc: WebContents): string {
@@ -568,6 +581,9 @@ export const pageBridge = {
    * 하위 프레임 칸은 그 iframe 의 화면 위치를 더해 탭 좌표로 바꾸고(앱이 이 자리를 캡처해 OCR),
    * id 에는 프레임 번호를 얹는다(그대로 pressOnce 에 넘긴다). 보안 키패드 모양이 아니면 null
    */
+  /** 마지막 keypadUnlabeled 판정 요약(메인 프레임). 못 읽으면 '' */
+  keypadDiag: async (tab: Tab): Promise<string> =>
+    call(tab.view.webContents, '__samba.keypadDiag()', z.string()).catch(() => ''),
   keypadUnlabeled: async (tab: Tab): Promise<KeypadCellDto[] | null> => {
     const wc = tab.view.webContents
     const main = await call(wc, opToCode({ op: 'keypadUnlabeled' }), keypadUnlabeledSchema)
@@ -722,6 +738,24 @@ export const pageBridge = {
       return withAutomationInput(wc, () => pageBridge.typeLoginNow(tab, id, value))
     return pageBridge.typeLoginNow(tab, id, value)
   },
+  /** 글자가 정확히 같은 요소(요소 목록에 안 잡히는 칸 포함)에 번호를 매겨 돌려준다. 없으면 -1. 최상위 문서만 본다 */
+  idOfExactText: async (tab: Tab, text: string, nth: number): Promise<number> => {
+    const wc = tab.view.webContents
+    if (wc.isDestroyed()) return -1
+    return call(wc, opToCode({ op: 'idOfExactText', text, nth }), z.number()).catch(() => -1)
+  },
+  /** 요소의 조상 상자들(DOM id 끝마디·크기) — 진단용 */
+  ancestorsOf: async (tab: Tab, id: number): Promise<string> => {
+    const wc = tab.view.webContents
+    if (wc.isDestroyed()) return ''
+    return call(wc, opToCode({ op: 'ancestorsOf', id }), z.string()).catch(() => '')
+  },
+  /** 같은 줄의 index 번째 칸(왼쪽부터)에 번호를 매겨 돌려준다. 없으면 -1. 최상위 문서만 본다 */
+  idOfRowCell: async (tab: Tab, id: number, index: number): Promise<number> => {
+    const wc = tab.view.webContents
+    if (wc.isDestroyed()) return -1
+    return call(wc, opToCode({ op: 'idOfRowCell', id, index }), z.number()).catch(() => -1)
+  },
   /** 입력칸 값의 글자 수(값 자체는 돌려주지 않는다). 못 읽으면 -1 */
   valueLength: async (tab: Tab, id: number): Promise<number> => {
     const wc = tab.view.webContents
@@ -737,13 +771,54 @@ export const pageBridge = {
   typeLoginKeys: async (tab: Tab, id: number, value: string): Promise<string> => {
     const wc = tab.view.webContents
     if (wc.isDestroyed()) return 'page is gone'
+    // 키 입력은 포커스를 가진 페이지만 받는다. 뒤에서 도는 탭(브릿지 작업)은 포커스가 없어 글자가 하나도 안 들어가고
+    // 값 직접 넣기로 떨어졌다(실기 2026-09-29 partner.hmall.com "패스워드를 입력하세요!") — 치는 동안만 포커스를 준다
+    const before = webContents?.getFocusedWebContents?.() ?? null
+    if (typeof wc.focus === 'function' && !(wc.isFocused?.() ?? false)) wc.focus()
+    const giveBack = (): void => {
+      if (before && before !== wc && !before.isDestroyed()) before.focus?.()
+    }
     const point = await pageBridge.rectOf(tab, id).catch(() => null)
     if (!point || !(await pageBridge.clickHuman(tab, point.x, point.y))) {
+      giveBack()
+      console.warn(`[type-login] 클릭 실패(좌표 ${point ? '있음' : '없음'}) — 값 직접 넣기로`)
       return pageBridge.fillValue(tab, id, value)
     }
     try {
       // 클릭이 포커스로 이어질 시간을 준다
       await pause(HUMAN_FOCUS_MS)
+      // 이 칸이 포커스를 받았을 때만 친다 — 아니면 글자가 다른 칸(아이디 칸)에 쳐진다. 값 직접 넣기로 돌아간다
+      const { id: focusId } = decodeFrameId(id)
+      const isFocused = (): Promise<boolean> =>
+        call(wc, opToCode({ op: 'hasFocus', id: focusId }), z.boolean()).catch(() => false)
+      let focused = await isFocused()
+      // 첫 클릭이 포커스로 안 이어질 때가 있다(Nexacro: 화면이 덜 그려졌을 때) — 두 번까지 다시 누른다
+      for (let i = 0; i < FOCUS_RETRIES && !focused; i++) {
+        await pause(FOCUS_RETRY_MS)
+        await pageBridge.clickHuman(tab, point.x, point.y)
+        await pause(HUMAN_FOCUS_MS)
+        focused = await isFocused()
+      }
+      // 클릭으로 안 되면 요소에 직접 포커스를 준다(Nexacro 비밀번호 칸은 클릭 좌표가 안내 글자 층에 걸린다)
+      if (!focused) {
+        focused = await call(wc, opToCode({ op: 'focusEl', id: focusId }), z.boolean()).catch(
+          () => false
+        )
+        if (focused) await pause(HUMAN_FOCUS_MS)
+      }
+      // 그래도 안 되면 Tab 으로 다음 칸에 간다(아이디 칸 다음이 비밀번호 칸인 화면 — Nexacro). 옮겨 간 칸이
+      // 이 칸이 아니면 치지 않는다
+      if (!focused) {
+        wc.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
+        wc.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+        await pause(HUMAN_FOCUS_MS)
+        focused = await isFocused()
+      }
+      if (!focused) {
+        giveBack()
+        console.warn('[type-login] 클릭 뒤 이 칸에 포커스가 없다 — 키 입력을 하지 않고 값 직접 넣기로')
+        return pageBridge.fillValue(tab, id, value)
+      }
       // 이미 든 값(아이디 저장 등)은 전체 선택으로 덮어쓴다
       wc.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: ['control'] })
       wc.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['control'] })
@@ -765,13 +840,19 @@ export const pageBridge = {
         await pause(HUMAN_KEY_MIN_MS + Math.random() * HUMAN_KEY_JITTER_MS)
       }
     } catch {
+      giveBack()
       return pageBridge.fillValue(tab, id, value)
     }
+    giveBack()
     const { id: localId } = decodeFrameId(id)
     const length = await call(wc, opToCode({ op: 'valueLength', id: localId }), z.number()).catch(
       () => -1
     )
-    if (length !== value.length) return pageBridge.fillValue(tab, id, value)
+    if (length !== value.length) {
+      // 글자 수만 남긴다(값은 남기지 않는다)
+      console.warn(`[type-login] 키 입력 뒤 글자 수 ${length}/${value.length}, 포커스 ${wc.isFocused?.()} — 값 직접 넣기로`)
+      return pageBridge.fillValue(tab, id, value)
+    }
     return 'ok'
   },
   /**

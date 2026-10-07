@@ -100,6 +100,12 @@ const BOOTSTRAP = `(() => {
     // 글자로 요소를 찾는다 — 번호는 페이지를 읽을 때마다 바뀌므로, 다시 쓸 코드는 이걸로 쓴다
     idOf: (text, nth) => invoke('page.idOf', [text, nth || 0]),
     clickText: (text, nth) => invoke('page.clickText', [text, nth || 0]),
+    // 요소 목록에 안 잡히는 칸(그리드 셀)을 정확한 글자로 찾아 번호를 준다(-1 = 없음)
+    idOfExact: (text, nth) => invoke('page.idOfExact', [text, nth || 0]),
+    // 그 칸과 같은 줄의 index 번째 칸(왼쪽부터) 번호 — 그리드의 체크 칸을 누를 때 쓴다(-1 = 없음)
+    // 진단: 요소의 조상 상자들(DOM id 끝마디·크기)
+    ancestorsOf: (id) => invoke('page.ancestorsOf', [id]),
+    idOfRowCell: (id, index) => invoke('page.idOfRowCell', [id, index || 0]),
     // 합성 클릭을 무시하는 요소(커스텀 드롭다운 등)를 요소 가운데 좌표로 진짜 마우스 클릭한다(실기: 렉스몬드 옵션)
     clickNative: (id) => invoke('page.clickNative', [id]),
     dismissOverlay: () => invoke('page.dismissOverlay', []),

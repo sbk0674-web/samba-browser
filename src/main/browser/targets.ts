@@ -16,6 +16,8 @@ export interface AgentTarget {
   openerId?: string
   /** 탭이면 활성 탭인지, 팝업이면 AI 표식이 붙어 있는지 */
   active: boolean
+  /** 그 탭·팝업이 속한 계정 프로필 — 스크립트가 같은 주소의 탭 여럿 중 이 계정의 것을 가린다 */
+  profile?: string
   /** 레인이 연 탭(과 그 팝업)이면 레인 이름 — 레인 없는 세션의 목록에만 붙는다(labelLaneTargets) */
   lane?: string
 }
@@ -26,6 +28,7 @@ export interface TargetInfo {
   title: string
   url: string
   openerId?: string
+  profile?: string
 }
 
 /**
@@ -44,6 +47,7 @@ export function buildTargets(
     title: t.title,
     url: t.url,
     ...(t.openerId === undefined ? {} : { openerId: t.openerId }),
+    ...(t.profile === undefined ? {} : { profile: t.profile }),
     active
   })
   return [

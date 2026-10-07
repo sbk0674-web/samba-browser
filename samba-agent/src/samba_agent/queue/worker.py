@@ -5,9 +5,10 @@ needs_human 으로 두고 사람이 슬랙에서 승인할 때까지 기다린�
 """
 
 import logging
+import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.failures import FailReason
@@ -17,8 +18,14 @@ from samba_agent.ops.tracing import run_metadata, traced
 from samba_agent.queue.db import PAY_STARTED_STEP, Job, JobQueue
 from samba_agent.queue.tabs import TabJanitor
 from samba_agent.supervisor.approval import resume_command
+from samba_agent.wave.flags import auto_cancel_evidence
 
 THREAD_PREFIX = 'job:'
+# 카카오페이 비밀번호를 사람이 끝내 안 넣어 멈춘 결제(payer 문구) — 다른 수단으로 사지 않고 메모만 남긴다
+KAKAO_FALLBACK_MARK = '카카오페이 폰 비밀번호를 기다렸지만'
+# 배송지를 저장했는데 목록에 바로 안 보여 멈춘 결제 전 실패(구매 문구) — 한 번 다시 돌린다
+SHIP_RETRY_MARK = '저장 뒤 목록에 없음'
+SHIP_RETRY_KEY = '_ship_retry'
 
 _log = logging.getLogger(__name__)
 
@@ -50,9 +57,18 @@ class WorkerDeps:
     events: EventLog | None = None
     env: str = 'dev'
     prompt_commit: str = '-'
-    # 이행하지 못한 주문 표시(가격X·재고X) — (주문번호, 실패 사유) → 결과 한 줄(붙일 게 없으면 None).
+    # 이행하지 못한 주문 표시(가격X·재고X) — (작업 키(행 id), 실패 사유) → 결과 한 줄(붙일 게 없으면 None).
     # dry-run 에서는 부르지 않는다
-    flag_order: Callable[[str, str | None], str | None] | None = None
+    flag_order: Callable[..., str | None] | None = None
+    # 주문 메모 한 줄 덧붙이기(작업 키(행 id), 글) — 카카오페이 최저가인데 비밀번호를 못 받은 주문에 쓴다. 없으면 보고만 한다
+    add_memo: Callable[[str, str], bool] | None = None
+    # 끝난(done) 작업 뒤처리 — (작업, 그래프 결과) → 보고할 한 줄(할 일 없으면 None). SSG 선물 수락(폰)에 쓴다
+    after_done: Callable[[Job, dict], str | None] | None = None
+    # 브라우저 그래프 대신 폰으로 사는 소싱처(대문자 id → 처리기). 처리기는 (작업, 주문) → (결과, 오류 코드, 보고)
+    # 중국 크림(SHIHUO) 주문 — 得物 앱 구매(사용자 2026-10-01)
+    phone_sources: dict[str, Callable[[Job, OrderRef], tuple[str, str | None, str]]] = field(
+        default_factory=dict
+    )
     # 처리할 소싱처 범위(대문자 id). 비어 있으면 거르지 않는다. 접수 뒤 삼바웨이브에서 소싱처가 바뀐 주문을
     # 시작 직전에 한 번 더 거른다(실기 2026-09-25: 무신사로 접수된 주문이 롯데온으로 바뀌어 돌았다)
     sources: frozenset[str] = frozenset()
@@ -92,6 +108,8 @@ class Worker:
         self._tab_marks: dict[int, frozenset[str]] = {}
         # keep_tabs 일 때 아직 안 닫은 지난 작업의 시작 시점 탭 목록(가장 오래된 것 하나면 충분하다)
         self._deferred_mark: frozenset[str] | None = None
+        # 결제 단계에 들어간 작업 id — 결제가 시작된 뒤 끝나지 못한(done 아닌) 작업은 결제창 탭을 닫지 않는다
+        self._pay_started: set[int] = set()
 
     def tick(self) -> Job | None:
         """queued 1건을 집어 끝까지(또는 승인 대기까지) 돌린다. 없으면 None."""
@@ -110,12 +128,15 @@ class Worker:
             msg = mask_text(str(e))[:300]
             self.d.queue.finish(job.id, 'needs_human', error=f'주문 조회 실패: {msg}')
             self.d.report(job, f'주문 조회 실패 — 사람 확인 필요: {msg}')
-            return self.d.queue.get(job.order_no)
+            return self.d.queue.get_by_id(job.id)
         if self.d.sources and order.source.upper() not in self.d.sources:
             why = f'처리 범위 밖 소싱처: {order.source or "(없음)"} — 범위 {sorted(self.d.sources)}'
             self.d.queue.finish(job.id, 'needs_human', error=why)
             self.d.report(job, f'{job.order_no} 건너뜀 — {why}')
-            return self.d.queue.get(job.order_no)
+            return self.d.queue.get_by_id(job.id)
+        handler = self.d.phone_sources.get(order.source.upper())
+        if handler is not None:
+            return self._run_phone_order(job, order, handler)
         self._reset_finished_thread(job.id)
         if self.d.tabs is not None:
             self._close_deferred(job)
@@ -129,6 +150,35 @@ class Worker:
             'dry_run_digits': self.d.dry_run_digits,
         }
         return self._cleanup_tabs(self._invoke(job, state))
+
+    def _run_phone_order(
+        self,
+        job: Job,
+        order: OrderRef,
+        handler: Callable[[Job, OrderRef], tuple[str, str | None, str]],
+    ) -> Job | None:
+        """폰으로 사는 소싱처 — 그래프 없이 처리기 하나로 끝낸다. dry-run 이면 사지 않고 사람에게 넘긴다."""
+        if self.d.dry_run:
+            self.d.queue.finish(job.id, 'needs_human', error='dry_run')
+            self.d.report(
+                job, f'{job.order_no} 폰 구매 소싱처({order.source}) — dry-run 이라 사지 않음'
+            )
+            return self.d.queue.get_by_id(job.id)
+        self.d.queue.progress(job.id, agent=f'phone.{order.source.lower()}', step='폰 구매')
+        try:
+            outcome, fail, line = handler(job, order)
+        except Exception as exc:  # noqa: BLE001 — 처리기 예외는 사람에게 넘긴다(결제 여부는 보고 줄로 확인)
+            outcome, fail, line = (
+                'needs_human',
+                'unknown',
+                f'폰 구매 오류: {mask_text(str(exc))[:200]}',
+            )
+        self.d.queue.progress(job.id, agent=None, step=None)
+        self.d.queue.finish(job.id, outcome, error=fail)
+        # 슬랙 보고와 별개로 로그에도 남긴다 — 폰 구매는 그래프 이벤트가 없어 실패 사유를 로그에서 못 찾았다(실기 10/3)
+        _log.info('[폰 구매] %s', mask_text(f'{job.order_no} {outcome} — {line}')[:300])
+        self.d.report(job, mask_text(f'{job.order_no} {outcome} — {line}')[:300])
+        return self.d.queue.get_by_id(job.id)
 
     def _close_leftovers(self, label: str) -> None:
         """작업 시작 직전 — 지난 작업(죽은 하네스·시간 초과)이 남긴 탭을 닫는다. 화면을 남기는 설정이면 건너뛴다."""
@@ -164,7 +214,17 @@ class Worker:
         if (job.step or '').startswith('승인 대기'):
             return job  # 결제 직전 주문서가 살아 있어야 한다
         before = self._tab_marks.pop(job.id, None)
+        paid = job.id in self._pay_started
+        self._pay_started.discard(job.id)
         if before is None:
+            return job
+        if paid and job.state != 'done':
+            # 결제가 시작된 뒤 끝내지 못했다(폰 승인 대기 중 끊김·검증 실패 등) — PC 결제창이 폰 승인 결과를 받아
+            # 주문을 마무리해야 하므로 절대 닫지 않는다(실기 2026-10-06 토스: 90초 만에 접고 결제창을 닫아
+            # 폰에서는 승인됐는데 무신사 주문이 생기지 않았다). 다음 작업 시작 때 정리된다
+            if self._deferred_mark is None:
+                self._deferred_mark = before
+            _log.info('%s 결제 시작 뒤 끝나지 못함 — 결제창 탭을 남겨 둔다', job.order_no)
             return job
         if self.d.keep_tabs:
             # 화면을 남긴다 — 다음 작업 시작 때 닫는다(가장 오래된 표식을 유지해야 그 뒤 탭이 전부 닫힌다)
@@ -181,17 +241,16 @@ class Worker:
             _log.info('%s 작업이 연 탭 %d개 닫음', job.order_no, closed)
         return job
 
-    def resume(
-        self, order_no: str, approved: bool, by: str, stage: str | None = None
-    ) -> Job | None:
+    def resume(self, key: str, approved: bool, by: str, stage: str | None = None) -> Job | None:
         """슬랙 승인 버튼 → 멈춘 그래프를 깨운다.
 
+        ``key`` 는 작업 키(삼바웨이브 행 id 또는 상품주문번호 — Job.key). 승인 버튼 value 에 실려 돌아온다.
         끝난 주문이거나(중복 클릭 등) 이미 다른 단계로 넘어갔으면 None.
         ``stage`` 를 주면 지금 큐가 그 단계(``승인 대기: {stage}``)에 멈춰 있을 때만 재개한다 —
         같은 버튼을 두 번 눌러도 두 번째는 여기서 걸린다(스펙 리뷰 지적 — Critical 2).
         읽기→running 전환은 JobQueue 트랜잭션으로 원자화돼 있어 동시 호출도 하나만 통과한다.
         """
-        job = self.d.queue.try_start_resume(order_no, stage=stage)
+        job = self.d.queue.try_start_resume(key, stage=stage)
         if job is None:
             return None
         return self._cleanup_tabs(self._invoke(job, resume_command(approved, by)))
@@ -236,6 +295,7 @@ class Worker:
         job_id = state.get('job_id')
         if job_id is None:
             return
+        self._pay_started.add(int(job_id))
         self.d.queue.progress(int(job_id), agent='payer', step=PAY_STARTED_STEP)
 
     def _reset_finished_thread(self, job_id: int) -> None:
@@ -311,7 +371,7 @@ class Worker:
         self.d.queue.progress(job.id, agent=None, step=None)
         self.d.queue.finish(job.id, 'needs_human', error=str(FailReason.UNKNOWN))
         self.d.report(job, f'{job.order_no} 처리 중 오류로 사람에게 넘긴다 — {masked}')
-        return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+        return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
 
     def _apply(self, job: Job, out: dict) -> Job:
         """그래프 결과를 큐와 슬랙에 옮긴다."""
@@ -324,7 +384,8 @@ class Worker:
             self.d.queue.progress(job.id, agent=f'approval.{stage}', step=f'승인 대기: {stage}')
             self.d.queue.finish(job.id, 'needs_human')
             if self.d.approval_report is not None:
-                self.d.approval_report(job, order_no, stage, summary)
+                # 버튼 value 에는 작업 키(행 id)를 싣는다 — 같은 상품주문번호의 다른 행 승인과 섞이지 않게
+                self.d.approval_report(job, job.key, stage, summary)
             else:
                 # 버튼을 달 통로가 없을 때의 폴백 — 사람이 `@삼바` 명령으로 이어가야 한다
                 self.d.report(job, f'승인 요청\n{summary}')
@@ -337,9 +398,9 @@ class Worker:
             if self.d.auto_approve and not (manual and stage == 'pay'):
                 # 사용자가 자동 이행을 켰다 — 요약을 남긴 채 곧바로 승인해 이어 간다
                 self.d.report(job, f'자동 승인: {order_no} {stage}')
-                resumed = self.resume(order_no, True, 'auto-approve', stage)
-                return resumed if resumed is not None else self.d.queue.get(job.order_no)  # type: ignore[return-value]
-            return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+                resumed = self.resume(job.key, True, 'auto-approve', stage)
+                return resumed if resumed is not None else self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
+            return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         outcome = out['outcome']
         fail = out.get('fail_reason')
         self.d.queue.progress(job.id, agent=None, step=None)
@@ -348,22 +409,104 @@ class Worker:
             job,
             f'{job.order_no} {outcome}' + (f' — 사유 {fail}' if fail else ' — 완료'),
         )
+        if outcome == 'done' and not self.d.dry_run and self.d.after_done is not None:
+            try:
+                line = self.d.after_done(job, out)
+            except Exception as exc:  # noqa: BLE001 — 뒤처리 실패가 끝난 주문을 되돌리지 않는다
+                line = f'뒤처리 실패: {mask_text(str(exc))[:120]}'
+            if line:
+                self.d.report(job, f'{job.order_no} {line}')
+        if outcome == 'needs_human' and not self.d.dry_run and not job.options.get(SHIP_RETRY_KEY):
+            reason = _failed_reason(out)
+            if SHIP_RETRY_MARK in reason:
+                # 롯데온 선물: 새 배송지를 저장했는데 목록에 바로 안 보여 멈춘 경우 — 다시 돌리면 저장된 배송지를
+                # 기존 항목으로 골라 통과한다(실기 2026-09-30~10-01, 3건 모두 두 번째에 이행). 한 번만 다시 산다
+                self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
+                self.d.queue.enqueue(
+                    job.order_no,
+                    job.requester,
+                    {**job.options, SHIP_RETRY_KEY: 1},
+                    job.thread_ts,
+                    wave_id=job.wave_id,
+                )
+                self.d.report(job, f'{job.order_no} 배송지 저장 뒤 목록 미반영 — 한 번 다시 산다')
+                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
+        tries = int(job.options.get(ACCOUNT_RETRY_KEY) or 0)
+        if outcome == 'needs_human' and not self.d.dry_run and tries < ACCOUNT_RETRY_MAX:
+            reason = _failed_reason(out)
+            skipped = _mismatch_profile(reason)
+            already = {x for x in str(job.options.get('skip_accounts') or '').split(',') if x}
+            if skipped and skipped not in already:
+                # 그 계정 프로필의 결제 앱(네이버·페이코)이 로그아웃이거나 다른 계정이라 결제 비밀번호를 넣지 않았다
+                # (결제 안 됨). 그 계정을 빼고 다시 산다 — 뺀 계정은 쌓고, 남은 계정이 있는 한 몇 번 더 돈다
+                # (실기 2026-10-03: 29CM 계정 3개 중 2개의 페이코가 로그아웃 — 한 번만 재시도하니 셋째 계정까지 못 갔다)
+                skip_all = ','.join(sorted(already | {skipped}))
+                self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
+                self.d.queue.enqueue(
+                    job.order_no,
+                    job.requester,
+                    {**job.options, 'skip_accounts': skip_all, ACCOUNT_RETRY_KEY: tries + 1},
+                    job.thread_ts,
+                    wave_id=job.wave_id,
+                )
+                self.d.report(
+                    job,
+                    mask_text(f'{job.order_no} {reason}')[:200]
+                    + f' — {skipped} 계정을 빼고 다시 산다',
+                )
+                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
+        if outcome == 'needs_human' and not self.d.dry_run and not job.options.get('card'):
+            reason = _failed_reason(out)
+            if KAKAO_FALLBACK_MARK in reason:
+                # 카카오페이가 최저가라 결제를 시도하고 PC 알림을 줬지만 폰 비밀번호를 끝내 못 받았다 — 다른 수단으로
+                # 사지 않고 삼바 메모만 남긴다. 사람이 카카오페이로 산다(사용자 2026-10-01 "네이버페이 사지 말고 메모만")
+                paid = re.search(r'\[카카오페이 ([^\]]+)\]', reason)
+                memo = (
+                    f'카카오페이 최저가({paid.group(1) if paid else "금액 미확인"}) — 결제 시도·알림했지만 '
+                    '폰 비밀번호 미입력. 사람이 카카오페이로 결제해 주세요'
+                )
+                note = '메모 남김'
+                if self.d.add_memo is not None:
+                    try:
+                        self.d.add_memo(job.key, memo)
+                    except Exception as exc:  # noqa: BLE001 — 메모 실패가 작업 결과를 바꾸지 않는다
+                        note = f'메모 실패: {mask_text(str(exc))[:80]}'
+                self.d.report(
+                    job, f'{job.order_no} 카카오페이 최저가·비밀번호 미입력 — {note}(사람이 결제)'
+                )
+                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         export_alert = _export_alert(out)
         if export_alert is not None:
             self.d.report(job, mask_text(f'{job.order_no} 외부 기입 {export_alert}')[:200])
         if fail and outcome != 'done' and self.d.flag_order is not None and not self.d.dry_run:
             reason = _failed_reason(out)
             if str(fail) in (str(FailReason.OUT_OF_STOCK), str(FailReason.MARGIN)):
-                # 품절·마진 미달은 자동으로 재고X·가격X·취소요청하지 않는다 — 스크립트 문구('L (품절)' 합성 등)는
-                # 페이지 근거가 아니다. 검수자가 상품 페이지를 직접 보고 근거(본 가격·품절 표시)를 메모에 적은 뒤
-                # 취소한다(사용자 2026-09-28: 근거 없는 취소 금지)
+                # 품절·마진 미달: 페이지에서 확인한 근거(확정 품절 문구, 주문서 원가·마진)가 있으면 그 근거를 메모에 적고
+                # 바로 취소중으로 돌린다(사용자 2026-09-29 "멈춘 주문 자동 처리"). 근거가 없거나 포이즌이면 예전처럼
+                # 사람이 본다(사용자 2026-09-28: 근거 없는 취소 금지)
                 kind = '재고X' if str(fail) == str(FailReason.OUT_OF_STOCK) else '가격X'
-                self.d.report(job, f'{job.order_no} {kind} 보류 — 검수 필요({mask_text(reason)[:80]})')
+                evidence = auto_cancel_evidence(
+                    out.get('order'),
+                    str(fail),
+                    reason,
+                    _buy_payload(out),
+                    time.strftime('%m/%d %H:%M'),
+                )
+                if evidence:
+                    # 표시·취소는 그 행(사이즈)만 — 키는 행 id
+                    flagged = self.d.flag_order(job.key, str(fail), evidence)
+                    self.d.report(
+                        job, f'{job.order_no} {kind} 자동 취소중 — {flagged or "결과 없음"}'
+                    )
+                else:
+                    self.d.report(
+                        job, f'{job.order_no} {kind} 보류 — 검수 필요({mask_text(reason)[:80]})'
+                    )
             else:
-                flagged = self.d.flag_order(job.order_no, str(fail))
+                flagged = self.d.flag_order(job.key, str(fail))
                 if flagged:
                     self.d.report(job, f'{job.order_no} {flagged}')
-        return self.d.queue.get(job.order_no)  # type: ignore[return-value]
+        return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
 
 
 def _export_alert(out: dict) -> str | None:
@@ -385,6 +528,35 @@ def _export_alert(out: dict) -> str | None:
     if status not in ('conflict', 'error'):
         return None
     return f'{status}: {reason or ""}'
+
+
+def _buy_payload(out: dict) -> dict[str, object] | None:
+    """구매 에이전트 결과의 payload(원가·마진·계정·수단). 없으면 None."""
+    for name, r in (out.get('results') or {}).items():
+        if not str(name).startswith('buyer'):
+            continue
+        payload = getattr(r, 'payload', None) if not isinstance(r, dict) else r.get('payload')
+        if isinstance(payload, dict) and payload.get('cost') is not None:
+            return payload
+    return None
+
+
+# 네이버페이 창 계정 불일치(payer.NAVERPAY_MISMATCH_MARK) 사유에서 문제 계정(프로필) 이름을 뽑는다
+ACCOUNT_RETRY_KEY = '_account_retry'
+# 결제 앱 계정 문제로 계정을 빼고 다시 사는 횟수 상한(계정 수보다 하나 적게)
+ACCOUNT_RETRY_MAX = 3
+_MISMATCH_PROFILE_RE = re.compile(r'네이버페이 창 계정 불일치: 프로필 (\S+) 의')
+# 결제창이 결제 앱(페이코·네이버·카카오) 로그인 화면이고 앱 로그인으로도 못 넘어갔다 — 그 프로필은 결제 앱에 로그인돼
+# 있지 않다. 결제는 안 됐으니 그 계정만 빼고 다시 산다(실기 2026-10-03: 29CM 최저 계정의 페이코가 로그아웃이라 주문이
+# 하루 가까이 멈췄다 — 다른 세 계정은 페이코 로그인 상태였다)
+_LOGIN_POPUP_PROFILE_RE = re.compile(r'결제창이 로그인 화면이다\([^)]*\) — 프로필 (\S+) 에서')
+
+
+def _mismatch_profile(reason: str) -> str:
+    """결제 앱 계정 문제(네이버페이 창 계정 불일치·결제창 로그인 화면)로 멈춘 사유면 그 계정 이름, 아니면 빈 문자열."""
+    m = _MISMATCH_PROFILE_RE.search(reason) or _LOGIN_POPUP_PROFILE_RE.search(reason)
+    name = m.group(1) if m else ''
+    return '' if name == '-' else name
 
 
 def _failed_reason(out: dict) -> str:

@@ -716,6 +716,30 @@ export function valueLength(id: number): number {
   return -1
 }
 
+/**
+ * 이 요소가 지금 키 입력을 받는가(document.activeElement). 진짜 키 입력 전에 확인한다 — 클릭이 포커스로
+ * 이어지지 않으면 글자가 앞서 포커스된 칸(아이디 칸)에 쳐진다(실기 2026-09-25 네이버, 2026-09-29 partner.hmall.com)
+ */
+export function hasFocus(id: number): boolean {
+  const el = get(id)
+  const active = document.activeElement
+  if (!el || !active) return false
+  if (active === el) return true
+  // Nexacro 는 포커스를 받으면 안내 글자용 칸(type=text)을 비밀번호 칸으로 바꿔 끼운다 — 요소는 달라져도
+  // DOM id 가 같거나 같은 부모 안의 입력칸이면 같은 칸이다
+  if (!(active instanceof HTMLInputElement)) return false
+  if (el.id !== '' && active.id === el.id) return true
+  return el.parentElement !== null && el.parentElement.contains(active)
+}
+
+/** 요소에 포커스를 준다(클릭이 포커스로 이어지지 않는 화면용 — Nexacro). 포커스를 받았으면 true */
+export function focusEl(id: number): boolean {
+  const el = get(id)
+  if (!el) return false
+  el.focus()
+  return hasFocus(id)
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -1156,6 +1180,95 @@ function pinCounterInput(): HTMLInputElement | null {
   return tel ?? null
 }
 
+/**
+ * 글자가 정확히 같은 요소에 번호를 매겨 돌려준다 — 누를 수 있다는 표시(버튼·링크·커서)가 없어 요소 목록에
+ * 안 잡히는 칸(Nexacro 그리드 셀 등)을 누르려는 용도다. 같은 글자가 여럿이면 가장 안쪽 요소들 중 nth 번째.
+ * 보이지 않거나 없으면 -1
+ */
+export function idOfExactText(text: string, nth = 0): number {
+  const want = text.replace(/\s+/g, ' ').trim()
+  if (want === '') return -1
+  const visible: VisibilityCache = new Map()
+  const hits: HTMLElement[] = []
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+    if ((el.textContent ?? '').replace(/\s+/g, ' ').trim() !== want) continue
+    // 같은 글자를 가진 자식이 있으면 바깥 껍데기다 — 가장 안쪽만 센다
+    if (Array.from(el.children).some((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim() === want)) continue
+    if (!isVisible(el, visible)) continue
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) continue
+    hits.push(el)
+  }
+  const el = hits[nth]
+  return el ? ensureId(el) : -1
+}
+
+/**
+ * 같은 줄(행)의 다른 칸에 번호를 매겨 돌려준다 — 그리드에서 글자로 찾은 칸(주문번호)의 줄에 있는 체크 칸을
+ * 누르려는 용도다. 기준 요소에서 위로 올라가며 형제 칸이 여럿인 첫 조상을 '줄'로 보고, 그 줄의 칸들을
+ * 화면 왼쪽부터 세어 index 번째 칸을 고른다. 없으면 -1
+ */
+export function idOfRowCell(id: number, index: number): number {
+  const base = get(id)
+  if (!base) return -1
+  const ref = base.getBoundingClientRect()
+  if (ref.height <= 0) return -1
+  // 기준 칸을 감싼 칸(글자 요소의 부모)이 줄 높이를 정한다 — 글자 요소는 칸보다 작을 수 있다
+  const line = Math.round(ref.top + ref.height / 2)
+  const onLine = (el: Element): boolean => {
+    const r = el.getBoundingClientRect()
+    if (r.width < 8 || r.height < 8 || r.width > ROW_CELL_MAX_WIDTH || r.height > ROW_CELL_MAX_HEIGHT) return false
+    return r.top <= line && r.bottom >= line
+  }
+  // 그리드는 고정 열(체크·번호)과 스크롤 열을 다른 상자에 그린다 — 문서 전체에서 같은 높이의 칸을 모은다.
+  // 겹친 요소는 가장 바깥 것(칸)만 센다
+  // 같은 높이에 있는 다른 화면(가려진 탭)의 요소가 섞이지 않게, 기준 칸을 감싼 표(넓고 높은 첫 조상) 안만 본다
+  let grid: HTMLElement | null = base.parentElement
+  while (grid) {
+    const g = grid.getBoundingClientRect()
+    if (g.width >= GRID_MIN_WIDTH && g.height >= GRID_MIN_HEIGHT) break
+    grid = grid.parentElement
+  }
+  if (!grid) return -1
+  const inGrid = Array.from(grid.querySelectorAll<HTMLElement>('*')).filter((el) => isVisible(el))
+  // Nexacro 그리드는 칸 id 가 '…gridrow_0.cell_0_3' 꼴이다 — 있으면 그것만 칸으로 센다(고정 열 상자를 칸으로 세지 않게)
+  const named = inGrid.filter((el) => NEXACRO_CELL_ID_RE.test(el.id) && onLine(el))
+  const cells = (
+    named.length >= 3
+      ? named
+      : inGrid.filter((el) => onLine(el) && !(el.parentElement && onLine(el.parentElement)))
+  )
+    .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+  const cell = cells[index]
+  return cell ? ensureId(cell) : -1
+}
+
+// 줄의 칸으로 볼 최대 크기(px) — 줄 전체를 감싼 상자·화면 레이어는 뺀다
+const ROW_CELL_MAX_WIDTH = 500
+const ROW_CELL_MAX_HEIGHT = 60
+const NEXACRO_CELL_ID_RE = /gridrow_\d+\.cell_\d+_\d+$/
+// 표로 볼 최소 크기(px)
+const GRID_MIN_WIDTH = 600
+const GRID_MIN_HEIGHT = 100
+
+/**
+ * 요소의 조상들을 안쪽부터 적는다 — DOM id 의 끝 두 마디와 크기·위치만(글자는 싣지 않는다).
+ * 화면 구조를 몰라 어느 상자가 표인지 가를 때 쓰는 진단용이다
+ */
+export function ancestorsOf(id: number): string {
+  let el: HTMLElement | null = get(id) ?? null
+  const out: string[] = []
+  for (let depth = 0; el && depth < 12; depth++) {
+    const r = el.getBoundingClientRect()
+    const tail = (el.id || '').split('.').slice(-2).join('.')
+    out.push(
+      `${el.tagName.toLowerCase()}#${tail} ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)} kids=${el.children.length}`
+    )
+    el = el.parentElement
+  }
+  return out.join(' | ')
+}
+
 /** 이 요소에 id 가 없으면 매겨 registry 에 넣는다(스냅샷을 다시 찍지 않고 누를 수 있게) */
 function ensureId(el: HTMLElement): number {
   if (idDoc !== document) resetElementIds()
@@ -1175,10 +1288,10 @@ function ensureId(el: HTMLElement): number {
  * 부분·중복 배치로 누르면 잘못 눌러 계정이 잠긴다. 이미지로 그려진 숫자는 잡지 못한다.
  * 값은 어디에서도 읽지 않는다: filled 는 비밀 입력칸의 길이(자리수)뿐이다
  */
-export function keypadLayout(): KeypadLayoutDto | null {
-  const visible: VisibilityCache = new Map()
+/** root 안에서 0~9 가 정확히 한 번씩 보이면 그 요소들. 빠지거나 겹치면 null */
+function digitCellsIn(root: ParentNode, visible: VisibilityCache): Map<string, HTMLElement> | null {
   const found = new Map<string, HTMLElement>()
-  const candidates = Array.from(document.querySelectorAll<HTMLElement>(KEYPAD_DIGIT_SELECTOR))
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>(KEYPAD_DIGIT_SELECTOR))
   for (const el of candidates) {
     const digit = singleDigitOf(el)
     if (digit === null) continue
@@ -1190,6 +1303,23 @@ export function keypadLayout(): KeypadLayoutDto | null {
     found.set(digit, el)
   }
   if (KEYPAD_DIGITS.some((d) => !found.has(d))) return null
+  return found
+}
+
+export function keypadLayout(): KeypadLayoutDto | null {
+  const visible: VisibilityCache = new Map()
+  // 키패드가 모달(role=dialog)이면 그 안만 본다 — 뒤 페이지의 '수량 1' 같은 한 자리 숫자가 키패드의 1 과 겹쳐
+  // 배치 전체가 버려졌다(실기 2026-10-06 롯데온 L.PAY 비밀번호). 모달 밖은 눌러도 먹지 않으니 볼 필요가 없다
+  let found: Map<string, HTMLElement> | null = null
+  for (const modal of Array.from(
+    document.querySelectorAll<HTMLElement>('[role="dialog"], dialog[open], [aria-modal="true"]')
+  )) {
+    if (!isVisible(modal, visible)) continue
+    found = digitCellsIn(modal, visible)
+    if (found) break
+  }
+  found = found ?? digitCellsIn(document, visible)
+  if (!found) return null
   const digits = KEYPAD_DIGITS.map((digit) => ({ digit, id: ensureId(found.get(digit)!) }))
   const pin = pinCounterInput()
   return { digits, filled: pin ? pin.value.length : null }
@@ -1199,7 +1329,8 @@ export function keypadLayout(): KeypadLayoutDto | null {
 const KEYPAD_UNLABELED_SELECTOR = 'button, [role="button"], a'
 // 보안 키패드 한 칸으로 볼 크기(px). 아이콘·전체 화면 레이어는 빼낸다
 const KEYPAD_CELL_MIN = 16
-const KEYPAD_CELL_MAX = 200
+// 창이 넓으면 네이버페이 PC 키패드 한 칸이 200px 을 넘는다(실기 2026-09-29: 버튼 11개가 다 걸러져 사람에게 넘김)
+const KEYPAD_CELL_MAX = 400
 // 숫자 10개 + 재배열·빈칸 같은 여분 버튼까지
 const KEYPAD_UNLABELED_MIN = 10
 const KEYPAD_UNLABELED_MAX = 14
@@ -1236,9 +1367,38 @@ function glyphRectOf(
   return { left, top, width: right - left, height: bottom - top }
 }
 
+/** 마지막 keypadUnlabeled 판정 요약(후보 수·묶음 수) — 실패 사유를 남기는 데만 쓴다. 값·위치는 담지 않는다 */
+let keypadDiag = ''
+
+export function lastKeypadDiag(): string {
+  return keypadDiag
+}
+
+/** 버튼 크기(4px 단위 반올림)가 같은 칸 무리 중 가장 큰 것 */
+function largestSameSizeGroup<T extends { bw: number; bh: number }>(cells: T[]): T[] {
+  const groups = new Map<string, T[]>()
+  for (const c of cells) {
+    const key = `${Math.round(c.bw / 4)}x${Math.round(c.bh / 4)}`
+    groups.set(key, [...(groups.get(key) ?? []), c])
+  }
+  let best: T[] = []
+  for (const g of groups.values()) if (g.length > best.length) best = g
+  return best
+}
+
 export function keypadUnlabeled(): KeypadCellDto[] | null {
+  keypadDiag = ''
+
   const visible: VisibilityCache = new Map()
-  const cells: { el: HTMLElement; x: number; y: number; width: number; height: number }[] = []
+  const cells: {
+    el: HTMLElement
+    x: number
+    y: number
+    width: number
+    height: number
+    bw: number
+    bh: number
+  }[] = []
   for (const el of Array.from(document.querySelectorAll<HTMLElement>(KEYPAD_UNLABELED_SELECTOR))) {
     if (singleDigitOf(el) !== null) continue
     if ((el.textContent ?? '').trim() !== '') continue
@@ -1251,11 +1411,23 @@ export function keypadUnlabeled(): KeypadCellDto[] | null {
     // OCR 은 숫자 그림 주변만 읽는 편이 정확하다(130×63 칸 전체를 주면 작은 숫자를 검출 모델이 놓친다 — 실기).
     // 버튼 안에 그림을 담은 작은 요소(스프라이트 span·img·svg)가 하나 있으면 그 사각형에 여백을 둬 쓴다
     const glyph = glyphRectOf(el, r)
-    cells.push({ el, x: glyph.left, y: glyph.top, width: glyph.width, height: glyph.height })
+    cells.push({
+      el,
+      x: glyph.left,
+      y: glyph.top,
+      width: glyph.width,
+      height: glyph.height,
+      bw: r.width,
+      bh: r.height
+    })
   }
-  if (cells.length < KEYPAD_UNLABELED_MIN || cells.length > KEYPAD_UNLABELED_MAX) return null
-  cells.sort((a, b) => a.y - b.y || a.x - b.x)
-  return cells.map((c) => ({
+  // 글자 없는 버튼이 더 있으면(재배열·지우기 아이콘 등) 크기가 같은 칸끼리 묶어 가장 큰 무리만 키패드로 본다
+  // (실기 2026-09-30 네이버페이 비밀번호 확인 창: 10~14개 범위를 넘어 사람에게 넘겼다)
+  const picked = cells.length > KEYPAD_UNLABELED_MAX ? largestSameSizeGroup(cells) : cells
+  keypadDiag = `후보 ${cells.length}개, 같은 크기 무리 ${picked.length}개`
+  if (picked.length < KEYPAD_UNLABELED_MIN || picked.length > KEYPAD_UNLABELED_MAX) return null
+  picked.sort((a, b) => a.y - b.y || a.x - b.x)
+  return picked.map((c) => ({
     id: ensureId(c.el),
     x: c.x,
     y: c.y,

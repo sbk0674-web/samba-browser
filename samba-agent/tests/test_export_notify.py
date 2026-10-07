@@ -152,3 +152,34 @@ def test_run_forever_는_멈추라고_하면_멈춘다(queue):
     )
     assert len(sent) == 1
     assert slept == [15.0]
+
+
+def test_나중에_끝난_요청의_성공을_주문_스레드에_알린다(queue):
+    req = queue.enqueue('E1', 'emp', 62470, 2300)
+    claimed = queue.claim_next(['emp'])
+    assert claimed is not None
+    queue.done(req.id, '기입 확인')
+    queue.enqueue('S1', 'shopmine', 1000, 0)
+    shop = queue.claim_next(['shopmine'])
+    assert shop is not None
+    queue.done(shop.id, '처리 1건')
+    posts: list[tuple[str | None, str]] = []
+
+    def post(thread_ts, text):
+        posts.append((thread_ts, text))
+        return True
+
+    notifier = ExportNotifier(queue, lambda _o: 't1', post, done_targets=('emp', 'emp_cancel'))
+    assert notifier.tick() == 1
+    assert posts == [('t1', 'E1 외부 기입 완료(emp) — 원가 62,470 · 배송비 2,300')]
+    assert notifier.tick() == 0
+
+
+def test_알림을_켜기_전에_들어온_성공은_알리지_않는다(queue):
+    req = queue.enqueue('E1', 'emp', 62470, 2300)
+    queue.claim_next(['emp'])
+    queue.done(req.id, '기입 확인')
+    notifier = ExportNotifier(
+        queue, lambda _o: 't1', lambda _t, _x: True, done_targets=('emp',), since='9999-01-01'
+    )
+    assert notifier.tick() == 0

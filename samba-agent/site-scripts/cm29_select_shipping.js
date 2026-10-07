@@ -34,12 +34,15 @@ function mismatch(f, e) {
 async function pickForm() {
   let c = (await tabs.list()).filter(x => /29cm\.co\.kr\/order\/checkout/.test(x.url || ''))
   if (args.tab) c = c.filter(x => x.id === String(args.tab))
+  // 계정 비교를 동시에 돌리면 계정마다 주문서 탭이 열린다 — 이 계정(프로필)의 탭만 본다
+  // (실기 2026-09-29: 'multiple checkout tabs' 로 원가를 못 읽었다)
+  if (args.profile) { const mine = c.filter(x => !x.profile || x.profile === args.profile); if (mine.length) c = mine }
   if (!c.length) return { err: 'no checkout tab' }
   const ok = []
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/총 결제금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
@@ -93,7 +96,7 @@ if (!ch) return { ok: false, note: '배송지 변경 버튼 없음' }
 await page.click(idOf(ch))
 await page.waitFor(/배송지 추가/, 6000).catch(() => {})
 let dl = ''
-for (let i = 0; i < 10 && !/\(\d{5}\)/.test(dl); i++) { await sleep(200); dl = (await page.get({ selector: '[role=dialog]' })).tree }
+for (let i = 0; i < 10 && !/\(\d{5}\)/.test(dl); i++) { await sleep(200); dl = (await page.get({ selector: '[role=dialog]' })).tree; if (!/\(\d{5}\)/.test(dl)) dl = (await page.get({})).tree }
 const dtx = text(dl).replace(/^.*?배송지 추가\s*/, '')
 // 항목은 '… 수정 (삭제) 선택|선택된 배송지' 로 끝난다 — i 번째 항목 = i 번째 선택 버튼
 const items = dtx.split(/\s선택(?:된 배송지)?(?=\s|$)/).map(s => s.replace(/\s(수정|삭제)(?=\s|$)/g, ' ').trim()).filter(s => /\(\d{5}\)/.test(s)).map(entry)

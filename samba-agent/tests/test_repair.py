@@ -212,6 +212,10 @@ def test_numeric_overlap_and_choice_resolution() -> None:
     assert numeric_overlap_options(opts, wanted) == ['718(56.8cm)']
     # 230 주문에 220 을 고르는 사고 — 숫자가 안 겹치면 AI 후보에서 빠진다
     assert numeric_overlap_options(['220', '225'], '230') == []
+    # 모자 분수 사이즈는 세 자리 코드가 꼭 같아야 한다 — 7 7/8(=778, 품절) 주문에 718 을 후보로 주지 않는다
+    caps = ['678(54.9cm) (품절)', '7(55.8cm)', '718(56.8cm)', '734(61.5cm)', '778(62.5cm) (품절)']
+    assert numeric_overlap_options(caps, '블랙 7 7/8 미국 버전') == []
+    assert numeric_overlap_options(caps, '블랙 7 1/8 미국 버전') == ['718(56.8cm)']
     assert numeric_overlap_options(['S [품절]', 'M'], '상아색 S') == ['M']
     assert resolve_choice('BLACK, ONE', ['BLACK / ONE', 'WHITE / ONE']) == 'BLACK / ONE'
     assert resolve_choice('없음', ['BLACK / ONE']) is None

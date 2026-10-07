@@ -128,11 +128,12 @@ const ARGS: Record<string, Record<string, unknown>> = {
   phone_key: { key: 'back' },
   phone_swipe: { from: { x: 10, y: 900 }, to: { x: 10, y: 200 } },
   phone_screenshot: {},
+  phone_open_window: {},
   wait_for_sms_code: {}
 }
 
 describe('폰 도구 목록', () => {
-  it('도구 7종의 이름이 정해진 이름과 같다', () => {
+  it('도구 8종의 이름이 정해진 이름과 같다', () => {
     const { tools } = build()
     expect(tools.map((t) => t.name)).toEqual([
       'phone_get_screen',
@@ -141,6 +142,7 @@ describe('폰 도구 목록', () => {
       'phone_key',
       'phone_swipe',
       'phone_screenshot',
+      'phone_open_window',
       'wait_for_sms_code'
     ])
     expect(PHONE_TOOL_NAMES).toEqual(tools.map((t) => t.name))
@@ -472,5 +474,16 @@ describe('wait_for_sms_code', () => {
     const r = await get(tools, 'wait_for_sms_code').handler({})
     expect(textOut(r)).toBe('refused: read-only mode')
     expect(waitForSmsCode).not.toHaveBeenCalled()
+  })
+})
+
+describe('phone_open_window', () => {
+  it('배선된 큰 화면 열기를 부르고, 배선 전이면 거절한다', async () => {
+    const opened: string[] = []
+    const { tools, ctx } = build()
+    expect(textOut(await get(tools, 'phone_open_window').handler({}))).toContain('refused')
+    ctx.phones.openWindow = (s: string): void => void opened.push(s)
+    expect(textOut(await get(tools, 'phone_open_window').handler({}))).toBe('ok')
+    expect(opened.length).toBe(1)
   })
 })

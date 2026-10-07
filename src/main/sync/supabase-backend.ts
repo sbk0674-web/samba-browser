@@ -16,6 +16,9 @@ import type { SessionStorageAdapter } from './session-store'
 import { readSupabaseEnv, type SupabaseEnv } from './env'
 import { tr } from '../i18n'
 
+// 삭제 표식을 받을 때 넘길 최대 페이지 수(페이지당 DEFAULT_SELECT_LIMIT 행)
+const DELETED_MAX_PAGES = 50
+
 // 인증 만료로 볼 응답 코드/문구
 const AUTH_EXPIRED = ['PGRST301', '401', 'jwt expired', 'invalid refresh token']
 
@@ -163,6 +166,25 @@ export function createSupabaseBackend(
       if (error) raise(error.message)
       return (data ?? []) as RemoteRow[]
     },
+    async selectDeleted(table, workspaceId, columns) {
+      // 삭제 표식은 수천 행일 수 있다 — id 순으로 페이지를 넘기며 모두 받는다(상한을 두어 무한정 돌지 않는다)
+      const out: RemoteRow[] = []
+      for (let page = 0; page < DELETED_MAX_PAGES; page += 1) {
+        const from = page * DEFAULT_SELECT_LIMIT
+        const { data, error } = await client
+          .from(table)
+          .select(columns)
+          .eq('workspace_id', workspaceId)
+          .not('deleted_at', 'is', null)
+          .order('id', { ascending: true })
+          .range(from, from + DEFAULT_SELECT_LIMIT - 1)
+        if (error) raise(error.message)
+        const rows = (data ?? []) as unknown as RemoteRow[]
+        out.push(...rows)
+        if (rows.length < DEFAULT_SELECT_LIMIT) break
+      }
+      return out
+    },
     async upsert(table, rows) {
       if (rows.length === 0) return
       const { error } = await client.from(table).upsert(rows)
@@ -196,13 +218,23 @@ export function createSupabaseBackend(
       if (error) return null
       return typeof data === 'number' ? data : null
     },
-    async subscribe(table, onChange) {
+    async subscribe(table, onChange, onStatus) {
       // Realtime 은 "있으면 좋은" 기능이다. 실패해도 폴링으로 계속 동작해야 한다
       try {
         const channel = client
           .channel(`samba-${table}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table }, () => onChange())
-          .subscribe()
+          .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+            // 다른 PC 의 변경이 왔다 — 바로 한 번 동기화한다(60초 폴링을 기다리지 않는다)
+            console.info(`[sync] Realtime ${table} ${String(payload.eventType)}`)
+            onChange()
+          })
+          .subscribe((status, err) => {
+            // 구독 상태를 남긴다 — SUBSCRIBED 가 아니면 Realtime 이 안 붙은 것(표가 publication 에 없거나 권한)
+            // 이라 60초 폴링만 돈다. 사용자 2026-10-06: "1분이 아니라 실시간으로 같이 바뀌어야 한다"
+            const detail = err instanceof Error ? ` ${err.message}` : ''
+            console.info(`[sync] Realtime 구독 ${table}: ${status}${detail}`)
+            onStatus?.(status === 'SUBSCRIBED')
+          })
         return () => {
           void client.removeChannel(channel)
         }

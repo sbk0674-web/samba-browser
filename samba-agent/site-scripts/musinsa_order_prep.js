@@ -23,13 +23,25 @@ await safe(() => page.waitFor('총 결제 금액', 8000))
 
 // 1) 상품 쿠폰: '쿠폰 사용|변경|적용 중' 옆 clickable 을 눌러 시트를 연다(버튼 자체는 글자에 가려 안 눌린다)
 let t = await get({ interactive: 1 })
+// 누를 자리(clickable)가 버튼 바로 다음 줄이 아닐 때가 있다 — 글자가 같은 clickable 을 어디서든 찾는다(2026-10-01)
 const cb = idOf(t, /^\[\d+\] button "쿠폰 (?:사용|변경|적용 중)"\n\[(\d+)\] clickable/m)
+  || idOf(t, /^\[(\d+)\] clickable "쿠폰 (?:사용|변경|적용 중)"/m)
+if (!cb && /^\[\d+\] button "쿠폰 (?:사용|변경|적용 중)"/m.test(t)) notes.push('coupon button found but not clickable')
 if (cb) {
   await page.click(cb)
-  const opened = await safe(() => page.waitFor('적용하기', 3000))
-  t = await get({ interactive: 1 })
-  const rs = [...t.matchAll(/^\[(\d+)\] radio "([\d,]+)원 할인/gm)].map(m => ({ id: +m[1], v: num(m[2]) })).sort((a, b) => b.v - a.v)
-  const ap = idOf(t, /^\[(\d+)\] button "적용하기"/m)
+  // '적용하기' 글자는 시트가 그려지기 전에도 DOM 에 있다 — 쿠폰 radio 가 보일 때까지 기다린다(2026-10-01 쿠폰 누락 사고)
+  let rs = []
+  for (let i = 0; i < 12 && !rs.length; i++) {
+    await sleep(500)
+    t = await get({ interactive: 1 })
+    // 쿠폰이 많으면 전체 요소 목록에서 시트 안 radio 가 잘린다 — 글자 조회('원 할인')도 함께 본다(2026-10-01)
+    const tq = await get({ query: '원 할인' })
+    rs = [...(t + '\n' + tq).matchAll(/^\[(\d+)\] radio "([\d,]+)원 할인/gm)].map(m => ({ id: +m[1], v: num(m[2]) })).sort((a, b) => b.v - a.v)
+  }
+  const opened = rs.length > 0 || /적용하기/.test(t)
+  // '적용하기' 버튼은 interactive 목록에 안 나올 때가 있다 — page.idOf 로도 찾는다
+  let ap = idOf(t, /^\[(\d+)\] button "적용하기"/m)
+  if (!ap) { const k = await safe(() => page.idOf('적용하기', 0)); if (typeof k === 'number' && k >= 0) ap = k }
   if (rs[0] && ap) {
     await page.click(rs[0].id)
     await sleep(300)

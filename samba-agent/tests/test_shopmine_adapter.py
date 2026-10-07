@@ -14,6 +14,8 @@ class FakeUi:
         self.checked: list[str] = []
         self.calls: list[str] = []
         self.statuses: list[str] = []
+        # 이미 그 작업상태인 주문(필터 목록에는 없다)
+        self.marked: list[str] = []
         self.ready_error: Exception | None = None
         self.wait_error: Exception | None = None
         # 완료됨을 눌러도 남는 주문(되읽기 불일치 시험용)
@@ -43,6 +45,10 @@ class FakeUi:
     def filtered_order_nos(self) -> list[str]:
         self.calls.append('list')
         return list(self.rows)
+
+    def order_nos_with_status(self, status: str) -> list[str]:
+        self.calls.append(f'marked {status}')
+        return list(self.marked)
 
     def select_orders(self, order_nos) -> dict[str, int]:
         self.calls.append(f'select {",".join(order_nos)}')
@@ -139,6 +145,11 @@ def test_수집_시간_초과는_AdapterRetry_timeout():
         ('3474596476 2904713019', '2904713019', True),  # GS이숍 — 토큰
         ('3474596476 2904713019', '3474596476', True),
         ('10103253087873', '10103253087873', True),
+        # 롯데홈쇼핑 — EMP 는 공백으로, 하네스는 ':' 로 나눈다
+        ('20260929B92579:1136441910', '20260929B92579 1136441910', True),
+        ('20260929B92579:1136441910', '20260929B92579  1136441910', True),
+        ('20260929B92579:1136441910', '20260929B92579 9999999999', False),
+        ('20260929B92579:1136441910', '20260929B90309 1136441910', False),
         ('10103253087873', '1010325308787', False),  # 앞부분만 같은 것은 아니다
         ('20260928C6B437', '20260928C6B9E4', False),
         ('', '20260928C6B437', False),
@@ -154,3 +165,25 @@ def test_기본은_완료됨_취소_어댑터는_지연됨으로_바꾼다():
     ShopMineAdapter(ui).complete_pending(['S1'])
     ShopMineAdapter(ui, status='지연됨').complete_pending(['S2'])
     assert ui.statuses == ['완료됨', '지연됨']
+
+
+def test_이미_그_작업상태인_주문은_끝난_것으로_본다():
+    ui = FakeUi(rows=('S1',))
+    ui.marked = ['D1']
+    done = ShopMineAdapter(ui, status='지연됨').complete_pending(['S1', 'D1', 'X9'])
+    assert done == {'S1', 'D1'}
+    assert ui.rows == []
+
+
+def test_전부_이미_바뀌어_있으면_누르지_않는다():
+    ui = FakeUi(rows=('S1',))
+    ui.marked = ['D1']
+    assert ShopMineAdapter(ui, status='지연됨').complete_pending(['D1']) == {'D1'}
+    assert not any(c.startswith('done') for c in ui.calls)
+
+
+def test_완료됨은_이미_바뀐_주문을_찾으러_큰_목록을_읽지_않는다():
+    ui = FakeUi(rows=('S1',))
+    ui.marked = ['D1']
+    assert ShopMineAdapter(ui).complete_pending(['D1']) == set()
+    assert not any(c.startswith('marked') for c in ui.calls)

@@ -24,7 +24,7 @@ import { tr, type MessageKey } from '../i18n'
 
 export type PayState =
   'idle' | 'await_app' | 'app_steps' | 'password' | 'verify' | 'done' | 'failed'
-export type PayProvider = 'toss' | 'payco' | 'kakaopay' | 'naverpay'
+export type PayProvider = 'toss' | 'payco' | 'kakaopay' | 'naverpay' | 'alipay' | 'lottecard'
 
 export interface PayProviderSpec {
   id: PayProvider
@@ -44,6 +44,12 @@ export interface PayProviderSpec {
   changeMethodText?: RegExp
   methodSheetTitle?: RegExp
   /**
+   * 결제 화면에서 선택된 카드 줄 바로 아래 오는 할부 안내 문구(토스 '할부 선택 ・ 일시불'). 있으면 그 바로 위
+   * 글자 줄이 지금 선택된 카드다 — 카드 행이 여럿 보이는 화면(실기 2026-10-06: 넥슨현대·LOCA 두 줄)에서는
+   * [결제수단 변경] 위 두 줄 규칙으로 선택 카드를 가릴 수 없다
+   */
+  installmentText?: RegExp
+  /**
    * 결제 화면에만 있는 문구. 적혀 있으면 이 문구가 보이는 화면에서만 진행 버튼을 누른다 —
    * 앱 홈이나 다른 서비스 화면의 [확인]·[다음]을 눌러 엉뚱한 곳으로 들어가지 않게 한다(실기: 토스 홈 → 용돈 화면)
    */
@@ -53,6 +59,35 @@ export interface PayProviderSpec {
    * 알림 클릭이 엉뚱한 곳으로 들어가던 앱(토스)에 쓴다. 생략하면 결제 알림을 먼저 누른다
    */
   openBy?: 'app' | 'notification'
+  /**
+   * 다른 앱(得物)이 띄운 결제창처럼 이미 앞에 떠 있으면 앱을 다시 열지 않는다 — 다시 열면 결제창이 앱 홈에 가린다
+   */
+  keepIfForeground?: boolean
+  /** 웹 결제창 없이 앱 안에서 끝나는 결제(식화·得物 → 알리페이) — 웹 성공 확인을 하지 않는다 */
+  appOnly?: boolean
+  /**
+   * 비밀번호 뒤에 단계가 더 있는 결제(알리페이 국제카드: CVV → 결제 비밀번호 → 카드사 인증 → PIN).
+   * 비밀번호를 넣은 뒤 완료만 기다리지 않고 앱 단계(버튼·다음 비밀 화면)를 계속 따라간다
+   */
+  multiStep?: boolean
+  /** 카드 CVV 를 묻는 화면의 문구 — 계정 카드 항목의 card.cvc 를 누른다 */
+  cvvHint?: RegExp
+  /** 카드사 PIN(결제 비밀번호와 같은 값, 사용자 2026-10-03) 화면의 문구 — 결제 비밀번호를 한 번 더 누른다 */
+  pinHint?: RegExp
+  /** 진행이 막히는 화면(백신 설치 요구 등) — 보이면 누르지 않고 멈춘다 */
+  blockerHint?: RegExp
+  /**
+   * 결제 요청 화면까지 앱 안에서 거쳐 가는 버튼 문구(순서대로 한 번씩 누른다). 웹 결제창이 푸시를 보내지 않고
+   * 사용자가 앱에서 코드를 넣는 결제(롯데카드 앱카드: 홈 → 로카페이 → 온라인 결제 코드 입력)에 쓴다
+   */
+  appPath?: RegExp[]
+  /**
+   * 웹 결제창이 보여 준 숫자코드를 넣는 화면의 문구. 이 화면에 숫자 키패드(UI 트리의 0~9)가 보이면
+   * PayRequest.code 자리를 차례로 누르고 진행 버튼([입력완료])을 누른다. code 가 없으면 멈춘다(엉뚱한 값을 넣지 않는다)
+   */
+  codeHint?: RegExp
+  /** 딥링크 대신 이 액티비티를 바로 띄운다(롯데카드 로카페이: 앱 홈의 [PAY] 아이콘에 접근성 글자가 없다) */
+  launchActivity?: string
 }
 
 export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
@@ -63,13 +98,19 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     // 토스는 결제 화면에서 [결제하기]만 누르면 된다 — [확인]·[다음]은 홈·광고·다른 서비스에도 있어 넣지 않는다
     confirmText: /결제하기|동의하고 결제/,
     passwordHint: /비밀번호|간편비밀번호|PIN/,
-    successHint: /결제(가)?\s?완료|송금 완료|완료되었습니다/,
+    // 비밀번호 뒤 토스는 "무신사에서 결제를 완료해주세요"(폰 승인 끝, 상점 창이 마무리) 화면을 보여 준다 —
+    // 이 화면이 폰 쪽 성공이고, 진짜 완료는 웹 결제창(webSuccess)으로 확인한다(실기 2026-10-07 00:02 — 이 문구를 못 읽어
+    // 30회 폴링 뒤 stuck 으로 끝났고, 그 사이 PC 쪽은 주문 완료가 됐다)
+    successHint: /결제(가)?\s?완료|송금 완료|완료되었습니다|결제를 완료해\s?주세요/,
     // "앱을 켜려면 비밀번호를 눌러주세요" — 토스는 앱 잠금과 결제에 같은 비밀번호를 쓴다
     unlockHint: /앱을 켜려면/,
     changeMethodText: /결제수단 변경/,
     methodSheetTitle: /결제수단 선택/,
-    payScreenHint: /결제수단 변경/,
+    installmentText: /할부 선택/,
+    // 카드 줄을 눌러 바꾸면 화면이 내려가 [결제수단 변경]이 안 보일 수 있다 — 할부 줄도 결제 화면 표식으로 본다
+    payScreenHint: /결제수단 변경|할부 선택/,
     // 실기: 알림창의 결제 알림을 눌러 들어가면 엉뚱한 곳을 누르기 일쑤였다 — 앱을 열면 결제 요청 화면이 뜬다
+    // (2026-10-06 22:31 성공 경로: 알림 전송 직후 앱 열기 → 결제 화면 → 카드 확인 → 키패드)
     openBy: 'app'
   },
   payco: {
@@ -95,6 +136,51 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     confirmText: /결제하기|확인|다음/,
     passwordHint: /결제 ?비밀번호|네이버페이 비밀번호|비밀번호/,
     successHint: /결제 ?완료|완료되었습니다/
+  },
+  // 식화·得物(더우) 앱 결제 — 앱이 알리페이 결제창을 띄운다. 6자리 결제 비밀번호 칸 제목이 'CVV를 입력하세요'로
+  // 번역돼 보인다(사용자 2026-10-01: "cvv가 결제 비밀번호다"). 키패드는 숫자가 고정이고 UI 트리에 글자가 있다
+  alipay: {
+    id: 'alipay',
+    packageName: 'com.eg.android.AlipayGphone',
+    deepLink: 'alipays://',
+    // 'PIN번호 결제' = 카드사(현대카드) 인증 화면에서 앱카드 대신 PIN 으로 간다(실기 2026-10-03 唯品会)
+    // '다음' = 카드사 인증의 백신(V3) 확인 페이지에서 설치돼 있으니 넘어가는 버튼(실기 2026-10-03)
+    // 영어 표시(알리페이 '일반버전'은 한국어가 없어 영어로 뜬다, 2026-10-03)도 함께 본다
+    confirmText: /^(?:결제|확인|确认付款|立即付款|付款|PIN번호 결제|다음|Pay|Confirm|Next|OK)$/,
+    // 한국어 알리페이 결제창(唯品会 국제카드)은 '支付密码' 글자 없이 금액·수수료·숫자 키패드만 보인다(실기 2026-10-03)
+    passwordHint:
+      /CVV를 입력|결제 ?비밀번호|支付密码|请输入|주문금액|국제카드 수수료|Enter CVV|Order total|International Card|Payment Password/i,
+    successHint: /결제 ?(?:완료|성공)|支付成功|付款成功|完成|Payment Successful|Paid/,
+    openBy: 'app',
+    keepIfForeground: true,
+    appOnly: true,
+    multiStep: true,
+    // 'CVV를 입력하세요' 제목 화면은 실제로는 6자리 결제 비밀번호 키패드다 — 실기 2026-10-03 唯品会: 결제 비밀번호 6자리를
+    // 넣으면 카드사 인증으로 넘어갔고, 카드 CVC 3자리를 넣으면 그 화면에 그대로 머물렀다. 그래서 cvvHint 는 두지 않는다
+    // (card-cvc 경로는 CVV 만 따로 묻는 화면이 확인될 때 쓴다)
+    // 카드사(현대카드) PIN 화면은 3D 인증 페이지(Cruise API) 안의 보안 키패드다
+    pinHint: /Cruise API|PIN ?번호 ?입력|비밀번호를 입력/,
+    // '백신 설치' 페이지 = 카드사 3D 인증(Cruise API)이 V3 확인을 못 받은 상태 — 이 폰에선 설치·권한·재설치로도 안 풀렸고
+    // (2026-10-03, 알리페이 12.12.16 웹뷰가 V3 스킴을 안 보냄) '다음'을 반복해 두드릴수록 카드사 위험점수만 오른다. 바로 멈춘다
+    blockerHint: /系统正忙|백신 설치|백신 앱을 설치/
+  },
+  // 롯데카드 앱카드(디지로카 앱 com.lcacApp 의 로카페이) — PC 결제창(sps.lottecard.co.kr)은 푸시를 보내지 않고
+  // 7자리 숫자코드(잔여시간 10분)를 보여 준다(실기 2026-10-06 롯데온). 폰에서 로카페이 → 코드 입력 → 결제 비밀번호 →
+  // 완료 뒤, PC 결제창의 [결제 완료]는 하네스가 누른다(appOnly: 웹 성공 확인은 하네스 몫)
+  // 실기 2026-10-06 로카페이: 홈(카드 캐러셀·[숫자 코드]) → 숫자코드 화면('PC 화면의 숫자코드를 입력해주세요', 키패드 뷰 탭)
+  // → 섞인 보안 키패드(contentDesc 0~9·삭제·입력완료, 캡처 불가). 카드는 반드시 LOCA Professional 1832(사용자 2026-10-06)
+  lottecard: {
+    id: 'lottecard',
+    packageName: 'com.lcacApp',
+    deepLink: 'lcacapp://',
+    launchActivity: 'com.lcacApp/.appcard.views.activity.AppCardActivity',
+    confirmText: /^(?:결제하기|확인|다음|결제|입력완료)$/,
+    passwordHint: /결제 ?비밀번호|간편 ?비밀번호|비밀번호 ?(?:6자리|입력)/,
+    successHint: /결제(?:가)? ?완료|승인(?:이)? ?완료|완료되었습니다|결제 성공/,
+    openBy: 'app',
+    appOnly: true,
+    appPath: [/LOCA Professional 1832/, /^숫자 ?코드$/, /숫자코드\(7자리\) 입력 키패드/],
+    codeHint: /숫자코드 입력|PC 화면의 숫자코드/
   }
 }
 
@@ -106,7 +192,9 @@ export const PAY_APP_TO_PAYMENT_PROVIDER: Record<PayProvider, PaymentProvider> =
   toss: 'toss',
   payco: 'payco',
   kakaopay: 'kakao',
-  naverpay: 'naver'
+  naverpay: 'naver',
+  alipay: 'alipay',
+  lottecard: 'lottecard'
 }
 
 /**
@@ -115,7 +203,9 @@ export const PAY_APP_TO_PAYMENT_PROVIDER: Record<PayProvider, PaymentProvider> =
  * 토스·카카오·페이코는 전화번호 결제라 구매 사이트 계정의 항목을 그대로 쓴다
  */
 export const PAY_APP_ACCOUNT_HOST: Partial<Record<PayProvider, string>> = {
-  naverpay: PAYMENT_PROVIDER_ACCOUNT_HOST.naver ?? 'naver.com'
+  naverpay: PAYMENT_PROVIDER_ACCOUNT_HOST.naver ?? 'naver.com',
+  alipay: PAYMENT_PROVIDER_ACCOUNT_HOST.alipay ?? 'alipay.com',
+  lottecard: PAYMENT_PROVIDER_ACCOUNT_HOST.lottecard ?? 'lottecard.co.kr'
 }
 
 /** 앱 화면을 더듬는 최대 스텝(무한 루프 방지) */
@@ -236,8 +326,8 @@ type CardStep =
   | { kind: 'missing' }
   | { kind: 'tap'; x: number; y: number; label: string }
 
-/** 결제 화면에서 [결제수단 변경] 위로 이만큼 안의 글자를 "지금 선택된 카드" 줄로 본다(카드명·일시불 안내) */
-const SELECTED_CARD_LOOKBACK = 3
+/** 글자 있는 줄 기준으로 카드명·일시불 안내 두 줄만 본다 */
+const SELECTED_CARD_TEXT_LINES = 2
 
 /**
  * 결제 화면에 지금 선택돼 있는 카드 이름. [결제수단 변경] 버튼 바로 위 몇 줄만 본다 —
@@ -245,13 +335,28 @@ const SELECTED_CARD_LOOKBACK = 3
  * (실기: 현대카드를 지정했는데 롯데(LOCA)로 결제됐다). 변경 버튼이 없으면 빈 문자열
  */
 export function selectedCardOf(screen: PhoneScreen, spec: PayProviderSpec): string {
+  // 할부 줄이 있으면 그 바로 위 글자 줄이 선택된 카드다(실기 2026-10-06 토스: 카드 행 두 줄 중 선택된 행 아래에만 할부 줄)
+  if (spec.installmentText) {
+    const at = screen.elements.findIndex((e) => spec.installmentText?.test(e.text))
+    if (at >= 0) {
+      const above = screen.elements
+        .slice(0, at)
+        .map((e) => e.text.trim())
+        .filter((t) => t !== '')
+      return above[above.length - 1] ?? ''
+    }
+  }
   if (!spec.changeMethodText) return ''
   const idx = screen.elements.findIndex((e) => spec.changeMethodText?.test(e.text))
   if (idx < 0) return ''
+  // 글자 없는 클릭 요소(체크 원·행 틀)는 세지 않는다 — 사이에 끼어 있어도 카드 이름 줄이 밀리지 않게(실기 2026-10-06 토스:
+  // '넥슨현대UNLIMITED' 와 [결제수단 변경] 사이에 빈 요소가 있어 선택 카드를 못 읽고 card-not-found).
+  // 다만 보는 범위는 옛 규칙(원래 요소 3개)과 같은 크기의 글자 있는 줄 2개로 좁힌다 — 카드 줄과 '일시불' 안내 줄뿐이다
   return screen.elements
-    .slice(Math.max(0, idx - SELECTED_CARD_LOOKBACK), idx)
+    .slice(0, idx)
     .map((e) => e.text.trim())
     .filter((t) => t !== '')
+    .slice(-SELECTED_CARD_TEXT_LINES)
     .join(' ')
 }
 
@@ -279,6 +384,17 @@ export function cardStep(screen: PhoneScreen, spec: PayProviderSpec, card: RegEx
   const change = spec.changeMethodText
     ? screen.elements.find((e) => spec.changeMethodText?.test(e.text))
     : undefined
+  // 결제 화면에 카드 행이 바로 보이면(토스: 넥슨현대·LOCA 두 줄) 그 행을 눌러 고른다 — [결제수단 변경] 목록을
+  // 거치면 "결제 취소할까요?" 팝업이 떴다(실기 2026-10-06). 카드 행은 할부 줄(없으면 변경 버튼) 위에만 있다 —
+  // 그 아래의 혜택 안내("현대카드로 결제하면…")는 카드 행이 아니다
+  const limit =
+    (spec.installmentText
+      ? screen.elements.find((e) => spec.installmentText?.test(e.text))
+      : undefined) ?? change
+  const row = limit
+    ? screen.elements.find((e) => e.bounds.t < limit.bounds.t && card.test(e.text))
+    : undefined
+  if (row) return at(row)
   // 변경 버튼이 안 보이면 아직 결제 화면이 아니다 — 카드가 없다고 단정하지 않고 기다린다
   return change ? at(change) : { kind: 'wait' }
 }
@@ -312,9 +428,20 @@ export function nextPayState(
     case 'app_steps':
       return stepInApp(screen, spec)
     case 'password':
-      return hasText(screen, spec.successHint) ? { state: 'verify' } : { state: 'password' }
+      if (hasText(screen, spec.successHint)) return { state: 'verify' }
+      // 단계가 더 있는 결제: 비밀 화면이 끝났으면(카드사 인증 안내 등) 그 화면의 버튼을 따라간다
+      if (spec.multiStep && !isSecretScreen(screen, spec)) return stepInApp(screen, spec)
+      return { state: 'password' }
     case 'verify':
-      return hasText(screen, spec.successHint) ? { state: 'done' } : { state: 'verify' }
+      if (hasText(screen, spec.successHint)) return { state: 'done' }
+      // 비밀번호 뒤에 카드사 인증이 더 있는 결제는 다음 화면(버튼·비밀 화면)을 계속 따라간다
+      if (
+        spec.multiStep &&
+        (isSecretScreen(screen, spec) || findConfirm(screen, spec.confirmText) !== undefined)
+      ) {
+        return stepInApp(screen, spec)
+      }
+      return { state: 'verify' }
     default:
       return { state }
   }
@@ -331,6 +458,12 @@ export type PayFailReason =
   | 'stuck'
   // 지정한 카드가 결제 앱의 카드 목록에 없다(다른 카드로 결제하지 않고 멈춘다)
   | 'card-not-found'
+  // CVV 를 물었는데 계정에 카드 항목(card.cvc)이 없거나 둘 이상이다
+  | 'card-not-saved'
+  // 카드사 인증이 백신 앱 설치 등 사람만 할 수 있는 것을 요구한다
+  | 'blocked-by-app'
+  // 앱이 숫자코드를 묻는데 요청에 code 가 없다(롯데카드 앱카드)
+  | 'code-missing'
   // 배선부가 실행기에 닿기도 전에 막는 두 가지(계정 특정 실패·연결된 폰 없음)
   | 'no-account'
   | 'no-phone'
@@ -363,6 +496,8 @@ export interface PayRequest {
   jobId?: string
   /** 결제 앱 안에서 고를 카드 이름의 일부(예: "현대"). 지금 선택된 카드가 이와 다르면 바꾼 뒤 결제한다 */
   cardHint?: string
+  /** 웹 결제창이 보여 준 숫자코드(롯데카드 앱카드 7자리) — spec.codeHint 화면에 친다. 숫자만 */
+  code?: string
   /** 결제 전에 확인 카드를 띄울지. 생략하면 띄운다(guard). 자동 모드에서는 false */
   confirmFirst?: boolean
   /**
@@ -388,6 +523,8 @@ export interface PayRunDeps {
     screenshot: (serial: string) => Promise<{ png: Buffer; secret: boolean }>
     /** 뒤로 키. 시험 입력을 취소하고 키패드에서 빠져나오는 데만 쓴다 */
     back?: (serial: string) => Promise<void>
+    /** 글자 입력(숫자코드). 비밀 값은 절대 여기로 보내지 않는다 — 결제 비밀번호는 tapPassword 가 누른다 */
+    typeText?: (serial: string, text: string) => Promise<'ok' | 'unsupported-text'>
   }
   /** 딥링크로 결제 앱을 앞으로 부른다(배선부가 am start 로 채운다) */
   launchApp: (serial: string, deepLink: string) => Promise<void>
@@ -546,7 +683,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
         // 비밀번호 화면이 사라지면 사용자가 직접 끝낸 것으로 본다
         stillBlocked: async () => isSecretScreen(await deps.phones.screen(req.serial), spec)
       })
-      if (result.outcome === 'resumed' && (await deps.webSuccess())) {
+      if (result.outcome === 'resumed' && (spec.appOnly || (await deps.webSuccess()))) {
         deps.onStep(tr('phone.payDoneByUser'), true)
         return finish(true)
       }
@@ -577,13 +714,20 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
     if (!(await openPayNotification(deps, req.serial, spec))) {
       await deps.launchApp(req.serial, spec.deepLink)
     }
-  } else {
+  } else if (!(
+    spec.keepIfForeground && (await deps.phones.screen(req.serial)).app === spec.packageName
+  )) {
     await deps.launchApp(req.serial, spec.deepLink)
   }
 
   let state: PayState = 'await_app'
   let lastTapped: number | null = null
   let passwordTried = false
+  // CVV·카드사 PIN 을 넣은 적이 있는가(알리페이 국제카드) — 결제 비밀번호와 따로 센다
+  let cvvTried = false
+  let pinTried = false
+  // 마지막으로 비밀(결제 비밀번호·CVV·PIN)을 넣은 차례 — 넣은 직후 같은 화면이 남아 있는 동안은 기다린다
+  let secretAt = -1
   // 앱 잠금 화면에 넣은 적이 있는가 — 결제 비밀번호 입력과 따로 센다
   let unlockTried = false
   let unlockedAt = -1
@@ -599,13 +743,63 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
   let cardTaps = 0
   // 카드를 지정하지 않은 결제는 앱에 선택된 카드로 나간다 — 어떤 카드였는지 진행 로그에 한 번 남긴다
   let cardNoted = false
+  // 앱 안 경로(appPath)에서 다음에 누를 버튼 차례, 숫자코드를 넣었는가
+  let pathIdx = 0
+  let codeTyped = false
 
   for (let i = 0; i < MAX_PAY_STEPS && state !== 'done'; i++) {
     screen = await deps.phones.screen(req.serial)
     const next = nextPayState(state, screen, spec)
     state = next.state
+    // 비밀 화면을 벗어났으면 입력 직후 유예도 끝난다 — 다음 비밀 화면(카드사 PIN)은 새로 센다
+    if (state !== 'password') secretAt = -1
+
+    if (spec.blockerHint && hasText(screen, spec.blockerHint)) return fail('blocked-by-app', screen)
 
     if (state === 'password') {
+      // 알리페이 국제카드: CVV → 결제 비밀번호 → 카드사 PIN(=결제 비밀번호) 순서로 비밀 화면이 셋 온다. 각각 한 번씩만
+      const cvv = spec.cvvHint !== undefined && hasText(screen, spec.cvvHint)
+      // PIN 은 보안 입력칸이 있는 화면에서만 — 'PIN번호 결제' 를 고르는 안내 화면은 버튼을 눌러야 한다
+      const pin =
+        !cvv &&
+        spec.pinHint !== undefined &&
+        hasText(screen, spec.pinHint) &&
+        screen.elements.some((e) => e.isSecret)
+      // 비밀을 넣은 직후에는 화면이 넘어가는 동안 같은 화면이 잠깐 더 보인다 — 그동안은 기다리기만 한다
+      if (secretAt >= 0 && i - secretAt <= UNLOCK_GRACE_POLLS) {
+        await sleep(PAY_POLL_MS)
+        continue
+      }
+      if (cvv || pin) {
+        if (cvv ? cvvTried : pinTried) return fail('verify-failed', screen)
+        secretAt = i
+        if (cvv) cvvTried = true
+        else pinTried = true
+        const layout = await resolveKeypad(deps, screen, req.serial, (v) => (usedVisual = v))
+        if (!layout) return handOff(screen)
+        const r = await tapPassword({
+          vault: deps.vault,
+          accountId: req.accountId,
+          provider: PAY_APP_TO_PAYMENT_PROVIDER[req.provider],
+          ...(req.jobId === undefined ? {} : { jobId: req.jobId }),
+          serial: req.serial,
+          layout,
+          tap: deps.phones.tap,
+          onStep: deps.onStep,
+          secret: cvv ? 'card-cvc' : 'payment'
+        })
+        if (r !== 'ok') {
+          return fail(
+            cvv && (r === 'not-found' || r === 'ambiguous') ? 'card-not-saved' : SECRET_FAIL[r],
+            screen
+          )
+        }
+        deps.onStep(tr(cvv ? 'phone.payCvvTyped' : 'phone.payPinTyped'), true)
+        state = cvv ? 'app_steps' : 'verify'
+        lastTapped = null
+        await sleep(PAY_POLL_MS)
+        continue
+      }
       // 앱 잠금 화면인가(앱을 켤 때 먼저 묻는 비밀번호). 잠금 1회 + 결제 1회, 어느 쪽도 재시도하지 않는다 —
       // 같은 화면이 두 번째로 보이면 잘못 눌린 것으로 본다(오답이 쌓이면 잠긴다)
       const unlocking = spec.unlockHint !== undefined && hasText(screen, spec.unlockHint)
@@ -615,6 +809,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
         continue
       }
       if (unlocking ? unlockTried : passwordTried) return fail('verify-failed', screen)
+      if (!unlocking) secretAt = i
       if (unlocking) unlockedAt = i
       if (unlocking) unlockTried = true
       else passwordTried = true
@@ -644,11 +839,51 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
       if (r !== 'ok') return fail(SECRET_FAIL[r], screen)
       // 시험 입력이면 여기서 끝난다 — 이어서 누르지도, 완료를 기다리지도 않는다
       if (dryRun) return cancelDryRun(typedDigits)
-      // 잠금을 풀었으면 결제 화면을 마저 따라간다. 결제 비밀번호였으면 완료를 기다린다
-      state = unlocking ? 'app_steps' : 'verify'
+      // 잠금을 풀었으면 결제 화면을 마저 따라간다. 결제 비밀번호였으면 완료를 기다린다 —
+      // 단계가 더 있는 결제(알리페이 국제카드)는 카드사 인증 버튼·PIN 화면을 계속 따라간다
+      state = unlocking || spec.multiStep ? 'app_steps' : 'verify'
       lastTapped = null
       await sleep(PAY_POLL_MS)
       continue
+    }
+
+    // 숫자코드 화면(롯데카드 앱카드): 진행 버튼보다 먼저 코드를 넣는다 — 빈 채로 [확인]을 누르지 않는다
+    // 숫자 키패드(0~9)가 보여야 코드 화면이다 — 안내 문구만 있는 화면(키패드 뷰를 눌러야 키패드가 뜬다)은 경로 버튼으로 본다
+    const codeKeypad =
+      spec.codeHint && state === 'app_steps' && !codeTyped && hasText(screen, spec.codeHint)
+        ? deps.keypad.fromUiTree(screen)
+        : null
+    if (codeKeypad) {
+      const code = req.code?.trim() ?? ''
+      if (!/^\d{4,12}$/.test(code)) return fail('code-missing', screen)
+      // 코드는 비밀이 아니다 — 자리마다 키패드의 그 숫자를 누른다(키 배치는 섞여 있어 화면에서 읽은 자리를 쓴다)
+      for (const d of code) {
+        const key = codeKeypad.digits[d]
+        if (!key) return fail('layout-incomplete', screen)
+        await deps.phones.tap(req.serial, key.x, key.y)
+      }
+      codeTyped = true
+      lastTapped = null
+      idlePolls = 0
+      deps.onStep(tr('phone.payCodeTyped'), true)
+      await sleep(PAY_POLL_MS)
+      continue
+    }
+    // 앱 안 경로(appPath): 결제 요청 화면으로 가는 버튼을 순서대로 한 번씩 누른다(코드를 넣기 전까지만)
+    if (spec.appPath && pathIdx < spec.appPath.length && state === 'app_steps' && !codeTyped) {
+      const want = spec.appPath[pathIdx]
+      const el = screen.elements.find(
+        (e) => want.test(e.text.trim()) || want.test(e.contentDesc ?? '')
+      )
+      if (el) {
+        pathIdx += 1
+        lastTapped = null
+        idlePolls = 0
+        deps.onStep(tr('phone.payPathTap', { label: el.text.trim() || el.contentDesc || '' }), true)
+        await deps.phones.tap(req.serial, el.center.x, el.center.y)
+        await sleep(PAY_POLL_MS)
+        continue
+      }
     }
 
     // 카드 지정: 결제하기를 누르기 전에 선택된 카드를 맞춘다
@@ -707,7 +942,7 @@ export async function runPayApproval(deps: PayRunDeps, req: PayRequest): Promise
 
   if (state !== 'done') return fail(passwordTried ? 'verify-failed' : 'stuck', screen)
   // 앱 완료 화면만으로는 부족하다 — 웹 팝업이 성공 주소로 넘어갔는지도 확인한다
-  if (!(await deps.webSuccess())) return fail('verify-failed', screen)
+  if (!spec.appOnly && !(await deps.webSuccess())) return fail('verify-failed', screen)
   deps.onStep(tr('phone.payDone'), true)
   return finish(true)
 }

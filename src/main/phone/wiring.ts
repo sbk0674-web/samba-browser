@@ -20,6 +20,7 @@ import { extractCode } from '../ai/visual'
 import type { HandoffResult } from '../agent/handoff'
 import type { PayToolRequest, PhoneOps, SmsCodeOutcome } from '../agent/tools-phone'
 import { execOutArgs, shellArgs, type AdbRunner } from './adb'
+import { ensureAwake } from './input'
 import { runSmsAuth } from './auth-flow'
 import { keypadFromUiTree } from './pay-secret'
 import type { PaySecretVault } from './pay-secret'
@@ -118,9 +119,17 @@ export function createLaunchApp(
   adb: AdbRunner
 ): (serial: string, deepLink: string) => Promise<void> {
   return async (serial, deepLink) => {
+    const spec = Object.values(PAY_PROVIDERS).find((p) => p.deepLink === deepLink)
+    if (spec?.launchActivity) {
+      // 결제 화면 액티비티를 바로 띄우는 앱(롯데카드 로카페이) — 딥링크·런처보다 확실하다
+      const direct = await adb.run(
+        shellArgs(serial, ['am', 'start', '-n', spec.launchActivity]),
+        10000
+      )
+      if (direct.code === 0 && !LAUNCH_FAILED_RE.test(`${direct.stdout}\n${direct.stderr}`)) return
+    }
     const res = await adb.run(amStartArgs(serial, deepLink), 10000)
     if (res.code === 0 && !LAUNCH_FAILED_RE.test(`${res.stdout}\n${res.stderr}`)) return
-    const spec = Object.values(PAY_PROVIDERS).find((p) => p.deepLink === deepLink)
     if (!spec) return
     await adb.run(monkeyArgs(serial, spec.packageName), 10000)
   }
@@ -140,7 +149,9 @@ export function isPaySuccessUrl(url: string): boolean {
 }
 
 /** 웹 팝업 성공 확인을 몇 번까지 다시 볼지(앱 완료보다 리다이렉트가 늦을 수 있다) */
-export const WEB_SUCCESS_TRIES = 8
+// 폰 승인 뒤 웹 결제창이 주문 완료로 넘어가기까지 — 실기 2026-10-07 토스: 폰 승인 00:02 → 무신사 주문 완료 ~00:05.
+// 8초로는 늘 verify-failed 였다. 3분까지 기다린다(성공은 보통 몇 초, 실패일 때만 길어진다)
+export const WEB_SUCCESS_TRIES = 180
 export const WEB_SUCCESS_INTERVAL_MS = 1000
 
 // --- 화면 인증번호 읽기(로컬 OCR 1차 → Visual 2차) ---------------------------
@@ -224,6 +235,12 @@ export interface PhoneRunContext {
     kind?: 'captcha' | 'keypad'
   }) => Promise<HandoffResult>
   cancelled: () => boolean
+  /**
+   * 이 호출이 보는 페이지(레인의 작업 탭). 없으면 배선부의 전역 작업 탭.
+   * 레인(하네스·수동 레인) 호출이 전역 작업 탭을 보면 사람이 보던 탭의 호스트로 계정을 찾아
+   * "계정을 특정할 수 없음" 으로 거부됐다(실기 2026-10-06)
+   */
+  page?: PagePort
 }
 
 /** PhoneService 에서 쓰는 것만 적는다(구조적 타입 — 순환 import 를 피한다) */
@@ -315,14 +332,14 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
   const online = (): PhoneDto[] => deps.phones.list().filter((p) => p.state === 'online')
 
   /** 이 사이트의 계정. 특정하지 못하면 null(결제는 시작하지 않는다) */
-  const accountFor = (host: string): AccountDto | null => {
+  const accountFor = (host: string, page: PagePort = deps.page): AccountDto | null => {
     if (!host) return null
     const accounts = deps.vault.listAccounts(host)
     if (accounts.length === 0) return null
     // 구매 계정이 여럿인 사이트(무신사의 bob·alice…)는 기본 계정이 없어 늘 "특정할 수 없음"으로
     // 끝났다(실기: 토스페이 결제 요청까지 가서 폰 승인이 거부됨). 계정별 프로필 탭의 이름으로 고른다.
     // 같은 이름의 계정이 로그인 도메인별로 여럿이면 결제 비밀번호를 가진 쪽이 먼저다
-    const profile = deps.page.profile?.() ?? ''
+    const profile = page.profile?.() ?? ''
     if (profile) {
       const named = accounts.filter((a) => a.label === profile || a.username === profile)
       const picked = named.find((a) => a.itemTypes.includes('password')) ?? named[0]
@@ -341,7 +358,8 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
   const payAccountFor = (
     siteHost: string,
     provider: PayProvider,
-    wanted: string | undefined
+    wanted: string | undefined,
+    page: PagePort = deps.page
   ): { account: AccountDto | null; ambiguous?: string[]; missing?: string } => {
     const paymentProvider = PAY_APP_TO_PAYMENT_PROVIDER[provider]
     const appHost = PAY_APP_ACCOUNT_HOST[provider]
@@ -357,7 +375,7 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
       const hit = named.find(hasSecret) ?? named[0]
       return hit ? { account: hit } : { account: null, missing: name }
     }
-    const site = accountFor(siteHost)
+    const site = accountFor(siteHost, page)
     if (site && hasSecret(site)) return { account: site }
     const withSecret = appAccounts.filter(hasSecret)
     if (withSecret.length === 1) return { account: withSecret[0] }
@@ -376,6 +394,13 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
       const assigned = deps.phones.assignForJob(accountId)
       if (assigned && list.some((p) => p.serial === assigned.serial)) return [assigned.serial]
     }
+    // 담당 폰이 없으면 설정의 기본 폰(붙어 있을 때). 없으면 연결된 폰 전부
+    const fallback = deps.settings().defaultPhoneSerial
+    if (fallback && list.some((p) => p.serial === fallback)) return [fallback]
+    // 무선 디버깅으로 붙으면 이름이 'adb-<시리얼>-xxxx._adb-tls-connect._tcp' 로 바뀐다 — 정확히 같지 않아
+    // 연결된 폰 전부로 넘어가 득물 전용 폰에서 결제 알림을 기다렸다(실기 2026-09-30). 시리얼을 품은 이름도 같은 폰으로 본다
+    const wireless = fallback ? list.find((p) => p.serial.includes(fallback)) : undefined
+    if (wireless) return [wireless.serial]
     return list.map((p) => p.serial)
   }
 
@@ -384,8 +409,9 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
 
   // --- 1) wait_for_sms_code → runSmsAuth --------------------------------------
   const waitForSmsCode = async (ctx: PhoneRunContext, host?: string): Promise<SmsCodeOutcome> => {
-    const siteHost = normalizeHost(host ?? '') || deps.page.host()
-    const account = accountFor(siteHost)
+    const page = ctx.page ?? deps.page
+    const siteHost = normalizeHost(host ?? '') || page.host()
+    const account = accountFor(siteHost, page)
     const serials = serialsFor(account?.id ?? null)
     // 인증 대기 중에만 ARS 감시를 켜고, 그 진행 로그를 이 작업의 StepLog 로 보낸다.
     // 중계를 먼저 붙인다 — 감시가 시작하자마자 알리는 경우가 있다
@@ -399,9 +425,9 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         serials: () => serials,
         siteHost,
         jobId: ctx.jobId,
-        snapshot: deps.page.snapshot,
-        fillValue: deps.page.fillValue,
-        submit: deps.page.submit,
+        snapshot: page.snapshot,
+        fillValue: page.fillValue,
+        submit: page.submit,
         autoSubmit: deps.settings().vaultAutoSubmit,
         screenshot: async (serial) => (await deps.ops.screenshot(serial)).png,
         readCodeFromImage: deps.readCode,
@@ -424,8 +450,9 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
 
   // --- 2) phone_approve_payment → runPayApproval -------------------------------
   const approvePayment = async (ctx: PhoneRunContext, req: PayToolRequest): Promise<PayResult> => {
-    const siteHost = deps.page.host()
-    const picked = payAccountFor(siteHost, req.provider, req.payAccount)
+    const page = ctx.page ?? deps.page
+    const siteHost = page.host()
+    const picked = payAccountFor(siteHost, req.provider, req.payAccount, page)
     if (picked.ambiguous) {
       const list = picked.ambiguous.join(', ')
       ctx.onStep(
@@ -447,7 +474,7 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
     // 네이버페이: 결제창이 키마스터에서 고른 네이버 계정으로 로그인돼 있는지 맞춘다(다른 계정으로 결제 금지)
     if (req.provider === 'naverpay') {
       const expected = deps.vault.paymentAccountUsername?.(account.id, 'naver') ?? null
-      const shown = expected ? ((await deps.page.naverPayAccount?.()) ?? null) : null
+      const shown = expected ? ((await page.naverPayAccount?.()) ?? null) : null
       if (expected && shown && !maskedNaverAccountMatches(shown, expected)) {
         ctx.onStep(
           tr('phone.payRejected', {
@@ -474,13 +501,32 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
       )
       return { ok: false, reason: 'no-phone' }
     }
-    const serial = serialsFor(account.id)[0]
+    // 담당 폰이 없는 계정은 연결된 폰 중 **그 결제 앱이 깔린 폰**만 고른다 — 첫 폰으로 가면 결제 앱이 없는 폰
+    // (다른 일에 쓰는 폰)에 결제 탭이 찍힐 수 있다(2026-09-29: 플립은 得物 전용, 결제 앱은 A426N 에만 있다)
+    const candidates = serialsFor(account.id)
+    const withApp: string[] = []
+    for (const s of candidates) {
+      const res = await deps.adb
+        .run(shellArgs(s, ['pm', 'path', PAY_PROVIDERS[req.provider].packageName]), 8000)
+        .catch(() => null)
+      if (res && res.code === 0 && /package:/.test(res.stdout)) withApp.push(s)
+    }
+    const serial = withApp[0]
+    if (candidates.length && !serial) {
+      ctx.onStep(
+        tr('phone.payRejected', {
+          reason: `${PAY_PROVIDERS[req.provider].packageName} 가 깔린 폰이 없다`
+        }),
+        false
+      )
+      return { ok: false, reason: 'no-phone' }
+    }
     if (!serial) {
       ctx.onStep(tr('phone.payRejected', { reason: tr('phone.gateNoPhone') }), false)
       return { ok: false, reason: 'no-phone' }
     }
     const spec = PAY_PROVIDERS[req.provider]
-    const openerId = deps.page.activeTabId()
+    const openerId = page.activeTabId()
 
     // 화면을 볼 때마다 비밀번호 화면 여부를 표식에 반영한다 — 화면 전송이 이 값을 본다
     const screen = async (s: string): Promise<PhoneScreen> => {
@@ -493,7 +539,7 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
     // 앱 완료 화면보다 웹 리다이렉트가 늦을 수 있어 몇 초 동안 다시 본다
     const webSuccess = async (): Promise<boolean> => {
       for (let i = 0; i < WEB_SUCCESS_TRIES; i++) {
-        if (await deps.page.paymentSucceeded(openerId)) return true
+        if (await page.paymentSucceeded(openerId)) return true
         if (ctx.cancelled()) return false
         await sleep(WEB_SUCCESS_INTERVAL_MS)
       }
@@ -506,17 +552,22 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         tap: deps.ops.tap,
         screenshot: deps.ops.screenshot,
         // 시험 입력(dry-run)을 취소하고 키패드에서 빠져나올 때만 쓴다
-        back: (s) => deps.ops.key(s, 'back')
+        back: (s) => deps.ops.key(s, 'back'),
+        // 결제창 숫자코드(롯데카드 앱카드) 입력 — 비밀 값은 지나가지 않는다
+        typeText: (s, text) => deps.ops.typeText(s, text)
       },
-      launchApp: createLaunchApp(deps.adb),
+      // 폰이 잠들어 있으면 결제 앱 화면을 못 읽는다 — 앱을 부르기 전에 깨운다(실기 2026-09-30)
+      launchApp: async (serial, link) => {
+        await ensureAwake(deps.adb, serial).catch(() => {})
+        await createLaunchApp(deps.adb)(serial, link)
+      },
       // 결제 요청 알림을 누르는 것이 가장 짧은 길이다. 누를 알림은 알림 기록에서 **그 결제 앱이 올린 것**만 고르고
       // 제목이 정확히 같은 요소만 누른다 — 카카오톡의 "토스" 메시지 같은 남의 알림은 후보가 되지 않는다
       notifications: {
-        open: async (serial) =>
-          void (await deps.adb.run(
-            shellArgs(serial, ['cmd', 'statusbar', 'expand-notifications']),
-            10000
-          )),
+        open: async (serial) => {
+          await ensureAwake(deps.adb, serial).catch(() => {})
+          await deps.adb.run(shellArgs(serial, ['cmd', 'statusbar', 'expand-notifications']), 10000)
+        },
         close: async (serial) =>
           void (await deps.adb.run(shellArgs(serial, ['cmd', 'statusbar', 'collapse']), 10000)),
         list: async (serial, packageName) =>
@@ -553,6 +604,7 @@ export function createPhoneAgentBridge(deps: PhoneWiringDeps): PhoneAgentBridge 
         methodLabel: req.methodLabel,
         ...(req.card === undefined ? {} : { cardHint: req.card }),
         ...(req.dryRunDigits === undefined ? {} : { dryRunDigits: req.dryRunDigits }),
+        ...(req.code === undefined ? {} : { code: req.code }),
         phoneLabel: deps.phones.list().find((p) => p.serial === serial)?.label ?? serial,
         accountId: account.id,
         phoneId: phoneIdOf(serial),

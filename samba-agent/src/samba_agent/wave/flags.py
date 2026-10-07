@@ -66,15 +66,20 @@ class FlagMarker:
         # 취소중으로 바뀐 주문을 외부 프로그램(샵마인·EMP)에도 알린다 — 없으면 하지 않는다
         self._on_cancelled = on_cancelled
 
-    def mark(self, order_no: str, error: str | None) -> str | None:
-        """표시 + 취소요청. 결과 한 줄(해당 없으면 None). 실패해도 예외를 내지 않는다(작업 결과는 이미 정해졌다)."""
+    def mark(self, key: str, error: str | None, evidence: str | None = None) -> str | None:
+        """표시 + 취소요청. 결과 한 줄(해당 없으면 None). 실패해도 예외를 내지 않는다(작업 결과는 이미 정해졌다).
+
+        ``key`` 는 주문 키 — 삼바웨이브 행 id(ord_…) 또는 상품주문번호. 행 id 면 그 행(사이즈)만 바꾼다.
+        evidence 를 주면 그 글자가 삼바웨이브 메모의 [취소근거] 가 된다(없으면 사유 코드만).
+        """
         flag = flag_for(error)
         if flag is None:
             return None
         token, label = flag
         try:
-            changed = self._wave.set_cancel_requested(order_no, str(error), flag=token)
-            tagged = token in self._wave.get_order(order_no).flags
+            changed = self._wave.set_cancel_requested(key, evidence or str(error), flag=token)
+            detail = self._wave.get_order(key)
+            tagged = token in detail.flags
         except WaveError as e:
             return f'{label}·취소요청 실패: {e}'
         except Exception as e:  # 연결 오류 등 — 작업 결과에는 영향이 없다
@@ -82,7 +87,49 @@ class FlagMarker:
             return f'{label}·취소요청 실패: {type(e).__name__}'
         status = '취소요청으로 바꿈' if changed else '이미 취소요청'
         if self._on_cancelled is not None:
-            note = self._on_cancelled(order_no)
+            # 외부 프로그램(샵마인·EMP)은 상품주문번호로 찾는다 — 행 id 가 아니라 번호를 넘긴다
+            note = self._on_cancelled(detail.order_number or key)
             if note:
                 status = f'{status} · {note}'
         return f'{label} 표시함 · {status}' if tagged else f'{label} 태그 확인 안 됨 · {status}'
+
+
+def auto_cancel_evidence(
+    order: object | None,
+    fail: str,
+    reason: str,
+    buy_payload: dict[str, object] | None,
+    now: str,
+) -> str | None:
+    """품절·마진 미달을 사람 검수 없이 취소중으로 돌려도 되는가 — 되면 메모에 남길 근거 글자, 안 되면 None.
+
+    사용자 2026-09-29: 멈춘 주문이 쌓여 처리가 늦다 → 페이지에서 읽은 근거가 있으면 자동으로 취소중.
+    - 포이즌도 같다 — 패널티 금액 확인은 보류(사용자 2026-09-30: 그것 때문에 너무 멈춘다).
+    - 품절: 스크립트가 상품 페이지에서 품절을 확인한 사유(CONFIRMED_NO_STOCK_MARKERS)일 때만.
+    - 마진 미달: 구매 단계가 주문서 금액(원가)과 마진을 계산해 넘긴 경우만(견적이 없으면 사람이 본다).
+    """
+    if order is None:
+        return None
+    source = str(getattr(order, 'source', '') or '')
+    url = str(getattr(order, 'product_url', '') or '')
+    if fail == str(FailReason.OUT_OF_STOCK):
+        if not confirmed_no_stock(reason):
+            return None
+        return f'[자동] 품절 확인({now} {source} 상품 화면{(" " + url) if url else ""}): {reason[:300]}'
+    if fail == str(FailReason.MARGIN):
+        p = buy_payload or {}
+        try:
+            cost = float(p.get('cost') or 0)
+            margin = float(p.get('margin_pct'))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        revenue = float(getattr(order, 'revenue', 0) or 0)
+        if cost <= 0 or revenue <= 0:
+            return None
+        return (
+            f'[자동] 마진 미달 확인({now} {source} 주문서): 결제 예정 원가 {cost:,.0f}원'
+            f' · 계정 {p.get("account") or "-"} · 수단 {p.get("card") or "-"}'
+            f' > 정산금 {revenue:,.0f}원 → 마진 {margin}%'
+            f'{(" · " + str(p.get("cross"))[:80]) if p.get("cross") else ""}'
+        )
+    return None

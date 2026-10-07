@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS export_requests (
   cost INTEGER NOT NULL,
   shipping_fee INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  memo TEXT NOT NULL DEFAULT '',
   fail_reason TEXT,
   detail TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -66,6 +67,8 @@ class ExportRequest:
     next_at: str
     created_at: str
     updated_at: str
+    # 샵마인 추가메모에 넣을 글(도착예정 등, 2026-09-30). 없으면 빈 문자열
+    memo: str = ''
 
 
 def _utc_now() -> datetime:
@@ -87,6 +90,7 @@ def _to_request(row: sqlite3.Row) -> ExportRequest:
         next_at=row['next_at'],
         created_at=row['created_at'],
         updated_at=row['updated_at'],
+        memo=row['memo'] or '',
     )
 
 
@@ -103,6 +107,10 @@ class ExportQueue:
         # 읽는 쪽(하네스 대기)과 쓰는 쪽(작업자)이 서로 막지 않게 한다
         self._db.execute('PRAGMA journal_mode=WAL')
         self._db.executescript(_SCHEMA)
+        # 예전 파일에는 memo 칸이 없다 — 붙인다(2026-09-30)
+        cols = {r[1] for r in self._db.execute('PRAGMA table_info(export_requests)')}
+        if 'memo' not in cols:
+            self._db.execute("ALTER TABLE export_requests ADD COLUMN memo TEXT NOT NULL DEFAULT ''")
         # 한 연결을 여러 스레드가 쓴다(그래프 노드·알림 고리) — BEGIN~COMMIT 구간을 직렬화한다
         self._lock = threading.Lock()
 
@@ -131,7 +139,9 @@ class ExportQueue:
             'SELECT * FROM export_requests WHERE id=?', (request_id,)
         ).fetchone()
 
-    def enqueue(self, order_no: str, target: str, cost: int, shipping_fee: int) -> ExportRequest:
+    def enqueue(
+        self, order_no: str, target: str, cost: int, shipping_fee: int, memo: str = ''
+    ) -> ExportRequest:
         """요청을 넣는다. 같은 (주문번호, 대상) 이 있으면 새 행을 만들지 않는다.
 
         값이 같으면 기존 행을 그대로 돌려준다. 값이 다르면 — 이미 기입했거나(done) 기입 중(running)
@@ -148,9 +158,9 @@ class ExportQueue:
             if row is None:
                 cur = self._db.execute(
                     'INSERT INTO export_requests '
-                    '(order_no, target, cost, shipping_fee, next_at, created_at, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    (order_no, target, cost, shipping_fee, now, now, now),
+                    '(order_no, target, cost, shipping_fee, memo, next_at, created_at, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (order_no, target, cost, shipping_fee, memo, now, now, now),
                 )
                 row = self._row(int(cur.lastrowid or 0))
             elif (row['cost'], row['shipping_fee']) != (cost, shipping_fee):
@@ -164,6 +174,13 @@ class ExportQueue:
                     'fail_reason=NULL, detail=NULL, attempts=0, notified=0, next_at=?, '
                     'updated_at=? WHERE id=?',
                     (cost, shipping_fee, now, now, row['id']),
+                )
+                row = self._row(row['id'])
+            if memo and row is not None and row['memo'] != memo and row['status'] != 'done':
+                # 메모만 새로 왔다 — 값·상태는 그대로 두고 메모만 바꾼다
+                self._db.execute(
+                    'UPDATE export_requests SET memo=?, updated_at=? WHERE id=?',
+                    (memo, now, row['id']),
                 )
                 row = self._row(row['id'])
         assert row is not None
@@ -185,7 +202,12 @@ class ExportQueue:
         return _to_request(row) if row is not None else None
 
     def claim_next(self, targets: Sequence[str]) -> ExportRequest | None:
-        """맡은 대상의 대기 요청 중 가장 오래된 것을 running 으로 바꿔 돌려준다."""
+        """맡은 대상의 대기 요청 하나를 running 으로 바꿔 돌려준다.
+
+        아직 한 번도 시도하지 않은 요청이 먼저다(오래된 순). 다시 보는 요청은 그 뒤에, 가장 오래전에 본 것부터.
+        예전에는 만든 순서만 봐서, 화면에 없는 옛 요청 열몇 건이 번갈아 집히며 새 요청이 몇 시간씩 밀렸다
+        (실기 2026-10-01: EMP 취소 대기 14건 때문에 원가 기입·상품코드 조회가 한 번도 못 돌았다).
+        """
         if not targets:
             return None
         now = self._iso()
@@ -193,7 +215,8 @@ class ExportQueue:
         with self._immediate():
             row = self._db.execute(
                 f"SELECT * FROM export_requests WHERE status='pending' AND next_at<=? "
-                f'AND target IN ({marks}) ORDER BY created_at, id LIMIT 1',
+                f'AND target IN ({marks}) ORDER BY (fail_reason IS NOT NULL), '
+                'CASE WHEN fail_reason IS NULL THEN created_at ELSE updated_at END, id LIMIT 1',
                 (now, *targets),
             ).fetchone()
             if row is None:
@@ -260,14 +283,38 @@ class ExportQueue:
         reason: ExportFail,
         detail: str,
         delay_s: float,
+        *,
+        count_attempt: bool = True,
     ) -> None:
-        """다시 대기시킨다. delay_s 가 지나야 다시 집힌다."""
+        """다시 대기시킨다. delay_s 가 지나야 다시 집힌다.
+
+        count_attempt 가 거짓이면 이번 시도를 횟수에서 뺀다(사람이 돌아와 멈춘 것은 실패가 아니다).
+        """
+        back = 0 if count_attempt else 1
         with self._immediate():
             self._db.execute(
                 "UPDATE export_requests SET status='pending', fail_reason=?, detail=?, "
-                'next_at=?, updated_at=? WHERE id=?',
-                (reason.value, detail, self._iso(delay_s), self._iso(), request_id),
+                'attempts=MAX(attempts-?, 0), next_at=?, updated_at=? WHERE id=?',
+                (reason.value, detail, back, self._iso(delay_s), self._iso(), request_id),
             )
+
+    def defer_orders(
+        self, target: str, order_nos: Sequence[str], reason: ExportFail, detail: str, delay_s: float
+    ) -> int:
+        """묶음으로 같이 봤지만 화면에 없던 다른 대기 요청도 함께 미룬다(횟수는 세지 않는다).
+
+        안 미루면 방금 본 주문들이 하나씩 다시 집혀, 같은 묶음을 주문 수만큼 되풀이한다.
+        """
+        if not order_nos:
+            return 0
+        marks = ','.join('?' for _ in order_nos)
+        with self._immediate():
+            cur = self._db.execute(
+                f"UPDATE export_requests SET fail_reason=?, detail=?, next_at=?, updated_at=? "
+                f"WHERE target=? AND status='pending' AND order_no IN ({marks})",
+                (reason.value, detail, self._iso(delay_s), self._iso(), target, *order_nos),
+            )
+        return int(cur.rowcount)
 
     def recover_running(self, targets: Sequence[str]) -> int:
         """작업자가 도중에 죽어 남은 running 을 되돌린다.
@@ -331,6 +378,19 @@ class ExportQueue:
             ).fetchall()
         return [_to_request(r) for r in rows]
 
+    def unnotified_done(self, targets: Sequence[str], since: str) -> list[ExportRequest]:
+        """그 대상들에서 since 뒤에 들어와 성공으로 끝났고 아직 알리지 않은 요청."""
+        if not targets:
+            return []
+        marks = ','.join('?' for _ in targets)
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT * FROM export_requests WHERE status='done' AND notified=0 "
+                f'AND created_at>=? AND target IN ({marks}) ORDER BY id',
+                (since, *targets),
+            ).fetchall()
+        return [_to_request(r) for r in rows]
+
     def mark_notified(self, request_id: int) -> None:
         with self._immediate():
             self._db.execute(
@@ -360,13 +420,15 @@ class ExportQueue:
     def has_older_pending(self, target: str, before_id: int) -> bool:
         """이 대상에 ``before_id`` 보다 먼저 들어온 대기 요청이 있는가.
 
-        있으면 이 요청은 한참 뒤에나 집힐 테니 export 단계가 기다려도 소용없다
+        있으면 이 요청은 한참 뒤에나 집힐 테니 export 단계가 기다려도 소용없다.
+        한 번 시도하고 다시 대기 중인 요청(화면에 아직 없음 등)은 세지 않는다 — 그런 요청은
+        정해진 시각까지 집히지 않아 이 요청을 막지 않는다
         (리뷰 지적 — I4 (b): alive() 만 보면 대기열이 밀려 있어도 주문마다 대기 시간을 다 쓴다).
         """
         with self._lock:
             row = self._db.execute(
                 "SELECT 1 FROM export_requests WHERE target=? AND status='pending' "
-                'AND id<? LIMIT 1',
+                'AND attempts=0 AND id<? LIMIT 1',
                 (target, before_id),
             ).fetchone()
         return row is not None

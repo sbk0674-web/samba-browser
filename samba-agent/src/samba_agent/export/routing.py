@@ -11,7 +11,16 @@ Target = Literal['emp', 'shopmine']
 # 취소 연동은 같은 프로그램의 다른 작업이라 대상 이름을 따로 둔다 — 큐의 (주문번호, 대상)
 # 유일 조건과 작업자의 대상별 처리를 그대로 쓴다
 CANCEL_SUFFIX = '_cancel'
-QueueTarget = Literal['emp', 'shopmine', 'emp_cancel', 'shopmine_cancel']
+# 소싱처 미등록 주문의 판매자상품코드 읽기 — 값을 넣지 않고 읽기만 하는 작업이다
+LOOKUP_SUFFIX = '_lookup'
+QueueTarget = Literal[
+    'emp', 'shopmine', 'emp_cancel', 'shopmine_cancel', 'emp_lookup', 'shopmine_lookup'
+]
+
+
+def lookup_target(target: str) -> str:
+    """기입 대상 → 그 프로그램의 읽기 대상 이름."""
+    return f'{target}{LOOKUP_SUFFIX}'
 
 
 def cancel_target(target: str) -> str:

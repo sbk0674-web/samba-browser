@@ -54,16 +54,16 @@ const call = (base: string, lane?: string): Promise<Response> =>
 describe('브릿지 레인', () => {
   it('레인이 다르면 동시에 돈다', async () => {
     const { base, lanes } = await up(150)
-    const [a, b] = await Promise.all([call(base, 'buyer01'), call(base, 'buyer02')])
+    const [a, b] = await Promise.all([call(base, 'edelvise06'), call(base, 'cannonfort')])
     expect([a.status, b.status]).toEqual([200, 200])
-    expect(lanes.sort()).toEqual(['buyer02', 'buyer01'])
+    expect(lanes.sort()).toEqual(['cannonfort', 'edelvise06'])
   })
 
   it('같은 레인이 겹치면 409, 레인 중에는 레인 없는 요청도 409', async () => {
     const { base } = await up(150)
-    const first = call(base, 'buyer01')
+    const first = call(base, 'edelvise06')
     await new Promise((r) => setTimeout(r, 30))
-    expect((await call(base, 'buyer01')).status).toBe(409)
+    expect((await call(base, 'edelvise06')).status).toBe(409)
     expect((await call(base)).status).toBe(409)
     expect((await first).status).toBe(200)
   })
@@ -75,7 +75,8 @@ describe('레인 탭 보기', () => {
     let n = 0
     const real = {
       list: () => tabs.map((t) => ({ ...t, title: '', active: false })),
-      listTargets: () => tabs.map((t) => ({ id: t.id, kind: 'tab', title: '', url: t.url, active: false })),
+      listTargets: () =>
+        tabs.map((t) => ({ id: t.id, kind: 'tab', title: '', url: t.url, active: false })),
       get: (id: string) => (tabs.some((t) => t.id === id) ? ({ id } as never) : null),
       targetTab: (id: string) => (tabs.some((t) => t.id === id) ? ({ id } as never) : null),
       create: (o: { url?: string }) => {
@@ -96,8 +97,42 @@ describe('레인 탭 보기', () => {
     expect(b.list().map((t) => t.url)).toEqual(['https://musinsa.com/b'])
     expect((a.agentTarget() as unknown as { id: string }).id).toBe('t1')
     expect((b.agentTarget() as unknown as { id: string }).id).toBe('t2')
+    // 폰 배선이 보는 작업 탭(workingTab)도 레인 것이다
+    expect((a.workingTab() as unknown as { id: string }).id).toBe('t1')
+    expect((b.workingTab() as unknown as { id: string }).id).toBe('t2')
     // 남의 탭은 닫지 못한다
     a.close('t2')
     expect(tabs.length).toBe(2)
+  })
+
+  it('작업 창이 결제 팝업이면 workingTab 은 그 팝업을 연 탭이다 — 폰 승인이 구매 사이트 계정을 찾는다', () => {
+    // 실기 2026-10-06: 토스 결제창(pay.toss.im 팝업)으로 switch_tab 한 직후 phone_approve_payment 가 host 를 비워 no-account
+    const tabs = [{ id: 't1', url: 'https://www.musinsa.com/order' }]
+    const popups = [{ id: 'p1', openerId: 't1', url: 'https://pay.toss.im/' }]
+    const real = {
+      list: () => tabs.map((t) => ({ ...t, title: '', active: false })),
+      listTargets: () => [
+        ...tabs.map((t) => ({ id: t.id, kind: 'tab', title: '', url: t.url, active: false })),
+        ...popups.map((p) => ({
+          id: p.id,
+          kind: 'popup',
+          openerId: p.openerId,
+          title: '',
+          url: p.url,
+          active: false
+        }))
+      ],
+      get: (id: string) => (tabs.some((t) => t.id === id) ? ({ id } as never) : null),
+      targetTab: (id: string) => ({ id }) as never,
+      create: (o: { url?: string }) => {
+        const t = { id: 't1', url: o.url ?? '' }
+        return { ...t, title: '', active: true }
+      }
+    } as unknown as TabManager
+    const lane = laneTabs(real, newLaneState())
+    lane.create({ url: 'https://www.musinsa.com/order' })
+    expect((lane.workingTab() as unknown as { id: string }).id).toBe('t1')
+    lane.focusTarget('p1')
+    expect((lane.workingTab() as unknown as { id: string }).id).toBe('t1')
   })
 })

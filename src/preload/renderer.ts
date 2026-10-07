@@ -29,6 +29,7 @@ import {
   type TaskModelKey,
   type TaskModels,
   type SyncStatus,
+  type BaselineReport,
   type ExtensionActionResult,
   type ExtensionAnchorDto,
   type ExtensionDto,
@@ -84,6 +85,11 @@ interface BookmarkMoveInput {
   id: number
   kind: 'folder' | 'link'
   toFolderId: number | null
+}
+
+// 끌어 옮기기 — 폴더 안 자리(toIndex)까지 지정한다
+interface BookmarkPlaceInput extends BookmarkMoveInput {
+  toIndex: number
 }
 
 // 항목 저장 요청. value(평문)는 렌더러 → 메인 방향으로만 흐른다
@@ -151,6 +157,11 @@ const api = {
     reload: (id: string): Promise<IpcResult<void>> => invoke(IPC.tabReload, id),
     setMobile: (id: string, mobile: boolean): Promise<IpcResult<void>> =>
       invoke(IPC.tabSetMobile, id, mobile),
+    /** 탭을 toIndex 자리로 옮긴다(탭 바 끌어 옮기기) */
+    move: (id: string, toIndex: number): Promise<IpcResult<void>> =>
+      invoke(IPC.tabMove, id, toIndex),
+    /** 이 작업공간에서 쓴 프로필(계정별 세션) 이름 목록 — 기본 프로필은 빠져 있다 */
+    profiles: (): Promise<IpcResult<string[]>> => invoke(IPC.profileList),
     onUpdated: (cb: (tabs: TabInfo[]) => void): (() => void) => {
       const h = (_: unknown, tabs: TabInfo[]): void => cb(tabs)
       ipcRenderer.on(IPC.tabUpdated, h)
@@ -353,6 +364,8 @@ const api = {
     rename: (id: number, kind: 'folder' | 'link', name: string): Promise<IpcResult<void>> =>
       invoke(IPC.bookmarksRename, { id, kind, name }),
     move: (input: BookmarkMoveInput): Promise<IpcResult<void>> => invoke(IPC.bookmarksMove, input),
+    place: (input: BookmarkPlaceInput): Promise<IpcResult<void>> =>
+      invoke(IPC.bookmarksPlace, input),
     removeFolder: (id: number): Promise<IpcResult<void>> => invoke(IPC.bookmarksRemoveFolder, id),
     sort: (folderId: number | null): Promise<IpcResult<void>> =>
       invoke(IPC.bookmarksSort, { folderId, by: 'name' }),
@@ -445,6 +458,12 @@ const api = {
   sync: {
     status: (): Promise<IpcResult<SyncStatus>> => invoke(IPC.syncStatus),
     now: (): Promise<IpcResult<SyncStatus>> => invoke(IPC.syncNow),
+    /**
+     * 이 PC 의 키마스터를 기준으로 선언해 다른 PC 를 맞춘다. dryRun 이면 서버와 견준 숫자만 돌려준다.
+     * 서버에만 있는 계정·항목에는 삭제 표식이 올라가므로 화면은 숫자를 보여 주고 확인받은 뒤에 실행한다
+     */
+    keymasterBaseline: (dryRun: boolean): Promise<IpcResult<BaselineReport>> =>
+      invoke(IPC.syncKeymasterBaseline, dryRun),
     onStatusChanged: (cb: (status: SyncStatus) => void): (() => void) => {
       const h = (_: unknown, status: SyncStatus): void => cb(status)
       ipcRenderer.on(IPC.syncStatusChanged, h)

@@ -15,7 +15,7 @@ const aiTaskModels = vi.fn(
     data: {
       provider: 'claude_subscription',
       taskModels,
-      choices: ['claude-fable-5-1', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001']
+      choices: ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001']
     }
   })
 )
@@ -55,11 +55,11 @@ describe('채팅 입력줄 모델·추론 강도', () => {
 
   it('작업별 모델 표의 표준 칸과 후보 목록을 읽어 온다', async () => {
     await useChatStore.getState().loadModelMenu()
-    expect(useChatStore.getState().model).toBe('claude-sonnet-5')
+    expect(useChatStore.getState().model).toBe('claude-sonnet-5-5')
     expect(useChatStore.getState().modelChoices).toEqual([
       'claude-fable-5-1',
-      'claude-opus-5',
-      'claude-sonnet-5',
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
       'claude-haiku-4-5-20251001'
     ])
   })

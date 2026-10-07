@@ -10,7 +10,8 @@ import { SyncOutbox, createOutboxRecorder } from '../src/main/sync/outbox'
 import { SyncEngine, SyncEngineHolder, SYNC_POLL_INTERVAL_MS } from '../src/main/sync/engine'
 import type { SettingsAccess } from '../src/main/sync/push'
 import { createFakeBackend, FAKE_USER_ID, type FakeBackend } from './stubs/fake-backend'
-import type { SyncStatus } from '../src/shared/sync'
+import { SYNC_TABLES, type SyncStatus } from '../src/shared/sync'
+import { remoteTableOf } from '../src/main/sync/mappers'
 import { DEFAULT_SETTINGS, type Settings } from '../src/shared/settings'
 
 const MASTER = 'master-pass-1234'
@@ -88,6 +89,26 @@ describe('SyncEngine', () => {
 
     await vi.advanceTimersByTimeAsync(SYNC_POLL_INTERVAL_MS)
     expect(backend.calls.select).toBeGreaterThan(second)
+  })
+
+  it('Realtime 구독이 전부 살아 있으면 주기 폴링은 당기지 않고, 끊겼다 다시 붙으면 한 번 당긴다', async () => {
+    engine.start()
+    await vi.advanceTimersByTimeAsync(0)
+    for (const t of SYNC_TABLES) backend.realtime(remoteTableOf(t), true)
+    await vi.advanceTimersByTimeAsync(0)
+    const live = backend.calls.select
+    await vi.advanceTimersByTimeAsync(SYNC_POLL_INTERVAL_MS * 2)
+    expect(backend.calls.select).toBe(live) // 폴링 두 번 지나도 당기지 않았다
+    expect(engine.realtimeLive()).toBe(true)
+
+    backend.realtime('accounts_sync', false)
+    await vi.advanceTimersByTimeAsync(SYNC_POLL_INTERVAL_MS)
+    const afterDrop = backend.calls.select
+    expect(afterDrop).toBeGreaterThan(live) // 하나라도 끊기면 폴링이 다시 당긴다
+
+    backend.realtime('accounts_sync', true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(backend.calls.select).toBeGreaterThan(afterDrop) // 다시 붙는 순간 놓친 것을 한 번 당긴다
   })
 
   it('stop() 뒤에는 더 돌지 않는다', async () => {

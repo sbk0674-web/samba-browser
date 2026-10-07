@@ -129,3 +129,43 @@ def test_실행중인_이벤트루프_안에서도_동작한다():
 
     assert not thread.is_alive()
     assert result['decision'].choice == '260'
+
+
+def _auth_error_result() -> ResultMessage:
+    return ResultMessage(
+        subtype='success',
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=True,
+        num_turns=1,
+        session_id='s1',
+        result='Your organization has disabled Claude subscription access',
+    )
+
+
+def test_auth_error_falls_back_to_next_account_token(monkeypatch):
+    # 기본 로그인 구독이 막히면 SAMBA_CLAUDE_OAUTH_TOKENS 의 다른 계정으로 다시 묻는다
+    monkeypatch.setenv('SAMBA_CLAUDE_OAUTH_TOKENS', 'tok-a, tok-b')
+    seen: list[str | None] = []
+
+    async def _query(*, prompt: str, options):
+        tok = options.env.get('CLAUDE_CODE_OAUTH_TOKEN')
+        seen.append(tok)
+        if tok != 'tok-b':
+            yield _auth_error_result()
+            return
+        yield assistant_text('{"choice": "ok", "reason": "r"}')
+
+    result = make_decide(query_fn=_query)('p', Decision)
+    assert seen == [None, 'tok-a', 'tok-b']
+    assert result.choice == "ok"
+
+
+def test_auth_error_on_every_account_raises_value_error(monkeypatch):
+    monkeypatch.delenv('SAMBA_CLAUDE_OAUTH_TOKENS', raising=False)
+
+    async def _query(*, prompt: str, options):
+        yield _auth_error_result()
+
+    with pytest.raises(ValueError, match='인증 실패'):
+        make_decide(query_fn=_query)('p', Decision)

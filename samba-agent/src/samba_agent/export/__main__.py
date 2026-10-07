@@ -11,6 +11,7 @@ import logging
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import get_args
 
@@ -24,6 +25,8 @@ from samba_agent.export.worker import ExportWorker
 from samba_agent.settings import DEFAULT_ROOT, load_settings
 
 log = logging.getLogger(__name__)
+
+EMP_MIN_IDLE_S = 180.0
 
 
 def _list(queue: ExportQueue, limit: int) -> int:
@@ -79,6 +82,44 @@ def _shopmine(dry: bool, order_nos: list[str], queue: ExportQueue) -> int:
     return 0
 
 
+def _auth_toast(program: str, detail: str) -> None:
+    from samba_agent.export.desktop import toast
+
+    name = {'shopmine': '샵마인', 'emp': 'EMP(플레이오토)'}.get(program, program)
+    if '인증' in detail:
+        toast.show(f'{name} 인증 필요', f'{detail}\n인증하면 외부 기입이 이어서 돈다.')
+    elif '창이 없다' in detail:
+        toast.show(f'{name} 이 꺼져 있다', f'{detail}\n켜면 외부 기입이 이어서 돈다.')
+    else:
+        toast.show(f'{name} 창이 막혀 있다', f'{detail}\n창을 닫으면 외부 기입이 이어서 돈다.')
+
+
+# 삼바웨이브에서 '취소로 가는 중'으로 보는 상태 — 이 밖이면(주문접수·배송대기 등) 외부 취소를 하지 않는다
+_CANCEL_STATES = frozenset({'cancelling', 'cancel_requested', 'cancelled'})
+
+
+def _still_cancelling() -> 'Callable[[str], bool | None] | None':
+    """취소 연동 직전 확인 함수. 삼바웨이브 설정이 없으면 None(확인 없이 예전처럼 돈다)."""
+    from samba_agent.wave.client import WaveClient, WaveError
+
+    settings = load_settings(DEFAULT_ROOT / '.env')
+    if not (settings.wave_internal_token and settings.wave_tenant_id):
+        return None
+
+    def check(order_no: str) -> bool | None:
+        client = WaveClient(
+            settings.wave_url, settings.wave_internal_token.get_secret_value(), settings.wave_tenant_id
+        )
+        try:
+            return (client.get_order(order_no).status or '').strip().lower() in _CANCEL_STATES
+        except WaveError:
+            return None
+        finally:
+            client.close()
+
+    return check
+
+
 def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
     adapters = build_adapters(targets)
     if not adapters:
@@ -91,11 +132,16 @@ def _worker(queue: ExportQueue, targets: tuple[str, ...]) -> int:
     signal.signal(signal.SIGTERM, lambda *_a: stop.set())
     log.info('입력 작업자 시작 — 대상 %s', ', '.join(adapters) or '없음')
     ExportWorker(
-        # 화면 조작은 창 메시지로만 한다 — 사용자가 PC 를 쓰는 중에도 돈다(2026-09-29)
         queue,
         adapters,
         user_idle_s=user_idle_seconds,
-        min_idle_s=0.0,
+        # 샵마인·EMP 모두 키보드·마우스가 3분 넘게 멈췄을 때만 만진다.
+        # EMP 는 조작하면 창이 앞으로 나오고(사용자 지시 2026-09-29), 샵마인도 메뉴를 실제 마우스 클릭
+        # (click_input)으로 열어 작업 중인 사람 화면을 건드린다(사용자 지시 2026-10-06)
+        min_idle_s=EMP_MIN_IDLE_S,
+        # 인증 창은 사람이 처리한다 — 슬랙을 안 보니 윈도우 알림으로 바로 알린다(사용자 2026-09-29)
+        on_auth_required=_auth_toast,
+        still_cancelling=_still_cancelling(),
     ).run_forever(stop.is_set)
     return 0
 

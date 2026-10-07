@@ -19,6 +19,7 @@ import {
 } from '../../shared/phone-snapshot'
 import {
   PHONE_KEYS,
+  ensureAwake,
   isPhoneKey,
   pressKey,
   swipe as adbSwipe,
@@ -63,6 +64,7 @@ export const PHONE_TOOL_NAMES = [
   'phone_key',
   'phone_swipe',
   'phone_screenshot',
+  'phone_open_window',
   'wait_for_sms_code'
 ]
 
@@ -96,6 +98,11 @@ export interface PhoneOps {
    * 결제 실행기가 세운 표식(SecretScreenGate)과 결제 앱의 비밀번호 문구를 함께 본다
    */
   isSecret: (serial: string, screen: PhoneScreen) => boolean
+  /**
+   * 폰 큰 화면(scrcpy 창)을 연다. 앱 안 바로보기는 느려 캡차 슬라이더를 사람이 못 민다 —
+   * 캡차가 뜨면 사람이 풀 수 있게 이 창을 띄운다(사용자 제보 2026-09-30). 배선 전이면 없다
+   */
+  openWindow?: (serial: string) => void
 }
 
 export interface PhoneToolContext {
@@ -284,6 +291,18 @@ export function createPhoneTools(ctx: PhoneToolContext): PhoneTool[] {
       })
   )
 
+  const openWindow = tool(
+    'phone_open_window',
+    'Open the large phone screen window (scrcpy) so a person can act on the phone, e.g. to solve a captcha slider. It does not touch the phone.',
+    {},
+    () =>
+      act('폰 큰 화면 열기', false, async (serial) => {
+        if (!ctx.phones.openWindow) return 'refused: phone window is not available'
+        ctx.phones.openWindow(serial)
+        return 'ok'
+      })
+  )
+
   const swipe = tool(
     'phone_swipe',
     'Swipe on the phone between two device coordinates. Use it to scroll a list or open a drawer.',
@@ -361,6 +380,7 @@ export function createPhoneTools(ctx: PhoneToolContext): PhoneTool[] {
     keyTool,
     swipe,
     screenshot,
+    openWindow,
     waitSmsCode
   ] as unknown as PhoneTool[]
 }
@@ -385,11 +405,24 @@ export function createPhoneOps(
   return {
     list,
     isSecret,
-    screen: (serial) => dumpScreen(adb, serial),
-    tap: (serial, x, y) => adbTap(adb, serial, x, y),
-    swipe: (serial, from, to, ms) => adbSwipe(adb, serial, from, to, ms),
+    // 폰이 잠들어 있으면 화면을 못 읽고 탭이 헛돈다 — 조작마다 먼저 깨운다(잠들어 있을 때만 WAKEUP)
+    screen: async (serial) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      return dumpScreen(adb, serial)
+    },
+    tap: async (serial, x, y) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      await adbTap(adb, serial, x, y)
+    },
+    swipe: async (serial, from, to, ms) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      await adbSwipe(adb, serial, from, to, ms)
+    },
     typeText: (serial, value) => adbTypeText(adb, serial, value),
-    key: (serial, key) => pressKey(adb, serial, key),
+    key: async (serial, key) => {
+      await ensureAwake(adb, serial).catch(() => {})
+      await pressKey(adb, serial, key)
+    },
     screenshot: async (serial) => {
       const screen = await dumpScreen(adb, serial)
       // 덤프가 실패해 판정할 수 없으면 캡처를 뜨지 않는다(가장 안전한 쪽으로 본다)
@@ -417,6 +450,8 @@ export interface PayToolRequest {
   card?: string
   /** 결제 앱 자체의 키마스터 계정(네이버페이면 naver.com 계정)의 아이디 또는 라벨 */
   payAccount?: string
+  /** 웹 결제창이 보여 준 숫자코드(롯데카드 앱카드 7자리) — 앱의 코드 입력 화면에 친다 */
+  code?: string
   /**
    * 시험 입력(dry-run) 자리수. 주면 결제 비밀번호를 이 자리수만 누르고 취소한다 —
    * 실기에서 키패드 자동 입력이 되는지만 보고 결제는 하지 않는다
@@ -466,6 +501,14 @@ export function createPayTool(ctx: PayToolContext): PhoneTool {
           'DRY RUN: type only this many digits of the payment password, then cancel and leave the keypad. ' +
             'Nothing is paid - the tool answers "refused: dry-run". Pass it only when the user asked to test the keypad.'
         ),
+      code: z
+        .string()
+        .regex(/^\d{4,12}$/)
+        .optional()
+        .describe(
+          'lottecard only: the numeric code (7 digits) shown in the PC card window (sps.lottecard.co.kr) — ' +
+            'the tool types it into the LOCA Pay code screen on the phone. Not a password.'
+        ),
       payAccount: z
         .string()
         .optional()
@@ -494,7 +537,8 @@ export function createPayTool(ctx: PayToolContext): PhoneTool {
           methodLabel: args.methodLabel,
           ...(args.card === undefined ? {} : { card: args.card }),
           ...(args.dryRunDigits === undefined ? {} : { dryRunDigits: args.dryRunDigits }),
-          ...(args.payAccount === undefined ? {} : { payAccount: args.payAccount })
+          ...(args.payAccount === undefined ? {} : { payAccount: args.payAccount }),
+          ...(args.code === undefined ? {} : { code: args.code })
         })
         // 사유는 상태 이름뿐이다 — 화면 값은 담지 않는다(진행 로그는 실행기가 남긴다).
         // detail 은 실행기가 고른 덧붙임(계정 아이디 목록 등)이라 그대로 전한다

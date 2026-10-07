@@ -3,7 +3,7 @@
 // 기존 저장소(VaultRepo·BookmarkRepo)는 "앱 기능" 관점의 질의만 담당하고,
 // 여기에는 remote_id·deleted_at 처럼 동기화에만 쓰는 컬럼 질의를 둔다
 
-import { and, eq, isNotNull, isNull, like, lt } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, like, lt, lte, or, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import {
   accounts,
@@ -12,6 +12,7 @@ import {
   chatMessages,
   chats,
   sites,
+  syncOutbox,
   syncState,
   vaultItems
 } from '../db/schema'
@@ -31,6 +32,28 @@ import type {
 const TOMBSTONE_KEY_PREFIX = 'tombstone:'
 function tombstoneKey(table: SyncTable, remoteId: string): string {
   return `${TOMBSTONE_KEY_PREFIX}${table}:${remoteId}`
+}
+
+// 복호화 실패 메모(sync_state) 키: vaultDecryptFailed:<원격 id>
+const DECRYPT_FAILED_KEY_PREFIX = 'vaultDecryptFailed:'
+
+/** 계정 자연 키의 호스트 정규화 — 대소문자·앞뒤 공백을 무시한다 */
+export function normalizeHost(host: string): string {
+  return host.trim().toLowerCase()
+}
+
+/** 계정 자연 키(정규화 호스트 + 아이디). 원격 삭제 표식과 로컬 행을 맞출 때 쓴다 */
+export function accountNaturalKey(host: string, username: string): string {
+  return `${normalizeHost(host)}\u0000${username}`
+}
+
+/** 금고 항목 자연 키(계정 원격 id + 종류 + 라벨). 전역 항목은 계정 자리가 빈 문자열이다 */
+export function vaultItemNaturalKey(
+  accountRemoteId: string | null,
+  type: string,
+  label: string
+): string {
+  return `${accountRemoteId ?? ''}\u0000${type}\u0000${label}`
 }
 
 /** 폴더 경로 구분자. bookmarks_sync.folder_path 도 같은 규칙을 쓴다 */
@@ -90,8 +113,9 @@ export class SyncLocal {
   }
 
   // --- 삭제 메모(tombstone memory) -------------------------------------------
-  // 로컬에서 지운 행은 곧바로 사라진다. 그 원격 id 를 30일 동안 기억해, 다른 기기가 그 행을 살아 있는 채로
-  // 다시 올려도 풀이 되살리지 않게 한다(실기: 병렬 인스턴스의 옛 복제본이 지운 계정·사이트를 원복시킴)
+  // 지운 행의 원격 id 를 30일 동안 기억해, 다른 기기가 그 행을 살아 있는 채로 다시 올려도 풀이 되살리지
+  // 않게 한다(실기: 병렬 인스턴스의 옛 복제본이 지운 계정·사이트를 원복시킴). 계정·금고 항목은 이제 행을
+  // 남기는 soft delete 라 행 자체로도 막지만, 되돌리기로 원격 id 가 바뀐 옛 id·옛 하드 삭제분은 이 메모가 막는다
 
   /** 삭제 기록(outbox payload = 지운 행의 스냅샷)에서 원격 id 를 읽어 메모한다. 원격 id 가 없으면 아무것도 안 한다 */
   rememberTombstoneFromPayload(table: SyncTable, payload: string): void {
@@ -184,6 +208,141 @@ export class SyncLocal {
       .where(and(eq(sites.host, host), eq(accounts.username, username)))
       .all()
     return rows[0]?.id ?? null
+  }
+
+  // --- 자연 키(정규화 호스트 + 아이디) 기준 조회 ------------------------------
+  // 원격 id 가 다른 같은 계정(다른 기기·옛 사본이 새 id 로 올린 것)을 알아보는 데 쓴다
+
+  /** 자연 키가 같은 계정 행들(삭제 표식 포함). 호스트는 대소문자·앞뒤 공백을 무시한다 */
+  private accountsByKey(
+    host: string,
+    username: string
+  ): { id: number; remoteId: string | null; updatedAt: number; deletedAt: number | null }[] {
+    return this.d
+      .select({
+        id: accounts.id,
+        remoteId: accounts.remoteId,
+        updatedAt: accounts.updatedAt,
+        deletedAt: accounts.deletedAt
+      })
+      .from(accounts)
+      .innerJoin(sites, eq(accounts.siteId, sites.id))
+      .where(
+        and(
+          sql`lower(trim(${sites.host})) = ${normalizeHost(host)}`,
+          eq(accounts.username, username)
+        )
+      )
+      .all()
+  }
+
+  /** 자연 키가 같은 살아 있는 계정(원격 id 유무 무관) */
+  liveAccountIdByKey(host: string, username: string): number | null {
+    return this.accountsByKey(host, username).find((r) => r.deletedAt === null)?.id ?? null
+  }
+
+  /** 자연 키가 같은 살아 있는 계정들(원격 id 유무 무관) */
+  liveAccountsByKey(
+    host: string,
+    username: string
+  ): { id: number; remoteId: string | null; updatedAt: number }[] {
+    return this.accountsByKey(host, username)
+      .filter((r) => r.deletedAt === null)
+      .map((r) => ({ id: r.id, remoteId: r.remoteId, updatedAt: r.updatedAt }))
+  }
+
+  /** 자연 키가 같은 계정 중 가장 늦게 지운 삭제 표식 행. 없으면 null */
+  deletedAccountByKey(host: string, username: string): { id: number; deletedAt: number } | null {
+    let best: { id: number; deletedAt: number } | null = null
+    for (const r of this.accountsByKey(host, username)) {
+      if (r.deletedAt === null) continue
+      if (best === null || r.deletedAt > best.deletedAt) best = { id: r.id, deletedAt: r.deletedAt }
+    }
+    return best
+  }
+
+  /** 계정의 삭제 시각. 살아 있거나 없으면 null */
+  accountDeletedAt(id: number): number | null {
+    const row = this.d
+      .select({ deletedAt: accounts.deletedAt })
+      .from(accounts)
+      .where(eq(accounts.id, id))
+      .get()
+    return row?.deletedAt ?? null
+  }
+
+  /**
+   * 계정을 삭제 표식으로 바꾸고(soft delete) 딸린 살아 있는 항목도 함께 표식한다.
+   * 돌려주는 값은 함께 표식한 항목 중 이미 원격에 올라간(원격 id 가 있는) 항목 id —
+   * 호출부가 그 항목의 삭제 표식을 원격에 올린다
+   */
+  markAccountDeleted(id: number, deletedAt: number): number[] {
+    const items = this.d
+      .select({ id: vaultItems.id, remoteId: vaultItems.remoteId })
+      .from(vaultItems)
+      .where(and(eq(vaultItems.accountId, id), isNull(vaultItems.deletedAt)))
+      .all()
+    this.d
+      .update(vaultItems)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(and(eq(vaultItems.accountId, id), isNull(vaultItems.deletedAt)))
+      .run()
+    this.d
+      .update(accounts)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(eq(accounts.id, id))
+      .run()
+    this.db.scheduleSave()
+    return items.filter((r) => r.remoteId !== null).map((r) => r.id)
+  }
+
+  /** 금고 항목 하나를 삭제 표식으로 바꾼다(soft delete) */
+  markVaultItemDeleted(id: number, deletedAt: number): void {
+    this.d
+      .update(vaultItems)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(eq(vaultItems.id, id))
+      .run()
+    this.db.scheduleSave()
+  }
+
+  /**
+   * 이미 지운 행의 수정 시각만 지금으로 올린다 — 원격에 되살아난 행을 다시 지우는 삭제 표식이
+   * 다른 기기의 LWW(더 늦은 쪽이 이긴다)와 풀 커서를 통과하려면 시각이 그 행보다 뒤여야 한다
+   */
+  touchDeletedRow(table: 'accounts' | 'vault_items', id: number, at: number): void {
+    const t = table === 'accounts' ? accounts : vaultItems
+    this.d
+      .update(t)
+      .set({ updatedAt: at })
+      .where(and(eq(t.id, id), isNotNull(t.deletedAt)))
+      .run()
+    this.db.scheduleSave()
+  }
+
+  /** 살아 있는 행의 수정 시각을 올린다 — 서버에 다시 올려 옛 삭제 표식을 덮을 때 쓴다 */
+  touchLiveRow(table: 'accounts' | 'vault_items', id: number, at: number): void {
+    const t = table === 'accounts' ? accounts : vaultItems
+    this.d
+      .update(t)
+      .set({ updatedAt: at })
+      .where(and(eq(t.id, id), isNull(t.deletedAt)))
+      .run()
+    this.db.scheduleSave()
+  }
+
+  // --- 복호화 실패 메모 -------------------------------------------------------
+  // 풀에서 열지 못한 금고 행의 원격 id 와 그 행의 updated_at. 커서가 그 행에 붙박이지 않게 넘기고,
+  // 같은 행(같은 판)에 대한 경고는 한 번만 남긴다
+
+  /** 이 원격 행을 이 판(updated_at)으로 이미 실패 처리했는가 */
+  decryptFailedBefore(remoteId: string, updatedAt: number): boolean {
+    const at = this.getStateNumber(`${DECRYPT_FAILED_KEY_PREFIX}${remoteId}`)
+    return at !== null && at >= updatedAt
+  }
+
+  rememberDecryptFailed(remoteId: string, updatedAt: number): void {
+    this.setStateNumber(`${DECRYPT_FAILED_KEY_PREFIX}${remoteId}`, updatedAt)
   }
 
   /** updatedAt 을 함께 주면 그 값도 적는다(최초 업로드에서 시각을 올려 보낸 경우) */
@@ -317,6 +476,55 @@ export class SyncLocal {
       )
       .get()
     return row ? row.id : null
+  }
+
+  /** (계정, 종류, 라벨) 이 같은 살아 있는 항목(원격 id 유무 무관). 원격 삭제 표식을 맞출 때 쓴다 */
+  liveVaultItemByIdentity(
+    accountId: number | null,
+    type: string,
+    label: string
+  ): { id: number; remoteId: string | null; updatedAt: number } | null {
+    const row = this.d
+      .select({ id: vaultItems.id, remoteId: vaultItems.remoteId, updatedAt: vaultItems.updatedAt })
+      .from(vaultItems)
+      .where(
+        and(
+          isNull(vaultItems.deletedAt),
+          eq(vaultItems.type, type),
+          eq(vaultItems.label, label),
+          accountId === null ? isNull(vaultItems.accountId) : eq(vaultItems.accountId, accountId)
+        )
+      )
+      .get()
+    return row ?? null
+  }
+
+  /**
+   * (계정, 종류, 라벨) 이 같은 항목 중 가장 늦게 지운 삭제 표식의 시각(원격 id 유무 무관).
+   * 다른 기기가 같은 항목을 새 원격 id 로 올렸을 때 되살릴지 판단하는 데 쓴다. 없으면 null
+   */
+  deletedVaultItemAtByIdentity(
+    accountId: number | null,
+    type: string,
+    label: string
+  ): number | null {
+    const rows = this.d
+      .select({ deletedAt: vaultItems.deletedAt })
+      .from(vaultItems)
+      .where(
+        and(
+          isNotNull(vaultItems.deletedAt),
+          eq(vaultItems.type, type),
+          eq(vaultItems.label, label),
+          accountId === null ? isNull(vaultItems.accountId) : eq(vaultItems.accountId, accountId)
+        )
+      )
+      .all()
+    let best: number | null = null
+    for (const r of rows) {
+      if (r.deletedAt !== null && (best === null || r.deletedAt > best)) best = r.deletedAt
+    }
+    return best
   }
 
   vaultItemUpdatedAt(id: number): number | null {
@@ -665,6 +873,76 @@ export class SyncLocal {
     if (table === 'chats') return this.chatForSync(rowId)
     if (table === 'chat_messages') return this.chatMessageForSync(rowId)
     return null
+  }
+
+  // --- 키마스터 기준 반영 ----------------------------------------------------
+
+  /**
+   * 다른 PC 가 "내 키마스터가 기준"이라고 선언했을 때 이 PC 를 정리한다(기준 PC 자신은 부르지 않는다).
+   * - 서버에 올라간 적 없는(원격 id 없는) 살아 있는 계정·항목 중 기준 이전 것은 지운다(로컬 삭제 표식) —
+   *   기준 PC 에 없는 행이고, 두면 나중에 올라가 기준 PC 에 섞인다
+   * - 기준 이전에 쌓인 계정·항목의 대기 변경(옛 삭제 재전송 포함)을 버린다 — 올라가면 기준 PC 의 행을 덮는다
+   * 서버에 올라가 있던 행은 건드리지 않는다. 기준 PC 가 올린 삭제 표식·최신 값이 풀로 내려와 맞춰진다
+   */
+  applyKeymasterBaseline(at: number): { localOnly: number; outbox: number } {
+    const scopeA =
+      this.workspaceLocalId === null
+        ? undefined
+        : or(isNull(accounts.workspaceId), eq(accounts.workspaceId, this.workspaceLocalId))
+    const scopeI =
+      this.workspaceLocalId === null
+        ? undefined
+        : or(isNull(vaultItems.workspaceId), eq(vaultItems.workspaceId, this.workspaceLocalId))
+    let localOnly = 0
+    const staleAccounts = this.d
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(
+        and(
+          isNull(accounts.remoteId),
+          isNull(accounts.deletedAt),
+          lte(accounts.updatedAt, at),
+          scopeA
+        )
+      )
+      .all()
+    for (const row of staleAccounts) {
+      this.markAccountDeleted(row.id, at)
+      localOnly += 1
+    }
+    const staleItems = this.d
+      .select({ id: vaultItems.id })
+      .from(vaultItems)
+      .where(
+        and(
+          isNull(vaultItems.remoteId),
+          isNull(vaultItems.deletedAt),
+          lte(vaultItems.updatedAt, at),
+          scopeI
+        )
+      )
+      .all()
+    for (const row of staleItems) {
+      this.markVaultItemDeleted(row.id, at)
+      localOnly += 1
+    }
+    const pending = this.d
+      .select({ id: syncOutbox.id })
+      .from(syncOutbox)
+      .where(
+        and(inArray(syncOutbox.table, ['accounts', 'vault_items']), lte(syncOutbox.createdAt, at))
+      )
+      .all()
+    if (pending.length > 0) {
+      this.d
+        .delete(syncOutbox)
+        .where(
+          and(inArray(syncOutbox.table, ['accounts', 'vault_items']), lte(syncOutbox.createdAt, at))
+        )
+        .run()
+    }
+    if (localOnly > 0 || pending.length > 0) this.db.scheduleSave()
+    return { localOnly, outbox: pending.length }
   }
 
   // --- tombstone 정리 --------------------------------------------------------

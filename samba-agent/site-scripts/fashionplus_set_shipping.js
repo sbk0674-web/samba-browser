@@ -4,7 +4,9 @@
 // 탭: args.tab > 이 레인의 패션플러스 주문서 탭 하나 · args: name, address, address_detail, postal_code, profile, tab
 // 반환 {ok,name,address,address_detail,zip,phone_field_id,phone_formats,order_tab,note}
 const OF = /fashionplus\.co\.kr\/order\/\d+(?:[?#]|$)/
-const lines = async q => (await page.get(q ? { selector: q } : {})).tree.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
+// 배송지 창(iframe)이 넘어가는 중에 읽으면 프레임 호출이 시간 초과로 던진다 — 잠깐 쉬고 다시 읽는다(2026-10-01)
+const tree = async o => { for (let i = 0; i < 4; i++) { try { return String((await page.get(o)).tree || '') } catch (e) { await sleep(1500) } } return '' }
+const lines = async q => (await tree(q ? { selector: q } : {})).split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
 const idOfLine = l => parseInt(String(l).slice(1))
 const valOf = l => ((l || '').match(/value="([^"]*)"/) || [])[1] || ''
 const fail = (note, x) => ({ ok: false, note, ...(x || {}) })
@@ -26,14 +28,15 @@ await tabs.switch(tab)
 const big = async () => (await lines()).filter(l => /^\[\d{6,}\]/.test(l))
 let fr = await big()
 if (!fr.some(l => /link "새 주소 입력"/.test(l))) {
-  const ch = await page.idOf('배송지 변경')
+  let ch = -1
+  for (let i = 0; i < 3 && ch < 0; i++) { try { ch = await page.idOf('배송지 변경') } catch (e) { await sleep(1200) } }
   if (ch < 0) return fail('배송지 변경 링크 없음', { order_tab: tab })
-  await page.click(ch)
+  try { await page.click(ch) } catch (e) {}
   for (let i = 0; i < 20 && !(fr = await big()).some(l => /link "새 주소 입력"/.test(l)); i++) await sleep(250)
 }
 const nl = fr.find(l => /link "새 주소 입력"/.test(l))
 if (!nl) return fail('새 주소 입력 탭 없음', { order_tab: tab })
-await page.click(idOfLine(nl))
+try { await page.click(idOfLine(nl)) } catch (e) {}
 let form = []
 for (let i = 0; i < 12; i++) { await sleep(250); fr = await big(); const k = fr.findIndex(l => /link "우편번호 찾기"/.test(l)); if (k >= 3) { form = fr; break } }
 const k = form.findIndex(l => /link "우편번호 찾기"/.test(l))

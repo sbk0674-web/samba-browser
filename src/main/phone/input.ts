@@ -86,3 +86,47 @@ export async function pressKey(adb: AdbRunner, serial: string, key: PhoneKey): P
   if (!isPhoneKey(key)) throw new Error(`unknown key: ${String(key)}`)
   await adb.run(shellArgs(serial, ['input', 'keyevent', PHONE_KEYS[key]]))
 }
+
+/** `dumpsys power` 의 mWakefulness 가 Awake 인가. 읽지 못하면 깨어 있다고 본다(탭을 막지 않는다) */
+export function parseAwake(stdout: string): boolean {
+  const m = /mWakefulness=(\w+)/.exec(stdout)
+  return m ? m[1] === 'Awake' : true
+}
+
+/**
+ * 폰을 깨운다. 무선 adb 에서는 scrcpy `--stay-awake` 가 안 먹어 폰이 잠들면 화면이 검게 나온다
+ * (실기 2026-09-30). WAKEUP 은 POWER 와 달리 켜진 화면을 끄지 않는다
+ */
+export async function wakeScreen(adb: AdbRunner, serial: string): Promise<void> {
+  await adb.run(shellArgs(serial, ['input', 'keyevent', 'KEYCODE_WAKEUP']))
+}
+
+/** 잠들어 있으면 깨우고 true(= 이번 입력은 버린다 — 검은 화면에서 누른 자리에 뭐가 있는지 모른다) */
+export async function wakeIfAsleep(adb: AdbRunner, serial: string): Promise<boolean> {
+  // 상태를 못 읽으면 깨어 있다고 보고 입력을 그대로 보낸다 — 깨우기 때문에 탭이 실패하면 안 된다
+  const out = await adb.run(shellArgs(serial, ['dumpsys', 'power'])).catch(() => null)
+  if (!out || parseAwake(out.stdout)) return false
+  await wakeScreen(adb, serial)
+  return true
+}
+
+/** 자동 작업이 폰을 깨운 뒤 켜질 때까지 기다리는 횟수·간격 */
+export const AWAKE_POLL_TRIES = 6
+export const AWAKE_POLL_MS = 300
+
+/**
+ * 자동 작업(결제 승인·폰 도구)의 조작 전에 부른다 — 잠들어 있으면 깨우고 Awake 가 될 때까지 잠깐 기다린다.
+ * 평소에는 폰 설정대로 꺼져 있게 둔다(사용자 2026-09-30: 작업하거나 클릭할 때만 보이면 된다)
+ */
+export async function ensureAwake(
+  adb: AdbRunner,
+  serial: string,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))
+): Promise<void> {
+  if (!(await wakeIfAsleep(adb, serial))) return
+  for (let i = 0; i < AWAKE_POLL_TRIES; i++) {
+    await sleep(AWAKE_POLL_MS)
+    const out = await adb.run(shellArgs(serial, ['dumpsys', 'power']))
+    if (parseAwake(out.stdout)) return
+  }
+}

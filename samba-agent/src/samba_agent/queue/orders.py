@@ -71,38 +71,64 @@ def _normalize(data: dict[str, object]) -> dict[str, object]:
     return out
 
 
-def lookup_order_api(wave: 'WaveClient', order_no: str) -> OrderRef:
+class AmbiguousOrder(ValueError):
+    """상품주문번호에 삼바웨이브 행이 여럿 — 행 id(ord_…)로 다시 접수해야 한다. 앱 스크립트로 넘어가지 않는다."""
+
+
+def lookup_order_api(wave: 'WaveClient', key: str) -> OrderRef:
     """삼바웨이브 내부 API 로 주문을 찾아 OrderRef 를 만든다(앱 화면을 거치지 않는다).
 
+    ``key`` 는 행 id(ord_…) 또는 상품주문번호. 상품주문번호에 행이 여럿이면 삼바웨이브가 422 로 행 목록을
+    주고, 이쪽은 AmbiguousOrder 를 낸다 — 어느 행을 살지 사람이 정해야 한다.
     상세 응답에는 배송지(개인정보)가 실려 있지만 OrderRef 에는 옮기지 않는다 —
     배송지는 구매 에이전트가 입력하는 순간에만 따로 받아 쓴다.
     소싱처 이름은 표(sources.yaml)를 거쳐 삼바웨이브 id 로 맞춘다.
     """
-    detail = wave.get_order(order_no)
+    try:
+        detail = wave.get_order(key)
+    except WaveError as e:
+        if e.status == 422:
+            raise AmbiguousOrder(f'행이 여럿인 주문 — 행 id 로 접수: {e}') from e
+        raise
     ref = detail.to_order_ref()
     if not ref.source or not ref.seller:
-        raise ValueError(f'order lookup incomplete: {order_no} (소싱처·판매처 없음)')
+        raise ValueError(f'order lookup incomplete: {key} (소싱처·판매처 없음)')
     return ref.model_copy(update={'source': default_sources().normalize(ref.source)})
 
 
-def parse_order_fn(
-    wave: 'WaveClient | None', bridge: BridgeClient
-) -> Callable[[str, Mapping[str, str]], OrderRef]:
+def parse_order_fn(wave: 'WaveClient | None', bridge: BridgeClient) -> Callable[..., OrderRef]:
     """조회 통로 하나로 묶는다 — 삼바웨이브 API 가 있으면 그쪽, 없으면 앱 저장 스크립트.
 
     API 가 있어도 그 주문이 삼바웨이브에 없거나(404) 필드가 모자라면 스크립트로 한 번 더 찾는다 —
     수기로 넣은 주문이 API 목록에 안 잡히는 경우가 있다.
     """
 
-    def parse(order_no: str, options: Mapping[str, str]) -> OrderRef:
+    def parse(order_no: str, options: Mapping[str, str], key: str | None = None) -> OrderRef:
+        """``key`` 는 삼바웨이브 행 id(있으면). 앱 스크립트 폴백은 상품주문번호로만 찾는다."""
+        ref: OrderRef | None = None
         if wave is not None:
             try:
-                return lookup_order_api(wave, order_no)
+                ref = lookup_order_api(wave, key or order_no)
+            except AmbiguousOrder:
+                raise  # 행이 여럿 — 앱 스크립트도 첫 행을 집을 뿐이라 넘어가지 않는다
             except (WaveError, ValueError) as e:
                 log.warning('삼바웨이브 조회 실패 — 앱 스크립트로 넘어간다: %s', e)
-        return lookup_order(bridge, order_no, options)
+        if ref is None:
+            ref = lookup_order(bridge, order_no, options)
+        return with_overrides(ref, options)
 
     return parse
+
+
+# 작업 옵션으로 덮어쓸 수 있는 주문 필드 — 등록 상품이 다른 색상이거나 사이즈 표기가 달라 사람이
+# 상품 링크·옵션을 정해 준 경우(실기 2026-09-30 라코스테: 연결 상품은 베이지, 블랙은 다른 상품)
+OVERRIDE_FIELDS = ('option', 'product_url')
+
+
+def with_overrides(ref: OrderRef, options: Mapping[str, object]) -> OrderRef:
+    """작업 옵션의 option·product_url 이 있으면 주문 참조의 그 필드를 바꾼다."""
+    update = {k: str(options[k]) for k in OVERRIDE_FIELDS if options.get(k)}
+    return ref.model_copy(update=update) if update else ref
 
 
 def focus_orders_page(bridge: BridgeClient) -> None:

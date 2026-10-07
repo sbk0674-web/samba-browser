@@ -88,6 +88,7 @@ def _get_jobs(queue: JobQueue) -> Response:
             'jobs': [
                 {
                     'order_no': j.order_no,
+                    'wave_id': j.wave_id,
                     'state': j.state,
                     'assignee_agent': j.assignee_agent,
                     'step': j.step,

@@ -124,6 +124,23 @@ export function PhoneSettingsPanel({ settings, update }: SectionProps): React.JS
             onCheckedChange={(v) => update({ phoneAutoReconnect: v })}
           />
         </SettingsToggleRow>
+        <SettingsToggleRow
+          label={t('phone.settings.relay')}
+          description={t('phone.settings.relayDesc')}
+        >
+          <Switch
+            checked={settings.phoneRelayEnabled}
+            onCheckedChange={(v) => update({ phoneRelayEnabled: v })}
+          />
+        </SettingsToggleRow>
+        <SettingsRow label={t('phone.settings.relayBroker')} description={t('phone.settings.relayBrokerDesc')}>
+          <input
+            className="h-8 w-full rounded border border-border bg-background px-2 text-sm"
+            value={settings.phoneRelayBrokerUrl}
+            placeholder="wss://api.example.com/api/v1/samba/phone-relay"
+            onChange={(e) => update({ phoneRelayBrokerUrl: e.target.value.trim() })}
+          />
+        </SettingsRow>
       </SettingsSection>
     </>
   )

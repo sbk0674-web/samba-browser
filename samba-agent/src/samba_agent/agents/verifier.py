@@ -11,6 +11,7 @@ from samba_agent.agents.source_detail import (
     detail_goal,
     detail_script,
     site_of,
+    with_pay_card,
 )
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_value
@@ -55,7 +56,7 @@ class VerifierAgent(AgentBase):
             )
         self.step('verifier: 삼바웨이브 주문 읽기')
         try:
-            order = self._wave.get_order(a.order.order_no)
+            order = self._wave.get_order(a.order.wave_key)
         except WaveError as e:
             raise AgentFailure('fail', f'삼바웨이브 조회 실패: {e}', e.reason) from e
         # 배송지(개인정보)는 쳐다보지 않는다 — 대조 대상 필드만 꺼내 쓴다
@@ -122,7 +123,7 @@ class VerifierAgent(AgentBase):
             and quoted_reward > 0
         ):
             source = {**source, 'reward': float(quoted_reward)}
-        recomputed = actual_cost(source)
+        recomputed = actual_cost(with_pay_card(source, a.handoff))
         if recomputed is not None and 'real_price' in expected:
             expected['real_price'] = recomputed
             source = {**source, 'real_price': recomputed}
@@ -146,9 +147,15 @@ class VerifierAgent(AgentBase):
         masked_mismatches = mask_value(mismatches)
         self.note('대조 결과', json.dumps(masked_mismatches, ensure_ascii=False) or '없음')
         if mismatches:
-            explain = self.decide_once(
-                f'{a.rules}\n\n다음 불일치를 한 문장으로 설명하라: {masked_mismatches}', Decision
-            )
+            try:
+                explain = self.decide_once(
+                    f'{a.rules}\n\n다음 불일치를 한 문장으로 설명하라: {masked_mismatches}', Decision
+                )
+            except AgentFailure:
+                # AI 설명이 안 돼도(접근 막힘 등) 불일치 사실은 그대로 올린다(실기 2026-09-30)
+                explain = Decision(
+                    choice=json.dumps(masked_mismatches, ensure_ascii=False)[:200], reason='AI 설명 불가'
+                )
             return AgentResult(
                 status='fail',
                 reason=f'불일치 {len(mismatches)}건: {explain.choice}',

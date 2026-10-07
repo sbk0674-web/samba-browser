@@ -11,11 +11,12 @@ import signal
 import sqlite3
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from slack_bolt import App
 
-from samba_agent.agents.buyer import BuyerAgent
+from samba_agent.agents.buyer import _CLOSE_LANE_TABS_JS, OFFICE_ADDRESS_HINT, BuyerAgent
 from samba_agent.agents.factory import build_agents
 from samba_agent.agents.payer import PayerAgent
 from samba_agent.agents.recorder import RecorderAgent
@@ -25,15 +26,34 @@ from samba_agent.api.server import build_app, serve
 from samba_agent.bridge.client import BridgeClient, BridgeError
 from samba_agent.export.notify import ExportNotifier
 from samba_agent.export.routing import ExportRouting
-from samba_agent.export.stage import ExportFn, make_cancel_exporter, make_exporter
+from samba_agent.export.stage import (
+    ExportFn,
+    make_cancel_exporter,
+    make_exporter,
+    make_lookup_requester,
+)
 from samba_agent.export.store import ExportQueue
 from samba_agent.gateway.slack_bot import SambaBot
 from samba_agent.llm.decide import make_decide
+from samba_agent.ops.crosscheck import CrossChecker, LedgerRow
+from samba_agent.ops.crosscheck import configure as configure_crosscheck
+from samba_agent.ops.dewu_order import make_shihuo_handler
+from samba_agent.ops.dewu_tracking import start_dewu_tracking_loop
 from samba_agent.ops.diagnose import diagnose
 from samba_agent.ops.events import EventLog
+from samba_agent.ops.lotteon_gift_tracking import start_lotteon_gift_tracking_loop
 from samba_agent.ops.masking import mask_text
 from samba_agent.ops.releases import ReleaseStore
 from samba_agent.ops.site_scripts import install_missing
+from samba_agent.ops.source_audit import (
+    DETAIL_JS,
+    LIST_JS,
+    SourceAudit,
+    SourceDetail,
+    parse_detail,
+    run_js_json,
+)
+from samba_agent.ops.ssg_gift_accept import make_after_done
 from samba_agent.ops.tracing import configure_tracing
 from samba_agent.queue.db import Job, JobQueue
 from samba_agent.queue.intake import Intake
@@ -49,10 +69,13 @@ from samba_agent.repair import (
 from samba_agent.settings import Settings, load_settings
 from samba_agent.supervisor.graph import build_supervisor
 from samba_agent.version import harness_version
-from samba_agent.wave.client import WaveClient
+from samba_agent.wave.client import WaveClient, WaveError
 from samba_agent.wave.flags import FlagMarker
 
 log = logging.getLogger(__name__)
+
+# 하네스가 결과를 기다리지 않는 외부 프로그램 — 사람이 PC 를 쓰지 않을 때만 만진다
+EXPORT_DEFERRED = ('emp',)
 
 ReportFn = Callable[[Job, str], None]
 ApprovalReportFn = Callable[[Job, str, str, str], None]
@@ -66,12 +89,24 @@ def make_reporters(get_bot: 'Callable[[], SambaBot]') -> tuple[ReportFn, Approva
     콜러블로 받아 호출 시점에 푼다.
     """
 
+    # 슬랙 전송 오류(네트워크 끊김 등)가 작업을 죽이면 안 된다 — 2026-10-01 DNS 끊김 때
+    # 작업을 running 으로 잡은 직후 보고가 터져 그 작업이 고아로 남고 큐가 멈췄다
     def report(job: Job, line: str) -> None:
-        if not get_bot().post(job.thread_ts, line):
+        try:
+            posted = get_bot().post(job.thread_ts, line)
+        except Exception as e:  # noqa: BLE001 — 보고 실패는 기록만 하고 넘긴다
+            log.warning('슬랙 보고 실패(%s) — 로그로만 남긴다', type(e).__name__)
+            posted = False
+        if not posted:
             log.info('%s', mask_text(line))
 
     def approval_report(job: Job, order_no: str, stage: str, summary: str) -> None:
-        if not get_bot().post_approval(job.thread_ts, order_no, stage, summary):
+        try:
+            posted = get_bot().post_approval(job.thread_ts, order_no, stage, summary)
+        except Exception as e:  # noqa: BLE001
+            log.warning('슬랙 승인 요청 실패(%s) — 로그로만 남긴다', type(e).__name__)
+            posted = False
+        if not posted:
             log.info('승인 요청(슬랙 없음) %s %s\n%s', order_no, stage, mask_text(summary))
 
     return report, approval_report
@@ -94,7 +129,27 @@ def make_export(settings: 'Settings') -> tuple[ExportQueue, ExportFn] | None:
         return None
     queue = ExportQueue(settings.export_db_path)
     routing = ExportRouting.load(settings.export_routing_file)
-    return queue, make_exporter(queue, routing, wait_s=settings.export_wait_s)
+    return queue, make_exporter(
+        queue, routing, wait_s=settings.export_wait_s, deferred=EXPORT_DEFERRED
+    )
+
+
+def _alipay_approve(bridge: BridgeClient) -> Callable[[int], str]:
+    """알리페이 결제창 비밀번호 — 앱의 phone_approve_payment(provider='alipay')가 키마스터에서 넣는다."""
+
+    def approve(amount_krw: int) -> str:
+        try:
+            return bridge.call(
+                'phone_approve_payment',
+                provider='alipay',
+                amountKrw=max(int(amount_krw), 1),
+                merchant='得物',
+                methodLabel='알리페이',
+            ).result
+        except BridgeError as e:
+            return f'refused: {e}'
+
+    return approve
 
 
 def make_cancel_export(
@@ -105,7 +160,34 @@ def make_cancel_export(
         return None
     queue = ExportQueue(settings.export_db_path)
     routing = ExportRouting.load(settings.export_routing_file)
-    return make_cancel_exporter(queue, routing, lambda order_no: wave.get_order(order_no).seller)
+    return make_cancel_exporter(
+        queue,
+        routing,
+        lambda order_no: wave.get_order(order_no).seller,
+        wait_s=settings.export_wait_s,
+        deferred=EXPORT_DEFERRED,
+    )
+
+
+def make_lookup(settings: 'Settings') -> Callable[[str, str | None], str | None] | None:
+    """소싱처 미등록 주문의 판매자상품코드 읽기를 큐에 넣는 함수. 꺼져 있으면 None."""
+    if not (settings.export_enabled and settings.link_by_seller_code):
+        return None
+    queue = ExportQueue(settings.export_db_path)
+    return make_lookup_requester(queue, ExportRouting.load(settings.export_routing_file))
+
+
+def make_linker(wave: WaveClient) -> Callable[[str, str], str]:
+    """읽어 온 수집상품 번호로 주문을 잇고 결과 한 줄을 돌려준다. 이어지면 다음 수집 때 주문이 들어온다."""
+
+    def link(order_no: str, collected_product_id: str) -> str:
+        out = wave.link_collected(order_no, collected_product_id)
+        return (
+            f'{order_no} 소싱처 미등록 → 수집상품 {collected_product_id} 에 연결'
+            f'({out.get("source_url") or "주소 없음"}) — 다음 수집 때 처리한다'
+        )
+
+    return link
 
 
 def _bridge_ready(bridge: BridgeClient) -> bool:
@@ -121,13 +203,18 @@ def _bridge_ready(bridge: BridgeClient) -> bool:
 def main() -> None:
     settings = load_settings()
     # 시각을 붙인다 — 도구 호출 사이 간격으로 어느 단계가 느린지 잰다(2026-09-26 주문 1건 수 분 문제)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s', datefmt='%H:%M:%S')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s',
+        datefmt='%H:%M:%S',
+    )
     configure_tracing(settings)
 
     reg = Registry.load(settings.root)
     queue = JobQueue(settings.db_path)
     releases = ReleaseStore(settings.root / 'releases.sqlite')
     events = EventLog(settings.root / 'events.sqlite')
+    crosscheck_ledger = configure_crosscheck(settings.root / 'ledger.sqlite')
 
     bridge = BridgeClient(
         settings.bridge_url,
@@ -165,9 +252,11 @@ def main() -> None:
     flagger = (
         FlagMarker(
             wave,
-            lambda name, args: flag_bridge.call(
-                'run_script', name=name, args=json.dumps(args, ensure_ascii=False)
-            ).result,
+            lambda name, args: (
+                flag_bridge.call(
+                    'run_script', name=name, args=json.dumps(args, ensure_ascii=False)
+                ).result
+            ),
             on_cancelled=make_cancel_export(settings, wave),
         )
         if wave is not None
@@ -176,6 +265,10 @@ def main() -> None:
 
     # 조회 통로: 삼바웨이브 API 우선, 실패하면 앱 저장 스크립트
     _parse_order = parse_order_fn(wave, lookup_bridge)
+
+    def _source_sku_of(job: Job) -> tuple[str, str]:
+        order = _parse_order(job.order_no, job.options, job.wave_id)
+        return order.source, order.sku
 
     agents = build_agents(reg, bridge, decide, wave, settings.compare_accounts_max)
     repair_on = settings.repair_enabled
@@ -196,6 +289,17 @@ def main() -> None:
                 agent.repairer = repairer
                 agent.script_source = script_source
                 agent.script_history = script_history
+    if wave is not None:
+        # 중복 구매 판정에 쓸 "이미 기입된 소싱 주문번호" — 다른 삼바 주문으로 산 기록은 중복이 아니다
+        def _known_sourcing() -> set[str] | None:
+            try:
+                return wave.sourcing_numbers(14)
+            except WaveError:
+                return None
+
+        for agent in agents.values():
+            if isinstance(agent, BuyerAgent):
+                agent.known_sourcing_numbers = _known_sourcing
     if bridge.supports_lanes():
         # 앱이 레인을 알면 계정 비교를 동시에 돌린다(모르면 예전처럼 순서대로 — 한 탭을 서로 건드린다)
         for agent in agents.values():
@@ -273,7 +377,8 @@ def main() -> None:
             graph=graph,
             version=version_fn,  # 콜러블 그대로 넘긴다 — tick 마다 다시 불러 규칙 변경을 반영한다
             report=_report,
-            parse_order=lambda job: _parse_order(job.order_no, job.options),
+            # 행 id(wave_id)가 있으면 그것으로 조회한다 — 같은 상품주문번호의 다른 행을 읽지 않게
+            parse_order=lambda job: _parse_order(job.order_no, job.options, job.wave_id),
             # 같은 주문을 취소 뒤 다시 접수하면 job id(=스레드)가 같다 — 끝난 실행의 attempts·results 가
             # 남은 채 새 입력이 들어가면 재시도 횟수가 이어져 버린다(실기). 끝난 스레드는 지우고 시작한다
             reset_thread=checkpointer.delete_thread,
@@ -295,6 +400,19 @@ def main() -> None:
             # 앱 채팅이 도는 동안(409 busy)·앱이 꺼진 동안은 큐를 집지 않는다
             ready=lambda: _bridge_ready(bridge),
             flag_order=flagger.mark if flagger is not None else None,
+            add_memo=wave.add_memo if wave is not None else None,
+            # SSG 선물 주문은 결제 뒤 폰 카카오톡에서 선물을 받아야 발송된다(사용자 2026-10-01 하네스 이식)
+            after_done=make_after_done(_source_sku_of),
+            # 중국 크림(식화) 주문은 폰 得物 앱으로 산다 — 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다
+            phone_sources=(
+                {
+                    'SHIHUO': make_shihuo_handler(
+                        wave, _alipay_approve(bridge.scoped(['phone_approve_payment']))
+                    )
+                }
+                if wave is not None
+                else {}
+            ),
             sources=frozenset(
                 x.strip().upper() for x in settings.intake_sources.split(',') if x.strip()
             ),
@@ -309,6 +427,18 @@ def main() -> None:
     if settings.slack_bot_token and settings.slack_app_token:
         slack_app = App(token=settings.slack_bot_token.get_secret_value())
 
+    if wave is not None:
+        # 중국 크림 得物 주문 송장 — 30분마다 큐가 비었을 때 폰 得物 앱에서 읽어 해외송장에 넣는다(사용자 2026-10-01)
+        # 사람 대기(needs_human)는 폰을 쓰지 않으니 빼고, 대기·실행 중인 작업이 없을 때만 돈다
+        start_dewu_tracking_loop(
+            wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live())
+        )
+        # 롯데ON 선물 주문 송장 — 카카오톡 알림톡으로만 온다. 20분마다 폰에서 읽어 삼바에 넣고 마켓으로 보낸다(사용자 2026-10-02)
+        start_lotteon_gift_tracking_loop(
+            wave,
+            idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()),
+            state_dir=settings.db_path.parent,
+        )
     bot = SambaBot(slack_app, worker, queue, settings, _diagnose_text)
 
     # 자동 수집 — 삼바웨이브 클라이언트가 있고 켜져 있을 때만 돈다. 슬랙이 없으면 스레드 없이 큐에만 쌓인다
@@ -329,6 +459,8 @@ def main() -> None:
             ),
             # 이행 불가(소싱처 상품 삭제) — 재고X 표시 + 취소요청
             on_unfulfillable=flagger.mark if flagger is not None else None,
+            # 소싱처를 추정도 못 한 주문 — 샵마인·EMP 에서 판매자상품코드를 읽어 온다
+            on_unlinked=make_lookup(settings),
         )
         bot.intake = intake
 
@@ -367,9 +499,100 @@ def main() -> None:
             _thread_of,
             lambda ts, text: bot.post(ts, text),
             post_new=bot.post_new,
+            done_targets=[
+                *(t for d in EXPORT_DEFERRED for t in (d, f'{d}_cancel')),
+                *(('shopmine_lookup', 'emp_lookup') if settings.link_by_seller_code else ()),
+            ],
+            link=make_linker(wave) if settings.link_by_seller_code and wave is not None else None,
+            # 하네스가 다시 떠도 하루 안의 결과는 알린다 — 알린 것은 표시가 남아 되풀이하지 않는다
+            since=(datetime.now(UTC) - timedelta(days=1)).isoformat(timespec='seconds'),
         )
         threading.Thread(
             target=notifier.run_forever, args=(stop.is_set,), daemon=True, name='export-notify'
+        ).start()
+
+    if wave is not None:
+        # 교차 검증 — 하네스가 기입한 값과 삼바웨이브 값을 10분마다 대조한다(2026-10-01 실구매가 덮어쓰기 사고)
+        xbridge = bridge.scoped(['run_script', 'run_js']).with_lane('xcheck')
+
+        def _source_status(row: LedgerRow) -> str | None:
+            """소싱처 주문 상세의 상태 글자(읽기 전용). 못 읽으면 None."""
+            try:
+                raw = xbridge.call(
+                    'run_script',
+                    name='musinsa_order_detail',
+                    args=json.dumps(
+                        {'source_order_no': row.source_order_no, 'profile': row.account}
+                    ),
+                ).result
+                start = raw.rfind('{"source_order_no"')
+                out = json.loads(raw[start:]) if start >= 0 else {}
+            except (BridgeError, ValueError):
+                return None
+            finally:
+                try:
+                    xbridge.call('run_js', code=_CLOSE_LANE_TABS_JS, safety='no_pay')
+                except BridgeError:
+                    pass
+            if not isinstance(out, dict) or out.get('note'):
+                return None
+            return str(out.get('status') or '') or None
+
+        # 소싱처 주문 대조 — 무신사 주문 내역·주문 상세를 읽어 삼바에 없는 소싱 주문(중복 구매)과
+        # 받는 곳 불일치(직배인데 사무실)를 찾는다(2026-10-02 중복 구매 2건·롯데온 직배 사무실 도착)
+        def _audit_js(code: str) -> dict[str, object]:
+            try:
+                return run_js_json(xbridge.call('run_js', code=code, safety='no_pay').result)
+            except BridgeError:
+                return {}
+
+        def _musinsa_orders(account: str) -> list[str] | None:
+            nos = _audit_js(LIST_JS % {'profile': json.dumps(account)}).get('nos')
+            return [str(n) for n in nos] if isinstance(nos, list) else None
+
+        def _musinsa_detail(account: str, no: str) -> SourceDetail | None:
+            if not no.isdigit():
+                return None
+            out = _audit_js(DETAIL_JS % {'profile': json.dumps(account), 'no': no})
+            return parse_detail(out, OFFICE_ADDRESS_HINT) if out else None
+
+        def _known_numbers() -> set[str] | None:
+            try:
+                return wave.sourcing_numbers(14) | {
+                    r.source_order_no for r in crosscheck_ledger.recent(14)
+                }
+            except WaveError:
+                return None
+
+        source_audit = SourceAudit(
+            accounts=lambda: sorted(
+                {
+                    r.account
+                    for r in crosscheck_ledger.recent(14)
+                    if r.site == 'MUSINSA' and r.account
+                }
+            ),
+            list_orders=_musinsa_orders,
+            detail=_musinsa_detail,
+            known_numbers=_known_numbers,
+            alert=lambda text: bot.post_new(text),
+        )
+        checker = CrossChecker(
+            crosscheck_ledger,
+            wave,
+            lambda text: bot.post_new(text),
+            source_status=_source_status,
+            source_detail=lambda row: (
+                _musinsa_detail(row.account, row.source_order_no)
+                if row.site == 'MUSINSA' and row.account
+                else None
+            ),
+            source_audit=source_audit,
+            # 주문 작업이 도는 동안에는 브라우저를 건드리지 않는다
+            idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()),
+        )
+        threading.Thread(
+            target=checker.run_forever, args=(stop.is_set,), daemon=True, name='crosscheck'
         ).start()
 
     if intake is not None:

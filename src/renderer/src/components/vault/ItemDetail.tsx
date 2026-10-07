@@ -6,7 +6,13 @@ import { useVaultStore } from '@renderer/stores/vaultStore'
 import { usePhoneStore } from '@renderer/stores/phoneStore'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
-import { AGENT_ACCESS_VALUES, paymentProviderOfSections, payPriorityOf, withPayPriority, visibleTags } from '@shared/vault'
+import {
+  AGENT_ACCESS_VALUES,
+  paymentProviderOfSections,
+  payPriorityOf,
+  withPayPriority,
+  visibleTags
+} from '@shared/vault'
 import {
   PhoneAssignDialog,
   PhoneAssignSuggestion
@@ -181,7 +187,14 @@ function PlainRow({
 }
 
 // 항목 하나의 섹션>필드를 그대로 그린다. secret 필드는 RevealRow, 나머지는 PlainRow
-function ItemSections({ item }: { item: VaultItemMeta }): React.JSX.Element {
+function ItemSections({
+  item,
+  onEdit
+}: {
+  item: VaultItemMeta
+  /** 주면 섹션 제목 옆에 편집 버튼을 둔다 — 계정에 붙은 카드 항목(알리페이 카드)을 화면에서 고치기 위해 */
+  onEdit?: (item: VaultItemMeta) => void
+}): React.JSX.Element {
   const { t } = useTranslation()
   const rowOf = (field: VaultField): React.JSX.Element =>
     field.kind === 'secret' ? (
@@ -204,9 +217,20 @@ function ItemSections({ item }: { item: VaultItemMeta }): React.JSX.Element {
   }
   return (
     <>
-      {item.sections.map((section) => (
+      {item.sections.map((section, index) => (
         <section key={section.key} className="mb-5">
-          <h4 className="mb-2 text-[12px] font-semibold text-[var(--text2)]">{section.label}</h4>
+          <div className="mb-2 flex items-center gap-2">
+            <h4 className="text-[12px] font-semibold text-[var(--text2)]">{section.label}</h4>
+            {onEdit && index === 0 && (
+              <button
+                type="button"
+                onClick={() => onEdit(item)}
+                className="ml-auto h-6 rounded-[7px] border border-[var(--line)] px-2 text-[11.5px] text-[var(--text2)]"
+              >
+                {t('vault.detail.edit')}
+              </button>
+            )}
+          </div>
           <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white">
             {section.fields.map(rowOf)}
           </div>
@@ -612,7 +636,11 @@ export function ItemDetail({
       {items
         .filter((item) => item.type !== 'password')
         .map((item) => (
-          <ItemSections key={item.id} item={item} />
+          <ItemSections
+            key={item.id}
+            item={item}
+            {...(item.type === 'card' ? { onEdit: onEditItem } : {})}
+          />
         ))}
 
       <PaymentSection

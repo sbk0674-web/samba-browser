@@ -12,9 +12,12 @@ import {
   bookmarkFromRemote,
   chatFromRemote,
   chatMessageFromRemote,
+  fromIso,
   remoteTableOf,
   settingFromRemote,
-  vaultItemFromRemote
+  vaultItemFromRemote,
+  type AccountSyncRow,
+  type VaultItemSyncRow
 } from './mappers'
 import type { PullCursor } from './backend'
 import { settingUpdatedAtKey } from './outbox'
@@ -34,8 +37,11 @@ export interface PullResult {
    */
   vaultKeyMismatch: boolean
   /**
-   * 이번 주기에 금고 항목 복호화에 실패한 행이 있었다.
-   * 커서를 넘기면 그 행은 영영 다시 내려오지 않으므로 커서를 고정한다(3차 리뷰 C2)
+   * 이번 주기에 금고 항목 복호화에 **처음** 실패한 행이 있었다(알림용).
+   * 실패한 원격 id 는 sync_state 에 기억하고 커서는 넘긴다 — 예전에는 커서를 고정해, 열리지 않는
+   * 행이 한 페이지(500행)를 채우자 금고 풀이 9/18 부터 멈췄다. 그 행이 원격에서 다시 고쳐지면
+   * (updated_at 이 바뀌면) 커서 뒤로 다시 내려와 한 번 더 시도한다.
+   * 키 재료 불일치(vaultKeyMismatch) 주기에는 여전히 커서를 원래 자리에 둔다(C2)
    */
   vaultDecryptFailed: boolean
 }
@@ -58,6 +64,21 @@ export function pullCursorKey(workspaceLocalId: number, table: PullTable): strin
 /** 작업공간 축이 없던 시절의 표별 커서 키(옛 DB 승계용) */
 export function legacyTableCursorKey(table: PullTable): string {
   return `pullCursor:${table}`
+}
+
+/** 이 PC 가 마지막으로 반영한 키마스터 기준 시각(sync_state). 기준이 더 새로워지면 정리를 한 번 돌린다 */
+export const BASELINE_APPLIED_KEY = 'keymasterBaselineApplied'
+
+// 이번 주기의 키마스터 기준 시각. 풀 시작 때 정하고 판정 함수들이 읽는다(주기는 겹쳐 돌지 않는다).
+// 기준 이전의 삭제는 기준 이후에 올라온 살아 있는 행을 이기지 못한다 — 옛 PC 가 예전 삭제를 다시 올려
+// 기준 PC 의 계정까지 지우던 것을 막는다(실기 2026-10-02 "PC 마다 설정 다르고 지워지고")
+let baselineAt = 0
+
+/** 기준 이전의 삭제인가 — 그렇다면 기준 뒤에 고쳐진 원격 행에게 진다 */
+function staleDeletion(deletedAt: number | null, remoteUpdatedAt: number): boolean {
+  return (
+    deletedAt !== null && baselineAt > 0 && deletedAt <= baselineAt && remoteUpdatedAt > baselineAt
+  )
 }
 
 /** 마지막으로 풀에 성공한 시각(로컬 시계). 상태 표시줄에 그대로 보여 준다 */
@@ -152,6 +173,20 @@ export async function pullAll(deps: PullDeps): Promise<PullResult> {
   const vaultCursorKey = pullCursorKey(workspaceLocalId, 'vault_items')
   const vaultCursorBefore = local.getState(vaultCursorKey)
 
+  // 키마스터 기준 선언을 계정보다 먼저 읽는다 — 설정 표는 맨 끝에 받기 때문에, 미리 보지 않으면 같은 주기에
+  // 내려온 기준 PC 의 계정을 옛 삭제 기록으로 되지우고(삭제 표식 재전송) 만다
+  baselineAt = Math.max(
+    deps.settings.get().keymasterBaselineAt,
+    await peekBaseline(deps, local, workspaceLocalId)
+  )
+  if (baselineAt > (local.getStateNumber(BASELINE_APPLIED_KEY) ?? 0)) {
+    const cleaned = local.applyKeymasterBaseline(baselineAt)
+    local.setStateNumber(BASELINE_APPLIED_KEY, baselineAt)
+    console.log(
+      `동기화: 키마스터 기준(${new Date(baselineAt).toISOString()}) 반영 — 안 올린 행 ${cleaned.localOnly}개·대기 변경 ${cleaned.outbox}개 정리`
+    )
+  }
+
   await step('accounts', (cursor, limit) => pullAccounts(deps, local, cursor, limit, result))
   await step('vault_items', (cursor, limit) => pullVaultItems(deps, local, cursor, limit, result))
   await step('bookmarks', (cursor, limit) => pullBookmarks(deps, local, cursor, limit, result))
@@ -162,9 +197,10 @@ export async function pullAll(deps: PullDeps): Promise<PullResult> {
   )
   await step('settings', (cursor, limit) => pullSettings(deps, local, cursor, limit, result))
 
-  // 키 재료가 어긋났거나 한 행이라도 열지 못한 주기에는 금고 커서를 원래 자리에 둔다.
-  // 커서가 넘어가면 그 구간의 금고 항목은 키를 맞춘 뒤에도 영영 내려오지 않는다(C2)
-  if (result.vaultKeyMismatch || result.vaultDecryptFailed) {
+  // 키 재료가 어긋난 주기에는 금고 커서를 원래 자리에 둔다.
+  // 커서가 넘어가면 그 구간의 금고 항목은 키를 맞춘 뒤에도 영영 내려오지 않는다(C2).
+  // 행 하나하나의 복호화 실패는 커서를 막지 않는다(기억해 두고 넘긴다)
+  if (result.vaultKeyMismatch) {
     if (vaultCursorBefore === null) local.deleteState(vaultCursorKey)
     else local.setState(vaultCursorKey, vaultCursorBefore)
   }
@@ -175,6 +211,35 @@ export async function pullAll(deps: PullDeps): Promise<PullResult> {
 }
 
 /**
+ * 아직 받지 않은 설정 행에서 키마스터 기준 시각만 미리 읽는다(적용은 settings 단계가 한다).
+ * 읽지 못하면 0 — 기준이 없는 것으로 보고 평소대로 돈다
+ */
+async function peekBaseline(
+  deps: PullDeps,
+  local: SyncLocal,
+  workspaceLocalId: number
+): Promise<number> {
+  try {
+    const cursor = parsePullCursor(local.getState(pullCursorKey(workspaceLocalId, 'settings')))
+    const rows = await deps.backend.selectKeyed(
+      'settings_sync',
+      cursor,
+      workspaceOf(deps),
+      PULL_PAGE_SIZE
+    )
+    let at = 0
+    for (const raw of rows) {
+      const remote = settingFromRemote(raw)
+      if (remote.key !== 'keymasterBaselineAt') continue
+      if (typeof remote.value === 'number' && remote.value > at) at = remote.value
+    }
+    return at
+  } catch {
+    return 0
+  }
+}
+
+/**
  * 로컬·원격 중 누가 이겼는지 판정한다.
  * 로컬이 이기면 충돌로 센다 — 로컬 값이 그대로 남고, 다음 푸시가 원격을 덮는다
  */
@@ -182,7 +247,13 @@ function wins(localRow: Syncable | null, remoteRow: Syncable, result: PullResult
   // 로컬에서 지운 행(tombstone)은 원격의 "살아 있는" 갱신이 더 늦어도 되살리지 않는다 — 옛 복제본(병렬
   // 인스턴스)이 지운 뒤에 그 행을 만지고 upsert 하면 LWW 로는 삭제가 뒤집혔다(실기: 키마스터에서 지운
   // 계정·사이트가 자꾸 원복). 삭제는 사용자 의도라 이긴다. 다음 푸시가 tombstone 을 다시 올린다
-  if (localRow !== null && localRow.deletedAt !== null && remoteRow.deletedAt === null) {
+  // 단, 키마스터 기준 선언보다 앞선 삭제는 기준 뒤에 올라온 행에게 진다(아래 LWW 로 넘어간다)
+  if (
+    localRow !== null &&
+    localRow.deletedAt !== null &&
+    remoteRow.deletedAt === null &&
+    !staleDeletion(localRow.deletedAt, remoteRow.updatedAt)
+  ) {
     result.conflicts += 1
     return false
   }
@@ -219,38 +290,157 @@ async function pullAccounts(
   for (const raw of rows) {
     const remote = accountFromRemote(raw)
     seen.push({ updatedAt: remote.updatedAt, id: raw.id })
-    // 원격 id 로 먼저 찾고, 처음 합치는 기기라면 (host, username) 으로 짝을 맞춘다.
-    // 단 삭제 표식은 원격 id 로만 짝을 맞춘다 — (host, username) 폴백이 방금 새로 만든(또는 합치며 이름을
-    // 바꾼) 살아 있는 계정에 걸려 그 계정까지 지워 버렸다(실기: a-rt.com 합치기 뒤 계정 3개 실종)
-    const byRemote = remote.remoteId ? local.accountIdByRemote(remote.remoteId) : null
-    const localId =
-      byRemote ??
-      (remote.deletedAt === null
-        ? local.accountIdByHostUsername(remote.host, remote.username)
-        : null)
 
-    if (localId === null) {
-      // 원격에서 이미 지워진 행은 로컬에 되살리지 않는다
-      if (remote.deletedAt !== null) continue
-      // 로컬에서 지운 행(삭제 메모)은 다른 기기가 살아 있는 채로 다시 올려도 되살리지 않는다 — 삭제가 이긴다
-      if (remote.remoteId && local.tombstoneAt('accounts', remote.remoteId) !== null) {
-        result.conflicts += 1
+    // 1) 원격 id 로 짝이 맞으면 그 행끼리 판정한다
+    const byRemote = remote.remoteId ? local.accountIdByRemote(remote.remoteId) : null
+    if (byRemote !== null) {
+      const current = local.accountForSync(byRemote)
+      if (current && staleRemoteTombstone(current.deletedAt, remote.deletedAt)) {
+        restoreOverStaleTombstone(deps, local, 'accounts', byRemote, result)
         continue
       }
-      local.applyAccount(remote, null)
-      result.applied += 1
+      if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
+        local.applyAccount(remote, byRemote)
+        result.applied += 1
+      } else if (current && current.deletedAt !== null && remote.deletedAt === null) {
+        // 로컬 삭제가 이겼는데 서버에는 살아 있다 — 서버에도 삭제 표식을 다시 올려야
+        // 다른 기기(새로 로그인한 기기 포함)에서 되살아나지 않는다
+        requeueLocalTombstone(deps, local, 'accounts', byRemote)
+      }
       continue
     }
-    const current = local.accountForSync(localId)
-    if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
-      local.applyAccount(remote, localId)
-      result.applied += 1
-    } else if (current && current.remoteId === null && remote.remoteId) {
-      // 로컬이 이겼어도 어느 원격 행과 짝인지는 기억해 둔다
-      local.setAccountRemoteId(localId, remote.remoteId)
+
+    // 2) 처음 보는 원격 id 의 삭제 표식 — 같은 자연 키의 살아 있는 로컬 계정이 그 삭제보다 **엄격히**
+    //    옛것이면(삭제 뒤에 고친 적이 없으면) 로컬도 지운다. 옛 사본이 새 id 로 올린 행을 받아 둔 기기
+    //    (새로 로그인한 기기 등)가 여기서 정리된다. 그 행이 서버에 있던 것이면 서버에도 삭제 표식을 올린다.
+    //    삭제 뒤에 고친 계정(합치며 이름을 바꾼 남은 계정 등)은 수정 시각이 삭제보다 늦어 건드리지 않는다
+    //    (실기: a-rt.com 합치기 뒤 계정 3개 실종 — 합치기는 지운 뒤에 남은 계정을 고친다)
+    if (remote.deletedAt !== null) {
+      for (const target of local.liveAccountsByKey(remote.host, remote.username)) {
+        if (target.updatedAt >= remote.deletedAt) continue
+        markAccountDeletedAndPropagate(deps, local, target.id, remote.deletedAt)
+        if (target.remoteId !== null) requeueLocalTombstone(deps, local, 'accounts', target.id)
+        result.applied += 1
+      }
+      continue
     }
+
+    // 3) 처음 보는 원격 id 의 살아 있는 행
+    // 3-1) 이 원격 id 를 로컬에서 지운 기억(삭제 메모)이 있으면 되살리지 않는다 — 같은 id 는 삭제가 이긴다
+    let memo = remote.remoteId ? local.tombstoneAt('accounts', remote.remoteId) : null
+    if (memo !== null && remote.remoteId && staleDeletion(memo, remote.updatedAt)) {
+      // 기준 이전의 삭제 기억 — 버리고 받는다
+      local.forgetTombstone('accounts', remote.remoteId)
+      memo = null
+    }
+    if (memo !== null) {
+      result.conflicts += 1
+      requeueRemoteTombstone(deps, 'accounts', { id: 0, ...remote, deletedAt: memo })
+      continue
+    }
+    // 3-2) 같은 자연 키를 로컬에서 그 행보다 뒤에 지웠다 — 다른 기기·옛 사본이 새 id 로 다시 올린 것이다.
+    //      삽입하지 않고 그 원격 id 에 삭제 표식을 올린다
+    const deleted = local.deletedAccountByKey(remote.host, remote.username)
+    const live = local.liveAccountIdByKey(remote.host, remote.username)
+    if (live === null && deleted !== null && deleted.deletedAt >= remote.updatedAt) {
+      result.conflicts += 1
+      requeueRemoteTombstone(deps, 'accounts', { id: 0, ...remote, deletedAt: deleted.deletedAt })
+      continue
+    }
+    // 3-3) 같은 자연 키의 살아 있는 로컬 계정과 짝을 맞춘다(처음 합치는 기기)
+    if (live !== null) {
+      const current = local.accountForSync(live)
+      if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
+        local.applyAccount(remote, live)
+        result.applied += 1
+      } else if (current && current.remoteId === null && remote.remoteId) {
+        // 로컬이 이겼어도 어느 원격 행과 짝인지는 기억해 둔다
+        local.setAccountRemoteId(live, remote.remoteId)
+      }
+      continue
+    }
+    // 3-4) 삭제 뒤에 다시 만든 계정이다 — 지운 행 자리에 되살린다(같은 자연 키로 행이 둘 생기지 않게)
+    local.applyAccount(remote, deleted ? deleted.id : null)
+    result.applied += 1
   }
   return seen
+}
+
+/**
+ * 원격의 삭제 표식이 기준 이전에 지운 것인가(이 PC 에는 살아 있다) — 기준을 모르는 옛 코드 PC 가
+ * 예전 삭제를 뒤늦게 다시 올린 것이다. 받으면 기준 PC 의 계정이 지워진다
+ */
+function staleRemoteTombstone(
+  localDeletedAt: number | null,
+  remoteDeletedAt: number | null
+): boolean {
+  return (
+    baselineAt > 0 &&
+    localDeletedAt === null &&
+    remoteDeletedAt !== null &&
+    // 기준 선언이 올린 삭제 표식(시각 = 기준 시각)은 받아야 한다 — 그보다 앞선 삭제만 거른다
+    remoteDeletedAt < baselineAt
+  )
+}
+
+/** 옛 삭제 표식을 받지 않고, 이 PC 의 살아 있는 행을 지금 시각으로 다시 올려 서버를 되돌린다 */
+function restoreOverStaleTombstone(
+  deps: PullDeps,
+  local: SyncLocal,
+  table: 'accounts' | 'vault_items',
+  localId: number,
+  result: PullResult
+): void {
+  local.touchLiveRow(table, localId, Date.now())
+  deps.outbox.record(table, String(localId), 'upsert', undefined, deps.workspace().localId)
+  result.conflicts += 1
+}
+
+/**
+ * 로컬에서 이미 지운 행의 삭제 표식을 다시 올린다. 수정 시각을 지금으로 올려야 서버에 살아 있는 행
+ * (그 행보다 옛 시각의 삭제 표식은 다른 기기의 LWW 에서 진다)을 확실히 덮는다
+ */
+function requeueLocalTombstone(
+  deps: PullDeps,
+  local: SyncLocal,
+  table: 'accounts' | 'vault_items',
+  localId: number
+): void {
+  local.touchDeletedRow(table, localId, Date.now())
+  deps.outbox.record(table, String(localId), 'delete', undefined, deps.workspace().localId)
+}
+
+/**
+ * 로컬 행과 짝이 없는 원격 id 에 삭제 표식을 올리도록 변경 로그에 적는다.
+ * 로컬 행 id 대신 'remote:<원격 id>' 를 쓰고, payload 에 삭제 표식을 만들 스냅샷을 담는다.
+ * 금고 항목의 fieldsJson 은 비운다 — 복호화한 값을 변경 로그에 남기지 않는다
+ */
+function requeueRemoteTombstone(
+  deps: PullDeps,
+  table: 'accounts' | 'vault_items',
+  row: AccountSyncRow | VaultItemSyncRow
+): void {
+  if (!row.remoteId || row.deletedAt === null) return
+  const payload = { ...row, updatedAt: Date.now() }
+  deps.outbox.record(
+    table,
+    `remote:${row.remoteId}`,
+    'delete',
+    JSON.stringify(payload),
+    deps.workspace().localId
+  )
+}
+
+/** 로컬 계정을 삭제 표식으로 바꾸고, 딸린 항목 중 서버에 있던 것은 삭제 표식을 올린다 */
+function markAccountDeletedAndPropagate(
+  deps: PullDeps,
+  local: SyncLocal,
+  accountId: number,
+  deletedAt: number
+): void {
+  for (const itemId of local.markAccountDeleted(accountId, deletedAt)) {
+    deps.outbox.record('vault_items', String(itemId), 'delete', undefined, deps.workspace().localId)
+  }
 }
 
 async function pullVaultItems(
@@ -276,11 +466,16 @@ async function pullVaultItems(
       try {
         remote = vaultItemFromRemote(raw, key)
       } catch {
-        // 값도 암호문도 남기지 않는다 — 어느 행인지만 남긴다
-        console.warn('금고 항목 복호화 실패(건너뜀)', raw.id)
-        // 커서를 이 행 위로 넘기면 영영 다시 내려오지 않는다. 실패를 알려 이번 주기의
-        // vault_items 커서를 통째로 고정한다 — 키가 맞춰지면 다음 주기에 다시 받는다(C2)
-        result.vaultDecryptFailed = true
+        // 열지 못한 행은 원격 id 와 그 판(updated_at)을 기억하고 커서를 넘긴다 — 커서를 고정하면
+        // 이런 행이 한 페이지를 채웠을 때 금고 풀이 통째로 멈춘다(9/18~). 경고는 같은 행·같은 판에
+        // 한 번만 남긴다. 값도 암호문도 남기지 않는다 — 어느 행인지만 남긴다
+        const failedAt = fromIso(raw.updated_at)
+        if (!local.decryptFailedBefore(raw.id, failedAt)) {
+          console.warn('금고 항목 복호화 실패(건너뜀)', raw.id)
+          local.rememberDecryptFailed(raw.id, failedAt)
+          result.vaultDecryptFailed = true
+        }
+        applied.push({ updatedAt: failedAt, id: raw.id })
         continue
       }
       applied.push({ updatedAt: remote.updatedAt, id: raw.id })
@@ -291,17 +486,65 @@ async function pullVaultItems(
       const accountLocalId =
         remote.accountRemoteId === null ? null : local.accountIdByRemote(remote.accountRemoteId)
       const identityAllowed = remote.accountRemoteId === null || accountLocalId !== null
-      const localId =
-        local.vaultItemIdByRemote(remote.remoteId) ??
-        (identityAllowed
-          ? local.vaultItemIdByIdentity(accountLocalId, remote.type, remote.label)
-          : null)
-      if (localId === null) {
-        if (remote.deletedAt !== null) continue
-        if (remote.remoteId && local.tombstoneAt('vault_items', remote.remoteId) !== null) {
-          result.conflicts += 1
+      const byRemote = local.vaultItemIdByRemote(remote.remoteId)
+      if (byRemote !== null) {
+        const current = local.vaultItemForSync(byRemote)
+        if (current && staleRemoteTombstone(current.deletedAt, remote.deletedAt)) {
+          restoreOverStaleTombstone(deps, local, 'vault_items', byRemote, result)
           continue
         }
+        if (wins(current ? toSyncable(current) : null, toSyncable(remote), result)) {
+          local.applyVaultItem(remote, byRemote)
+          result.applied += 1
+        } else if (current && current.deletedAt !== null && remote.deletedAt === null) {
+          // 로컬 삭제가 이겼는데 서버에는 살아 있다 — 서버에도 삭제 표식을 다시 올린다
+          requeueLocalTombstone(deps, local, 'vault_items', byRemote)
+        }
+        continue
+      }
+      // 처음 보는 원격 id 의 삭제 표식 — 같은 (계정, 종류, 라벨) 의 살아 있는 로컬 항목이 그 삭제보다
+      // 엄격히 옛것이면 로컬도 지운다. 서버에 있던 항목이면 서버에도 삭제 표식을 올린다
+      if (remote.deletedAt !== null) {
+        const target = identityAllowed
+          ? local.liveVaultItemByIdentity(accountLocalId, remote.type, remote.label)
+          : null
+        if (target && target.updatedAt < remote.deletedAt) {
+          local.markVaultItemDeleted(target.id, remote.deletedAt)
+          if (target.remoteId !== null) requeueLocalTombstone(deps, local, 'vault_items', target.id)
+          result.applied += 1
+        }
+        continue
+      }
+      // 처음 보는 원격 id 의 살아 있는 행 — 이 id 를 지운 기억이 있거나, 같은 항목·딸린 계정을
+      // 그 행보다 뒤에 지웠으면 삽입하지 않고 그 원격 id 에 삭제 표식을 올린다
+      let memo = local.tombstoneAt('vault_items', remote.remoteId)
+      if (memo !== null && staleDeletion(memo, remote.updatedAt)) {
+        local.forgetTombstone('vault_items', remote.remoteId)
+        memo = null
+      }
+      const deletedByKey = identityAllowed
+        ? local.deletedVaultItemAtByIdentity(accountLocalId, remote.type, remote.label)
+        : null
+      const accountDeletedAt =
+        accountLocalId === null ? null : local.accountDeletedAt(accountLocalId)
+      const newer = [deletedByKey, accountDeletedAt].filter(
+        (at): at is number => at !== null && at >= remote.updatedAt
+      )
+      if (memo !== null || newer.length > 0) {
+        result.conflicts += 1
+        requeueRemoteTombstone(deps, 'vault_items', {
+          id: 0,
+          accountId: null,
+          ...remote,
+          fieldsJson: '[]',
+          deletedAt: memo ?? Math.max(...newer)
+        })
+        continue
+      }
+      const localId = identityAllowed
+        ? local.vaultItemIdByIdentity(accountLocalId, remote.type, remote.label)
+        : null
+      if (localId === null) {
         local.applyVaultItem(remote, null)
         result.applied += 1
         continue

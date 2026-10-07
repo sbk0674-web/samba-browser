@@ -109,7 +109,10 @@ const FORM_SPECS: Record<VaultItemType, SectionSpec[]> = {
         { key: 'identity.address', labelKey: 'vault.fieldNames.address', kind: 'text' },
         { key: 'identity.phone', labelKey: 'vault.fieldNames.phone', kind: 'text' },
         { key: 'identity.passport', labelKey: 'vault.fieldNames.passport', kind: 'secret' },
-        { key: 'identity.idCard', labelKey: 'vault.fieldNames.idCard', kind: 'secret' }
+        { key: 'identity.idCard', labelKey: 'vault.fieldNames.idCard', kind: 'secret' },
+        // 사업자 정보 — 현금영수증 지출증빙·세금계산서 칸에 넣는다(사용자 2026-09-29). 사업자등록증에 공개되는 값이라 가리지 않는다
+        { key: 'identity.bizName', labelKey: 'vault.fieldNames.bizName', kind: 'text' },
+        { key: 'identity.bizNo', labelKey: 'vault.fieldNames.bizNo', kind: 'text' }
       ]
     }
   ],

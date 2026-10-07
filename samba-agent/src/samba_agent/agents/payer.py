@@ -7,12 +7,14 @@
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse, urlsplit
 
+from samba_agent import local_aliases
 from samba_agent.agents.base import AgentBase, AgentFailure, run_agent, split_page_dialogs
 from samba_agent.agents.buyer import DIRECT_CARD_METHODS, POINTS_ONLY_METHOD, product_no_of
 from samba_agent.agents.contracts import AgentResult, Assignment
+from samba_agent.export.desktop import toast
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
 from samba_agent.sources import default_sources
@@ -31,6 +33,39 @@ CM29_RECENT_ORDER_SCRIPT = 'cm29_recent_order'
 # 한국 시간(윈도에 tzdata 가 없어 고정 오프셋)
 _KST = timezone(timedelta(hours=9))
 
+# 롯데카드 결제창(통합 일반/간편서비스) 호스트 — 롯데온 신용카드 → 롯데카드 선택 → 결제하기 뒤 뜨는 팝업(실기 2026-10-06)
+LOTTECARD_HOST = 'lottecard.co.kr'
+# 롯데카드 결제창에서 로카페이(앱카드) [결제하기]를 눌러 7자리 숫자코드를 읽는 run_js 본문.
+# 첫 화면: "로카페이(앱카드) 추천 … 결제하기 / 다른 결제" → 누르면 "숫자코드 입력 NNNNNNN 잔여시간 09:59 … [결제 완료]"
+_LOTTECARD_CODE_JS = (
+    "const L = await tabs.list()\n"
+    "const p = L.filter(t => /lottecard\\.co\\.kr/.test(t.url || '')).pop()\n"
+    "if (!p) return JSON.stringify({ code: null, note: 'no lottecard window' })\n"
+    "await tabs.switch(p.id)\n"
+    "let T = String((await page.get({})).tree || '')\n"
+    "if (!/숫자코드/.test(T)) {\n"
+    "  const b = T.match(/^\\[(\\d+)\\] button \"결제하기\"/m)\n"
+    "  if (!b) return JSON.stringify({ code: null, note: 'no appcard button', text: (T.split('PAGE TEXT')[1] || '').slice(0, 200) })\n"
+    "  await page.click(parseInt(b[1]))\n"
+    "  for (let i = 0; i < 10 && !/숫자코드/.test(T); i++) { await sleep(1500); T = String((await page.get({})).tree || '') }\n"
+    "}\n"
+    "const txt = (T.split('PAGE TEXT')[1] || T).replace(/\\s+/g, ' ')\n"
+    "const m = txt.match(/숫자코드 ?입력 ?(\\d{4,12})/)\n"
+    "const left = (txt.match(/잔여시간 ?(\\d{1,2}:\\d{2})/) || [])[1] || null\n"
+    "return JSON.stringify({ code: m ? m[1] : null, left, note: m ? null : txt.slice(0, 200) })"
+)
+# 폰 승인 뒤 롯데카드 결제창의 [결제 완료](payCheck)를 누르는 run_js 본문 — 눌러야 주문서가 주문 완료로 넘어간다
+_LOTTECARD_DONE_JS = (
+    "const L = await tabs.list()\n"
+    "const p = L.filter(t => /lottecard\\.co\\.kr/.test(t.url || '')).pop()\n"
+    "if (!p) return JSON.stringify({ clicked: false, note: 'window already closed' })\n"
+    "await tabs.switch(p.id)\n"
+    "const T = String((await page.get({})).tree || '')\n"
+    "const b = T.match(/^\\[(\\d+)\\] (?:link|button|clickable) \"결제 ?완료\"/m)\n"
+    "if (!b) return JSON.stringify({ clicked: false, note: (T.split('PAGE TEXT')[1] || '').slice(0, 160) })\n"
+    "await page.click(parseInt(b[1])); await sleep(4000)\n"
+    "return JSON.stringify({ clicked: true })"
+)
 # 페이코 PC 결제창: 정보제공동의 체크박스를 켜고 '결제' 링크를 누르는 run_js 본문(탭 전환 다음에 붙인다)
 _PAYCO_AGREE_PAY_JS = (
     # 동의 체크박스는 숨어 있어 요소 목록에 없다 — 앱의 page.check 가 라벨 글자로 켠다(실기 2026-09-25).
@@ -82,6 +117,13 @@ def payco_card_names(card: str) -> tuple[str, ...]:
     return ('현대',)
 
 PAY_SUCCESS_MARKERS = ('결제 완료', '결제완료', '주문완료', '주문 완료', '주문이 완료', 'approved')
+# 주문 완료 페이지 주소(무신사 /order/result/…, 롯데온 /order/complete/… 등) — 키패드 없이 끝난 결제를 알아보는 데 쓴다
+ORDER_DONE_URL_RE = re.compile(r'/order/(?:result|complete)/\d|orderComplete|order_complete|/order/done', re.IGNORECASE)
+# _press_keypad 가 키패드 없이 결제 완료 화면을 본 경우 돌려주는 값(앱 응답처럼 'ok' 로 시작한다)
+NO_KEYPAD_PAID = 'ok: paid without keypad (order complete page)'
+# 키패드가 없을 때 주문 완료 화면을 몇 번, 얼마 간격으로 더 볼지
+NO_KEYPAD_DONE_CHECKS = 4
+NO_KEYPAD_DONE_WAIT_MS = 3000
 # 결제 "전" 검사용 — 결제창·주문서에도 흔한 '결제 완료 시 적립' 같은 글자로 멈추지 않게 좁힌다
 # (실기: 무신사페이 결제창 문구에 걸려 결제 전 pay_interrupted). 주문 완료 주소의 탭이 있거나,
 # 화면에 주문 완료 문구와 주문번호가 함께 있어야 이미 결제된 것으로 본다
@@ -142,6 +184,21 @@ PAY_HOST_PROVIDERS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r'(^|\.)kakaopay\.com$|(^|\.)kakao\.com$'), 'kakaopay'),
     (re.compile(r'(^|\.)pay\.naver\.com$'), 'naverpay'),
 )
+
+# 네이버페이 창 계정 불일치로 멈춘 사유의 표식 — 작업 실행기가 이 표식을 보고 다른 계정으로 한 번 다시 산다
+NAVERPAY_MISMATCH_MARK = '네이버페이 창 계정 불일치'
+_NAVERPAY_MISMATCH_RE = re.compile(
+    r'NAVERPAY_ACCOUNT_MISMATCH.*?signed in as (\S+?), but the KeyMaster account to pay with is ([^\s.]+)'
+)
+
+
+def naverpay_mismatch(out: str) -> tuple[str, str] | None:
+    """앱의 네이버페이 계정 불일치 거절이면 (창에 보인 계정, 키마스터 연결 계정). 아니면 None."""
+    if 'NAVERPAY_ACCOUNT_MISMATCH' not in out:
+        return None
+    m = _NAVERPAY_MISMATCH_RE.search(out)
+    return (m.group(1), m.group(2)) if m else ('?', '?')
+
 
 # 키패드 입력 뒤 주문 완료 화면이 뜰 때까지 기다리는 시간(ms)
 PAY_RESULT_WAIT_MS = 4000
@@ -294,6 +351,10 @@ def order_form_mismatch(
     #    ABC 주문서는 스타일코드 없이 'NIKE P-6000' 만 보인다(실기 2026-09-28 B07648: CN0149 로 못 맞춰 결제 안 됨)
     compact_text = re.sub(r'[^0-9a-z가-힣]', '', low)
     compact_name = re.sub(r'[^0-9a-z가-힣]', '', product_name.lower())
+    # 띄어쓰기만 다른 고유 단어(주문 '트래퍼햇' ↔ 주문서 '트래퍼 햇') — 세 자 이상 단어가 공백 없는 주문서에 있다
+    # (실기 2026-09-30 롯데온 포이즌: 색상·상품 모두 맞는데 상품명 단어 대조로 결제를 막았다)
+    if any(len(w) >= 3 and re.sub(r'[^0-9a-z가-힣]', '', w.lower()) in compact_text for w in words):
+        return None
     site_tokens = [
         re.sub(r'[^0-9a-z가-힣]', '', tok)
         for tok in re.split(r'\s+', (site_name or '').lower())
@@ -312,6 +373,42 @@ def order_form_mismatch(
     return f'상품명 단어 {words[:6]} 가 주문서에 없다' + (
         f'(사이트 상품명 {site_words[:6]} 로도 못 맞춤)' if site_words else ''
     )
+
+
+# 도착예정일 — '10/03(토) 도착'·'10.03(토) 도착 예정'·'10월 3일(토) 도착'. 3일을 넘으면 메모에 남긴다(사용자 2026-09-30)
+ARRIVAL_MEMO_DAYS = 3
+_ARRIVAL_RE = re.compile(
+    r'(\d{1,2})\s*(?:[./]|월\s*)\s*(\d{1,2})\s*일?\s*\(?([월화수목금토일])?\)?\s*(?:까지\s*|이내\s*)?(?:도착|배송\s*완료)'
+)
+
+
+def arrival_eta(page: str, today: date) -> tuple[date, int] | None:
+    """주문서 글자에서 도착예정일과 오늘부터 며칠 뒤인지. 여럿이면 가장 늦은 날, 못 읽으면 None."""
+    found: list[date] = []
+    for m in _ARRIVAL_RE.finditer(re.sub(r'\s+', ' ', page or '')):
+        month, day = int(m.group(1)), int(m.group(2))
+        try:
+            d = date(today.year, month, day)
+        except ValueError:
+            continue
+        if d < today - timedelta(days=30):
+            d = date(today.year + 1, month, day)  # 연말에 본 1월 날짜
+        if today <= d <= today + timedelta(days=60):
+            found.append(d)
+    if not found:
+        return None
+    d = max(found)
+    return d, (d - today).days
+
+
+def arrival_memo(page: str, today: date) -> str | None:
+    """도착예정일이 3일을 넘으면 메모 한 줄, 아니면 None."""
+    eta = arrival_eta(page, today)
+    if eta is None or eta[1] <= ARRIVAL_MEMO_DAYS:
+        return None
+    d, days = eta
+    wd = '월화수목금토일'[d.weekday()]
+    return f'[도착예정] {d.month:02d}/{d.day:02d}({wd}) — 결제일 기준 {days}일'
 
 
 def is_cross_buy(a: Assignment) -> bool:
@@ -407,6 +504,9 @@ def checkout_script_for(source: str) -> str:
 # tool() 에서도 한 번 더 막아 이중으로 지킨다(불변조건)
 DRY_RUN_BLOCKED_TOOLS = frozenset({'fill_secret', 'phone_approve_payment'})
 
+# 사업자등록번호의 가명 열쇠 — 실제 값은 local-aliases.json 의 같은 열쇠에 'biz:<번호>' 로 둔다
+BIZ_NO_ALIAS = 'biz:0000000000'
+
 # 결제 직전 재조회에서 '아직 미처리' 로 보는 삼바웨이브 상태(플레이북 §5-1)
 WAVE_PENDING_STATUS = 'pending'
 
@@ -494,6 +594,69 @@ def _element_id(found: str) -> int | None:
     """find_elements 응답에서 첫 요소 번호를 뽑는다. 없으면 None."""
     m = ELEMENT_ID_RE.search(found)
     return int(m.group(1)) if m else None
+
+
+def _element_id_of(page: str, pattern: str) -> int | None:
+    """get_page 요소 목록에서 `[N] <pattern>` 으로 시작하는 첫 줄의 번호. 없으면 None."""
+    m = re.search(r'^\[(\d+)\] ' + pattern, page, re.MULTILINE)
+    return int(m.group(1)) if m else None
+
+
+# 카카오페이 카톡결제 탭을 누른 뒤·결제요청을 누른 뒤 기다리는 시간(ms)
+KAKAO_TAB_WAIT_MS = 1500
+KAKAO_REQUEST_WAIT_MS = 2500
+# 토스페이 PC 결제창: 탭을 누른 뒤·생년월일을 채워 알림 대기 화면으로 넘어가기를 기다리는 시간(ms)
+TOSS_TAB_WAIT_MS = 1000
+TOSS_POPUP_POLL_TRIES = 12
+TOSS_PUSH_WAIT_MS = 4000
+# 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
+KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck')
+KAKAO_HUMAN_WAIT_TRIES = 36
+
+
+def _as_won(value: object) -> str:
+    """알림·메모용 금액 글자. 모르면 '금액 미확인'."""
+    try:
+        amount = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return '금액 미확인'
+    return f'{amount:,.0f}원' if amount > 0 else '금액 미확인'
+
+
+KAKAO_HUMAN_WAIT_MS = 5000
+
+
+def _other_tab_on_host(listed: str, host: str, skip: str, profile: str = '') -> str | None:
+    """list_tabs 응답에서 그 호스트·그 프로필의 일반 탭(skip 제외) 하나의 id. 없으면 None.
+
+    폰 승인은 앞 탭의 프로필 이름으로 사이트 계정을 고른다 — 프로필이 다른 탭(기본 프로필)을 앞에 두면
+    계정이 여럿인 사이트에서 계정을 못 정해 no-account 로 거절된다(실기 2026-09-30)."""
+    try:
+        rows = json.loads(listed)
+    except ValueError:
+        return None
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or str(row.get('id') or '') == skip:
+            continue
+        if profile and str(row.get('profile') or '') != profile:
+            continue
+        if row.get('kind', 'tab') == 'tab' and host in _host_of(str(row.get('url') or '')):
+            return str(row['id'])
+    return None
+
+
+def _active_tab_id(listed: str) -> str | None:
+    """list_tabs 응답(JSON 배열)에서 활성 탭 id. 형식이 아니면 None."""
+    try:
+        rows = json.loads(listed)
+    except ValueError:
+        return None
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if isinstance(row, dict) and row.get('active') and row.get('id'):
+            return str(row['id'])
+    return None
 
 
 def _amount_krw(value: object) -> int | None:
@@ -629,7 +792,7 @@ class PayerAgent(AgentBase):
             return
         self.step('payer: 결제 직전 SAMBA 재조회')
         try:
-            current = self._wave.get_order(a.order.order_no)
+            current = self._wave.get_order(a.order.wave_key)
         except WaveError as e:
             raise AgentFailure(
                 'needs_human', f'결제 직전 SAMBA 재조회 실패(결제하지 않음): {e}', e.reason
@@ -680,7 +843,201 @@ class PayerAgent(AgentBase):
                 f'결제창 목록을 확인할 수 없다: {e.reason}',
                 e.fail_reason,
             ) from e
+        self._last_listed = listed
         return _popups_and_active_tabs(listed)
+
+    def _wait_human_kakao(self, a: Assignment, card: str, why: str) -> AgentResult:
+        """사람이 폰에서 카카오페이 비밀번호를 넣을 때까지 결제창을 열어 두고 완료 화면을 기다린다."""
+        self.step('payer: 카카오페이 — 폰에서 결제 비밀번호를 직접 넣어 주세요(결제창 열어 둠)')
+        self.note('카카오페이', mask_text(f'폰 키패드 자동 입력 실패({why[:60]}) — 사람 입력 대기'))
+        # 사람이 바로 알 수 있게 PC 알림을 띄운다(사용자 2026-10-01 "결제 시도하고 알람 준 뒤 안 되면 삼바 메모")
+        amount = _as_won(a.handoff.get('paid'))
+        toast.show(
+            '카카오페이 결제 비밀번호 입력',
+            f'{a.order.order_no} {amount} — 폰에서 3분 안에 결제 비밀번호를 넣어 주세요',
+        )
+        for _ in range(KAKAO_HUMAN_WAIT_TRIES):
+            page = self._success_page(a)
+            if any(m in page for m in PAY_SUCCESS_MARKERS):
+                return self._confirm_paid(a, card, paid_by='human')
+            self.tool('wait', ms=KAKAO_HUMAN_WAIT_MS)
+        raise AgentFailure(
+            'needs_human',
+            '카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인)'
+            f' [카카오페이 {_as_won(a.handoff.get("paid"))}]',
+            FailReason.PAY_INTERRUPTED,
+        )
+
+    def _restore_kakao_tab(self, kakao_tab: str, helper_tab: str | None) -> None:
+        """폰 승인 뒤 — 앞에 띄웠던 소싱처 탭을 닫고 카카오페이 결제창 탭으로 돌아간다(실패해도 확인 단계가 다시 본다)."""
+        try:
+            if helper_tab:
+                self.tool('close_tab', id=helper_tab)
+            self.tool('switch_tab', id=kakao_tab)
+        except AgentFailure as e:
+            self.note('카카오페이', mask_text(f'결제창 탭으로 못 돌아감({e.reason[:80]})'))
+
+    def _toss_phone_request(self, a: Assignment) -> bool:
+        """토스페이 PC 결제창(pay.toss.im)의 '휴대폰번호' 탭에 휴대폰·생년월일을 앱(fill_secret)이 채워 폰으로 결제 알림을 보낸다.
+
+        생년월일까지 채우면 창이 알림 대기 화면(/app-payment/push)으로 넘어가며 알림이 간다(실기 2026-10-06).
+        번호·생년월일은 하네스를 지나가지 않는다. 토스 결제 항목에 값이 없으면 같은 사람의 카카오페이 항목 값을 쓴다
+        (같은 휴대폰·생년월일). 창이 로그인 화면이 아니면(이미 알림 대기 등) 아무것도 하지 않고 False.
+        """
+        # 결제창은 주문서 탭과 별개의 팝업으로 뜬다(실기 2026-10-06: 앞 탭만 읽어 알림 없이 폰 승인으로 넘어가 92초 뒤 끊겼다) —
+        # 토스 팝업이 뜰 때까지 기다려 그 탭으로 옮기고, 알림을 보낸 뒤 원래 탭으로 돌아온다
+        front = _active_tab_id(self.tool('list_tabs'))
+        labels: list[str] = []
+        try:
+            labels = re.findall(r'"label":"([^"]+)"', self.tool('list_accounts'))
+        except AgentFailure:
+            labels = []
+        toss_tab: str | None = None
+        for _ in range(TOSS_POPUP_POLL_TRIES):
+            popups, _active = self._list_tabs_popups()
+            toss = [p for p in popups if p.get('id') and 'toss.im' in str(p.get('url') or '')]
+            if toss:
+                toss_tab = str(toss[-1]['id'])
+                break
+            self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+        if toss_tab is None:
+            return False
+        self.tool('switch_tab', id=toss_tab)
+        # 팝업은 about:blank 로 뜬 뒤 토스 화면이 그려진다 — 로그인 화면(휴대폰번호 칸)이 보일 때까지 기다린다
+        page = self.tool('get_page')
+        for _ in range(TOSS_POPUP_POLL_TRIES):
+            head = page.split('\n', 1)[0]
+            if 'pay.toss.im' in head and ('/login' in head or 'app-payment' in head):
+                break
+            self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+            page = self.tool('get_page')
+        head = page.split('\n', 1)[0]
+        if 'pay.toss.im' not in head or '/login' not in head:
+            if front:
+                self.tool('switch_tab', id=front)
+            return False
+        self.step('payer: 토스페이 알림 보내기')
+        tab = _element_id_of(page, r'clickable "휴대폰번호"')
+        if tab is not None:
+            self.tool('click', id=tab)
+            self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+            page = self.tool('get_page')
+        fields = (
+            (r'textbox "휴대폰번호"', 'payment.phone', 'digits'),
+            (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
+        )
+        attempts: list[tuple[str, str | None]] = [('toss', None), *[('toss', lab) for lab in labels], ('kakao', None)]
+        for pattern, field, fmt in fields:
+            element_id = _element_id_of(page, pattern)
+            if element_id is None:
+                raise AgentFailure(
+                    'needs_human', f'토스페이 알림 요청 칸 없음({field})', FailReason.UNKNOWN
+                )
+            out = ''
+            # 휴대폰·생년월일은 같은 사람의 값이다 — 이 구매 계정의 토스 항목에 없으면 같은 사이트의 다른 계정 토스 항목,
+            # 그래도 없으면 카카오페이 항목 값을 쓴다(계정마다 따로 넣지 않게, 사용자 2026-10-06)
+            for provider, label in attempts:
+                out = self.tool(
+                    'fill_secret',
+                    elementId=element_id,
+                    itemType='password',
+                    provider=provider,
+                    field=field,
+                    format=fmt,
+                    **({'accountLabel': label} if label else {}),
+                )
+                if out.strip().lower().startswith('ok'):
+                    break
+            if not out.strip().lower().startswith('ok'):
+                raise AgentFailure(
+                    'needs_human',
+                    f'토스페이 알림 요청 입력 실패({field}): {mask_text(out[:100])}',
+                    FailReason.UNKNOWN,
+                )
+        self.tool('wait', ms=TOSS_PUSH_WAIT_MS)
+        now = self.tool('get_page')
+        if 'app-payment/push' not in now.split('\n', 1)[0]:
+            raise AgentFailure(
+                'needs_human',
+                '토스페이 알림 대기 화면으로 안 넘어갔다 — 알림이 갔는지 사람이 확인',
+                FailReason.UNKNOWN,
+            )
+        self.note('토스페이', '결제 알림 보냄(휴대폰·생년월일은 키마스터 값)')
+        if front:
+            # 폰 승인은 앞 탭의 사이트 계정으로 결제 계정을 고른다 — 토스 창이 앞이면 계정을 못 찾는다
+            self.tool('switch_tab', id=front)
+        return True
+
+    def _kakao_talk_request(self, a: Assignment) -> tuple[str, str | None] | None:
+        """카카오페이 결제창의 '카톡결제' 탭에서 휴대폰·생년월일을 앱(fill_secret)이 채우고 결제요청을 누른다.
+
+        번호·생년월일은 하네스를 지나가지 않는다. 결제창이 카톡결제 화면이 아니면(이미 요청됨 등) 아무것도 하지 않는다.
+        키마스터에 값이 없으면(not found) 결제하지 않고 사람에게 넘긴다."""
+        self.step('payer: 카카오페이 카톡결제 요청')
+        page = self.tool('get_page')
+        if 'kakaopay.com' not in page.split('\n', 1)[0]:
+            return None
+        tab = _element_id_of(page, r'tab "카톡결제"')
+        if tab is not None:
+            self.tool('click', id=tab)
+            self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
+            page = self.tool('get_page')
+        fields = (
+            (r'textbox "휴대폰번호"', 'payment.phone', 'digits'),
+            (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
+        )
+        for pattern, field, fmt in fields:
+            element_id = _element_id_of(page, pattern)
+            if element_id is None:
+                raise AgentFailure(
+                    'needs_human', f'카카오페이 카톡결제 칸 없음({field})', FailReason.UNKNOWN
+                )
+            out = self.tool(
+                'fill_secret',
+                elementId=element_id,
+                itemType='password',
+                provider='kakao',
+                field=field,
+                format=fmt,
+            )
+            if not out.strip().lower().startswith('ok'):
+                raise AgentFailure(
+                    'needs_human',
+                    f'카카오페이 카톡결제 입력 실패({field}): {mask_text(out[:100])}',
+                    FailReason.UNKNOWN,
+                )
+        button = _element_id_of(self.tool('get_page'), r'button "결제요청"')
+        if button is None:
+            raise AgentFailure('needs_human', '카카오페이 결제요청 버튼 없음', FailReason.UNKNOWN)
+        self.tool('click', id=button)
+        self.tool('wait', ms=KAKAO_REQUEST_WAIT_MS)
+        self.note('카카오페이', '카톡결제 요청 보냄(휴대폰·생년월일은 키마스터 값)')
+        # 폰 승인은 지금 앞 탭의 사이트 계정으로 결제 계정을 고른다 — 카카오페이 화면이 앞이면 계정을 못 찾아
+        # 'no-account' 로 거절된다(실기 2026-09-30). 승인 동안 구매 계정 프로필로 소싱처 첫 화면을 앞에 둔다
+        listed = self.tool('list_tabs')
+        kakao_tab = _active_tab_id(listed)
+        if not kakao_tab:
+            return None
+        src = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source or ''))
+        host = (src.login_host if src else '') or ''
+        profile = str(a.handoff.get('account') or a.order.account or '')
+        # 같은 프로필로 이미 열린 소싱처 탭(주문서 등)이 있으면 그것을 앞에 둔다 — 결제 도구 허용 목록에 new_tab 이 없다
+        other = _other_tab_on_host(listed, host, kakao_tab, profile) if host else None
+        if other:
+            self.tool('switch_tab', id=other)
+            return kakao_tab, None
+        if src is None or not src.home:
+            return kakao_tab, None
+        opened = self.tool(
+            'run_js',
+            code=(
+                f'const t = await tabs.open({json.dumps({"url": src.home, **({"profile": profile} if profile else {})})}); '
+                'return (t && t.id) || ""'
+            ),
+        )
+        self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
+        m = re.search(r'[0-9a-fA-F-]{8,}', opened)
+        return kakao_tab, (m.group(0) if m else None)
 
     def _provider_from_payment_popup(self) -> str | None:
         """지금 열린 결제창(팝업)의 호스트로 결제 앱을 고른다. 결제창이 없거나 아는 결제
@@ -730,6 +1087,7 @@ class PayerAgent(AgentBase):
         """지금 화면(주문서)에 이 주문의 옵션과 상품명 고유 단어가 있는지 본다. 없으면 결제하지 않고 멈춘다."""
         # sku 는 삼바웨이브 상품명(+[옵션])이다(queue/orders._normalize). 교차 구매면 산 사이트의 상품명
         name, option, selected = expect_name(a), a.order.option, str(a.handoff.get('selected') or '')
+        self._arrival_memo: str | None = None
         if not order_form_keys(name, option, selected):
             return  # 대조할 단어·사이즈가 없다(시험 표본 등)
         # 구매가 만든 주문서 탭을 먼저 앞으로 — 활성 탭이 다른 페이지면 엉뚱한 화면을 대조한다
@@ -738,6 +1096,10 @@ class PayerAgent(AgentBase):
         if order_tab:
             self.tool('switch_tab', id=str(order_tab))
         page = self.tool('get_page')
+        # 도착예정일이 3일을 넘으면 기록 단계가 삼바웨이브 메모·샵마인 추가메모에 남긴다(사용자 2026-09-30)
+        self._arrival_memo = arrival_memo(page, datetime.now(_KST).date())
+        if self._arrival_memo:
+            self.note('도착예정', self._arrival_memo)
         # 사이트 상품명(구매 스냅샷이 상품 페이지에서 읽은 이름)·상품번호로도 본다 — 주문서가 영문명만 보이고
         # 모델코드를 안 보이는 사이트에서 같은 상품을 막던 오탐(실기 2026-09-26 ABC job 198·204)
         site_name = str(a.handoff.get('product_name') or '')
@@ -756,7 +1118,19 @@ class PayerAgent(AgentBase):
             raise AgentFailure(
                 'needs_human', f'주문서가 이 주문과 다르다 — 결제하지 않음: {mask_text(problem)}', FailReason.VERIFY_MISMATCH
             )
-        self.note('주문서 대조', '상품·옵션 일치 확인')
+        # 받는 분 주소 — 구매가 넣은 도로명+번호(handoff ship_key)가 주문서에 보여야 한다. 주문서에 다른 도로명 주소만
+        # 보이면 배송지가 엉뚱하게 들어간 것(실기 2026-10-02 롯데온 선물: 주소 검색이 다른 도시 '화전남1길 10'을 골라 경주로 감)
+        ship_key = str(a.handoff.get('ship_key') or '')
+        if ship_key:
+            flat = re.sub(r'\s+', '', page)
+            roads = re.findall(r'[가-힣A-Za-z0-9.]+(?:로|길)\d+(?:-\d+)?', flat)
+            if roads and ship_key not in flat:
+                raise AgentFailure(
+                    'needs_human',
+                    '주문서의 받는 분 주소가 주문 주소와 다르다 — 결제하지 않음(배송지 다시 확인)',
+                    FailReason.VERIFY_MISMATCH,
+                )
+        self.note('주문서 대조', '상품·옵션 일치 확인' + (' · 받는 분 주소 일치' if ship_key else ''))
 
     def _web_pay(self, a: Assignment) -> None:
         """사이트 결제창(팝업)의 '결제하기' → 웹 키패드에 fill_secret(password) — 플레이북 §7 무신사머니 흐름.
@@ -810,7 +1184,18 @@ class PayerAgent(AgentBase):
         out = self._press_keypad(a, provider, account)
         self.note('키패드 입력', mask_text(out[:200]))
         low = out.lower()
-        if low.startswith('refused') or 'not found' in low or 'ambiguous' in low:
+        mismatch = naverpay_mismatch(out)
+        if mismatch is not None:
+            # 네이버페이 창이 키마스터 연결 계정이 아닌 네이버 계정으로 로그인돼 있다 — 앱이 비밀번호를 넣지 않았으니
+            # 결제는 안 됐다. '결제 확인'으로 넘기면 "결제 여부 불명(재결제 금지)"으로 오판한다(실기 2026-10-01)
+            shown, expected = mismatch
+            raise AgentFailure(
+                'needs_human',
+                f'{NAVERPAY_MISMATCH_MARK}: 프로필 {account} 의 네이버페이 창은 {shown} 로 로그인돼 있고 키마스터 연결 계정은 '
+                f'{expected} 다 — 그 프로필에서 네이버를 {expected} 로 로그인해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)',
+                FailReason.PERMISSION_DENIED,
+            )
+        if low.startswith('refused') or '거절: refused' in low or 'not found' in low or 'ambiguous' in low:
             raise AgentFailure(
                 'needs_human',
                 f'결제 비밀번호를 앱이 넣지 못했다 — 사람이 직접 누른다: {mask_text(out[:100])}',
@@ -825,8 +1210,21 @@ class PayerAgent(AgentBase):
         """결제창이 로그인 화면이면 멈춘다 — 결제 비밀번호를 로그인 칸에 넣거나 헛되이 반복하지 않는다.
 
         실기 2026-09-27 ABC 214·218: 프로필의 네이버 로그인이 풀려 네이버페이 창이 nid.naver.com 로그인으로 갔고,
-        payer 는 '결제하기'·키패드를 못 찾은 채 fill_secret 을 10회씩 부른 뒤 '결제 확인 안 됨'으로 멈췄다."""
-        for p in popups:
+        payer 는 '결제하기'·키패드를 못 찾은 채 fill_secret 을 10회씩 부른 뒤 '결제 확인 안 됨'으로 멈췄다.
+
+        롯데온처럼 결제창이 팝업이 아니라 같은 탭에서 넘어가는 경우(keypad_in_tab)도 활성 탭이 로그인 화면이면 같게 본다
+        (실기 2026-09-30: 같은 탭 nid.naver.com 로그인의 '비밀번호' 글자를 키패드로 착각해 fill_secret 거절 10회)."""
+        same_tab: list[dict[str, object]] = []
+        try:
+            listed = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
+            if isinstance(listed, list):
+                same_tab = [
+                    t for t in listed
+                    if isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                ]
+        except ValueError:
+            same_tab = []
+        for p in [*popups, *[t for t in same_tab if t not in popups]]:
             url = str(p.get('url') or '')
             if _is_login_url(url):
                 profile = str(a.handoff.get('account') or a.order.account or '')
@@ -845,7 +1243,15 @@ class PayerAgent(AgentBase):
                     if out.lower().startswith(('submitted', 'ok', 'filled')):
                         self.tool('wait', ms=POPUP_LOGIN_SETTLE_MS)
                         popups_now, _active = self._list_tabs_popups()
-                        if not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
+                        try:
+                            now = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
+                        except ValueError:
+                            now = []
+                        tab_login = any(
+                            isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                            for t in (now if isinstance(now, list) else [])
+                        )
+                        if not tab_login and not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
                             return
                 raise AgentFailure(
                     'needs_human',
@@ -891,6 +1297,20 @@ class PayerAgent(AgentBase):
                     out = e.reason
                 if not _keypad_not_ready(out):
                     entered = True
+                    if out.lstrip().startswith('handoff'):
+                        # 앱이 사람에게 넘겼다 — 왜 못 눌렀는지(배치 인식·금고 잠김)는 단계 기록에만 있다
+                        failed = [label for label, ok in getattr(self, 'last_steps', ()) if not ok]
+                        self.note('키패드 넘김 사유', mask_text(' / '.join(failed)[:300]) or '기록 없음')
+                        try:
+                            # 어떤 화면에서 넘겼는지(키패드가 아닌 안내·오류 화면일 수 있다) 앞부분만 남긴다
+                            seen = self.tool('get_page')
+                            text = seen[seen.find('PAGE TEXT') :] if 'PAGE TEXT' in seen else seen
+                            self.note('키패드 넘김 화면', mask_text(seen[:120] + ' … ' + text[:400]))
+                            # 요소 종류·이름 앞부분만(값은 없다) — 버튼을 왜 못 찾았는지 본다
+                            kinds = [ln[:48] for ln in seen.splitlines() if ln.startswith('[')]
+                            self.note('키패드 넘김 요소', f'{len(kinds)}개: ' + ' ; '.join(kinds[:40]))
+                        except AgentFailure as e:
+                            self.note('키패드 넘김 화면', mask_text(f'못 읽음: {e.reason}'[:160]))
                     break
             if entered or calls >= KEYPAD_FILL_MAX_CALLS:
                 break
@@ -899,6 +1319,36 @@ class PayerAgent(AgentBase):
         if not entered:
             # 키패드가 끝내 없었다 — 앱은 아무것도 누르지 않았다. 결제 확인으로 넘기면 '결제 여부 불명'으로 오판한다
             self.note('키패드 입력', mask_text(f'키패드 없음({calls}회 확인): {out[:160]}'))
+            # 그때 화면(주소·제목·앞 글자)을 남긴다 — 로그인 창·확인 버튼 창 등 원인을 바로 알 수 있게(실기 2026-09-30)
+            try:
+                listed = json.loads(str(self.tool('list_tabs')))
+                seen = [
+                    f"{t.get('kind')}{'*' if t.get('active') else ''}:{str(t.get('url') or '').split('//')[-1][:50]}"
+                    f"|{str(t.get('title') or '')[:14]}"
+                    for t in (listed if isinstance(listed, list) else [])
+                    if isinstance(t, dict) and (t.get('kind') == 'popup' or t.get('active'))
+                ]
+                self.note('키패드 없음 화면', mask_text(' , '.join(seen))[:280])
+            except (AgentFailure, ValueError):
+                pass
+            # 비밀번호 없이 결제가 끝나는 수단(무신사페이 등록 카드 등)은 키패드 대신 주문 완료 화면이 뜬다 —
+            # 그걸 '결제 안 됨'으로 멈추면 산 주문이 주문접수로 남아 재주문 위험이다(실기 2026-09-30 챔피온 후드).
+            # 완료 화면이면 키패드 없이 성공으로 넘긴다(확인 단계가 주문번호를 읽는다)
+            if dry_run_digits is None:
+                # 결제창 글자('결제 완료 시 적립')로 오판하지 않게 주문 완료 주소의 탭이 있을 때만 본다
+                # 완료 화면은 결제 뒤 몇 초 늦게 뜬다 — 한 번만 보고 '결제 안 됨'으로 끝내면, 실제로는 결제된 주문이
+                # 다시 돌며 한 번 더 결제된다(실기 2026-09-29 탑텐키즈·09-30 크록스키즈: 무신사페이가 비밀번호 없이
+                # 결제됐는데 키패드 없음으로 끝나 재시도에서 중복 구매). 몇 번 더 기다리며 본다
+                for wait_i in range(NO_KEYPAD_DONE_CHECKS):
+                    try:
+                        done_tabs = str(self.tool('list_tabs'))
+                    except AgentFailure:
+                        done_tabs = ''
+                    if ORDER_DONE_URL_RE.search(done_tabs):
+                        self.note('키패드 입력', '키패드 없이 결제 완료 화면 — 비밀번호 없는 결제로 본다')
+                        return NO_KEYPAD_PAID
+                    if wait_i + 1 < NO_KEYPAD_DONE_CHECKS:
+                        self.tool('wait', ms=NO_KEYPAD_DONE_WAIT_MS)
             raise AgentFailure(
                 'needs_human',
                 f'결제 비밀번호 키패드가 뜨지 않았다({calls}회 확인) — 비밀번호를 넣지 않았다(결제 안 됨): '
@@ -940,6 +1390,8 @@ class PayerAgent(AgentBase):
             'paid_by': paid_by,
             'card': card,
         }
+        if getattr(self, '_arrival_memo', None):
+            payload['arrival_memo'] = self._arrival_memo
         try:
             tabs_now = self.tool('list_tabs')
         except AgentFailure:
@@ -969,6 +1421,8 @@ class PayerAgent(AgentBase):
         보이면 사람이 결제한 것으로 기록하고, 시간 안에 안 보이면 멈춘다(재결제 금지).
         """
         window = str(entered.get('popup_url') or '')
+        if '롯데' in issuer and LOTTECARD_HOST in _host_of(window):
+            return self._lottecard_appcard(a, card, issuer, window)
         self.note(
             '카드 직접 결제',
             mask_text(f'{issuer} 결제창({entered.get("pay_window") or "-"} {window[:80]}) — 사람이 폰으로 승인한다. 에이전트는 누르지 않는다'),
@@ -991,6 +1445,59 @@ class PayerAgent(AgentBase):
             f'{issuer} 결제창 승인을 기다렸지만 주문 완료가 보이지 않는다 — 사람이 결제 여부를 확인한다(재결제 금지)',
             FailReason.PAY_INTERRUPTED,
         )
+
+    def _lottecard_appcard(self, a: Assignment, card: str, issuer: str, window: str) -> AgentResult:
+        """롯데카드 앱카드(로카페이) 결제 — 롯데카드 결제창(sps.lottecard.co.kr)은 푸시 없이 7자리 숫자코드를 보여 준다.
+
+        결제창의 [결제하기](로카페이 추천)를 눌러 숫자코드를 읽고, 앱의 phone_approve_payment(provider lottecard, code)가
+        폰 디지로카 앱에서 로카페이 → 코드 입력 → 결제 비밀번호(키마스터)까지 끝내면, 결제창의 [결제 완료]를 눌러
+        주문 완료로 넘어간다(실기 2026-10-06 롯데온). 폰 승인이 거절되면 결제는 안 된 것이다 — 재시도 없이 사람에게.
+        """
+        self.step(f'payer: {issuer} 앱카드 — 결제창 숫자코드 읽기')
+        try:
+            out = self.tool('run_js', code=_LOTTECARD_CODE_JS)
+        except AgentFailure as e:
+            raise AgentFailure(
+                'needs_human',
+                mask_text(f'{issuer} 결제창에서 앱카드 숫자코드를 못 읽었다({e.reason[:80]}) — 결제하지 않았다'),
+                FailReason.PAY_INTERRUPTED,
+            ) from e
+        self.note('롯데카드 앱카드', mask_text(out[:160]))
+        m = re.search(r'"code"\s*:\s*"(\d{4,12})"', out)
+        if m is None:
+            raise AgentFailure(
+                'needs_human',
+                mask_text(f'{issuer} 결제창에 앱카드 숫자코드가 안 보인다 — 결제하지 않았다: {out[:120]}'),
+                FailReason.PAY_INTERRUPTED,
+            )
+        amount = _amount_krw(a.handoff.get('cost'))
+        if amount is None:
+            raise AgentFailure('needs_human', '결제 금액을 모른다 — 폰 승인을 부르지 않는다', FailReason.UNKNOWN)
+        self.step('payer: 폰 승인(롯데카드 앱카드)')
+        approved = self.tool(
+            'phone_approve_payment',
+            provider='lottecard',
+            amountKrw=amount,
+            merchant=a.order.source,
+            methodLabel=f'{card}/{issuer}',
+            code=m.group(1),
+        )
+        self.note('폰 승인', mask_text(approved[:200]))
+        low = approved.lower()
+        if low.startswith(('refused', 'error')) or any(k in approved for k in DECLINED_MARKERS):
+            raise AgentFailure(
+                'needs_human',
+                mask_text(f'롯데카드 앱카드 폰 승인 실패: {approved[:120]} — 결제창은 열어 둔다(재결제 금지)'),
+                FailReason.PAY_INTERRUPTED,
+            )
+        # 앱에서 본인인증이 끝났으면 결제창의 [결제 완료]를 눌러야 주문이 완료된다
+        self.step('payer: 롯데카드 결제창 [결제 완료]')
+        try:
+            done = self.tool('run_js', code=_LOTTECARD_DONE_JS)
+            self.note('롯데카드 앱카드', mask_text(done[:160]))
+        except AgentFailure as e:
+            self.note('롯데카드 앱카드', mask_text(f'[결제 완료] 누르기 실패({e.reason[:80]}) — 주문 완료 화면을 그대로 본다'))
+        return self._confirm_paid(a, card)
 
     def _payco_agree_and_pay(self, card: str = '') -> bool:
         """페이코 PC 결제창(bill.payco.com) — 버튼이 '결제하기'가 아니라 '결제' 링크이고 정보제공동의를 켜야 한다.
@@ -1140,6 +1647,11 @@ class PayerAgent(AgentBase):
         # 실제로 산 사이트(교차 비교) 기준으로 결제창에 들어간다
         script = checkout_script_for(str(a.handoff.get('buy_source') or a.order.source))
         payload: dict[str, object] = {'card': card}
+        # 현금영수증은 항상 지출증빙용(사용자 2026-09-29 롯데온) — 사업자등록번호는 이 PC 의 local-aliases.json 에만 둔다.
+        # 주문서 칸이 비어 있을 때만 스크립트가 넣는다
+        biz_no = local_aliases.apply(BIZ_NO_ALIAS).removeprefix('biz:')
+        if biz_no.isdigit() and set(biz_no) != {'0'}:
+            payload['biz_no'] = biz_no
         profile = a.handoff.get('account') or a.order.account
         if profile:
             payload['profile'] = profile  # 구매가 연 계정 프로필의 주문서에서 결제창을 연다
@@ -1289,6 +1801,17 @@ class PayerAgent(AgentBase):
             # PC 결제창에서 비밀번호를 받는 결제(페이코) — 폰 승인이 아니라 웹 키패드 경로로 간다
             provider = None
 
+        if provider == 'kakaopay' and _pay_provider(card) == 'kakaopay':
+            # 카카오페이 PC 결제창은 QR/카톡결제 탭이다 — 카톡결제에 휴대폰·생년월일(키마스터 카카오페이 결제 항목)을 넣고
+            # 결제요청을 눌러야 폰으로 결제 요청이 간다(사용자 2026-09-30 롯데온 카카오페이 머니)
+            kakao_front = self._kakao_talk_request(a)
+        else:
+            kakao_front = None
+
+        if provider == 'toss' and _pay_provider(card) == 'toss':
+            # 토스페이 PC 결제창은 휴대폰번호·생년월일을 넣어야 폰으로 알림이 간다 — 알림 없이 폰에서 토스 앱만 열지 않는다
+            self._toss_phone_request(a)
+
         if provider is not None:
             self.step('payer: 폰 승인')
             # 카드사(card_issuer)가 있으면 결제 앱 검색어로, 없고 카드 이름 자체가 결제 앱(예: 토스페이)이면 카드 아님
@@ -1298,15 +1821,26 @@ class PayerAgent(AgentBase):
             # payAccount 는 앱 스키마상 네이버페이 전용이다. 사용자 결정 — 결제 앱이 쇼핑몰
             # 계정에 연결된 네이버 계정으로 스스로 고르게 두고, 어떤 provider 에도 payAccount 를
             # 넘기지 않는다(리뷰 지적 — Critical 1)
-            approved = self.tool(
-                'phone_approve_payment',
-                provider=provider,
-                amountKrw=amount,
-                merchant=a.order.source,
-                methodLabel=card,
-                **({'card': card_hint} if card_hint else {}),
-            )
+            try:
+                approved = self.tool(
+                    'phone_approve_payment',
+                    provider=provider,
+                    amountKrw=amount,
+                    merchant=a.order.source,
+                    methodLabel=card,
+                    **({'card': card_hint} if card_hint else {}),
+                )
+            except AgentFailure as e:
+                if not (kakao_front and any(w in e.reason for w in KAKAO_HUMAN_FALLBACK_WORDS)):
+                    raise
+                # 카카오페이 비밀번호 키패드를 앱이 못 읽었다(보안 키패드) — 결제창을 연 채 사람이 폰에서 비밀번호를
+                # 넣기를 기다린다. 창을 닫고 멈추면 폰에서 승인해도 주문이 안 생긴다(실기 2026-09-30)
+                self._restore_kakao_tab(*kakao_front)
+                return self._wait_human_kakao(a, card, e.reason)
             self.note('폰 승인', mask_text(approved[:200]))
+            if kakao_front:
+                # 승인 동안 앞에 둔 소싱처 탭을 닫고, 카카오페이 결제창(승인 뒤 주문 완료로 넘어간다)으로 돌아간다
+                self._restore_kakao_tab(*kakao_front)
             if any(m in approved for m in DECLINED_MARKERS):
                 # 'refused:' 접두사 없는 과거 형식. 재시도 없음 — 그대로 사람에게 넘긴다(재결제 위험)
                 raise AgentFailure(

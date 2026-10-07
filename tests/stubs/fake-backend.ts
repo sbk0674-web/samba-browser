@@ -23,6 +23,8 @@ export interface FakeBackend extends SyncBackend {
   failWith(error: Error | null): void
   /** subscribe 로 등록한 콜백을 수동으로 발화한다 */
   fire(table: string): void
+  /** subscribe 의 onStatus 를 수동으로 부른다(Realtime 연결/끊김 재현) */
+  realtime(table: string, live: boolean): void
   /** 다음 호출부터 인증 만료로 실패시킨다(기기 원격 로그아웃 재현) */
   expireAuth(): void
   /** 호출 횟수 기록 */
@@ -56,6 +58,7 @@ export function createFakeBackend(): FakeBackend {
   const tables = new Map<string, Map<string, RemoteRow>>()
   const keyedTables = new Map<string, Map<string, RemoteKeyedRow>>()
   const listeners = new Map<string, Set<() => void>>()
+  const statusListeners = new Map<string, Set<(live: boolean) => void>>()
   const calls = { select: 0, upsert: 0, remove: 0 }
   let signedIn: { userId: string; email: string } | null = null
   let authExpired = false
@@ -140,6 +143,19 @@ export function createFakeBackend(): FakeBackend {
           .map((r) => ({ ...r }))
       )
     },
+    async selectDeleted(name, workspaceId, columns) {
+      guard()
+      calls.select += 1
+      const wanted = columns.split(',').map((c) => c.trim())
+      return [...table(name).values()]
+        .filter((r) => r.workspace_id === workspaceId)
+        .filter((r) => r.deleted_at !== null && r.deleted_at !== undefined)
+        .map((r) => {
+          const picked: RemoteRow = { id: r.id }
+          for (const c of wanted) picked[c] = r[c]
+          return picked
+        })
+    },
     async selectAll(name) {
       guard()
       calls.select += 1
@@ -181,16 +197,28 @@ export function createFakeBackend(): FakeBackend {
     async rpcNumber() {
       return null
     },
-    async subscribe(name, onChange) {
+    async subscribe(name, onChange, onStatus) {
       let set = listeners.get(name)
       if (!set) {
         set = new Set()
         listeners.set(name, set)
       }
       set.add(onChange)
+      if (onStatus) {
+        let ss = statusListeners.get(name)
+        if (!ss) {
+          ss = new Set()
+          statusListeners.set(name, ss)
+        }
+        ss.add(onStatus)
+      }
       return () => {
         set!.delete(onChange)
+        if (onStatus) statusListeners.get(name)?.delete(onStatus)
       }
+    },
+    realtime(name, live) {
+      for (const fn of statusListeners.get(name) ?? []) fn(live)
     },
     rows(name) {
       return [...table(name).values()].map((r) => ({ ...r }))

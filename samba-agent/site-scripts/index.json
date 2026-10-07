@@ -144,7 +144,8 @@
     "host": "lotteon.com",
     "description": "이미 열려 있는 롯데온 주문서(orderSheet)에서 결제수단을 고르고(카드사 이름 또는 간편결제 이름) '결제하기'를 눌러 결제창(팝업/앱 요청)이 뜨게 한다. {ok,method,popup_url} 반환. 실제 결제 승인은 하지 않지만 결제 요청 자체는 전송되므로 반드시 사용자 승인 하에만 run_script로 실행할 것.",
     "params": [
-      "card — 카드사이름 또는 간편결제이름"
+      "card — 카드사이름 또는 간편결제이름",
+      "biz_no — 선택, 사업자등록번호(현금영수증 지출증빙용 칸이 비었을 때만 넣는다)"
     ]
   },
   {
@@ -654,6 +655,16 @@
     ]
   },
   {
+    "name": "lotteon_order_detail",
+    "host": "lotteon.com",
+    "description": "롯데온 주문 상세(2026-10-01, 로그인 실측): 계정 profile 로 주문/배송 내역에서 그 주문의 '상세보기'를 눌러 결제정보(결제액·L.POINT 사용)·구매적립예정을 읽고 탭을 닫는다.",
+    "params": [
+      "orderNo",
+      "profile",
+      "source_order_no"
+    ]
+  },
+  {
     "name": "lotteon_payment_quotes",
     "host": "",
     "description": "열려 있는 롯데온 주문서(orderSheet/payments) 탭에서 결제수단마다(신용카드는 카드사별로) 선택→800ms 대기→총 결제금액을 읽어 견적을 모은다. 결제하기는 절대 누르지 않고 끝나면 신용카드/롯데카드로 되돌린다. 주문·결제 없음.",
@@ -1006,6 +1017,53 @@
       "color",
       "limit",
       "model",
+      "profile"
+    ]
+  },
+  {
+    "name": "ssg_find_product",
+    "host": "ssg.com",
+    "description": "교차 비교용 — 모델코드로 SSG.COM 검색해 신세계몰·백화점 같은 상품(가장 싼 표시가) 찾기. 결제 없음",
+    "params": [
+      "model",
+      "name",
+      "source_url",
+      "option",
+      "profile"
+    ]
+  },
+  {
+    "name": "ssg_gift_address",
+    "host": "ssg.com",
+    "description": "SSG 선물 받는 분 지정: 배송지 대신 입력하기 → 주소록에서 고객 항목 체크 → 선택완료 → 계속하기 → 주문서. 없으면 배송지 추가 목록을 열고 need_address",
+    "params": [
+      "address",
+      "address_detail",
+      "name"
+    ]
+  },
+  {
+    "name": "ssg_gift_enter",
+    "host": "ssg.com",
+    "description": "SSG 선물하기 진입: 상품 주소(애드픽 경유 주소 그대로)를 새 탭으로 열고 옵션 → 선물 → 선물 정보 화면. 결제 없음",
+    "params": [
+      "option",
+      "product_url",
+      "profile"
+    ]
+  },
+  {
+    "name": "ssg_gift_save_address",
+    "host": "ssg.com",
+    "description": "SSG 선물하기 주소록 저장: 채워진 배송지 폼 저장 → 회원 팝업 닫고 선물 정보 화면으로",
+    "params": []
+  },
+  {
+    "name": "ssg_login_check",
+    "host": "ssg.com",
+    "description": "SSG 로그인 확인: MY SSG 주문조회를 새 탭으로 열어 로그인 여부를 보고 닫는다(결제 전 확인용)",
+    "params": [
+      "back_tab",
       "profile"
     ]
   },

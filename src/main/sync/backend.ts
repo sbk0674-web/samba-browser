@@ -92,6 +92,12 @@ export interface SyncBackend {
    * 커서로 걸러 낼 수 없고 행 수도 기기 수만큼이라 통째로 읽는다
    */
   selectAll(table: string): Promise<RemoteRow[]>
+  /**
+   * 작업공간의 삭제 표식(deleted_at 이 있는 행)만 준다. columns 로 받을 컬럼을 좁힌다(예: 'id,host,username,updated_at,deleted_at').
+   * 최초 업로드 직전에 "같은 자연 키가 이미 서버에서 지워졌는가" 를 보는 데 쓴다 —
+   * 옛 사본이 지운 계정을 새 원격 id 로 다시 올려 되살리는 것을 막는다
+   */
+  selectDeleted(table: string, workspaceId: string, columns: string): Promise<RemoteRow[]>
   upsert(table: string, rows: RemoteRow[]): Promise<void>
   remove(table: string, ids: string[]): Promise<void>
   /**
@@ -106,8 +112,15 @@ export interface SyncBackend {
   ): Promise<RemoteKeyedRow[]>
   /** 복합 PK 표(settings_sync)에 올린다. 충돌 해결은 서버의 기본키를 따른다 */
   upsertKeyed(table: string, rows: RemoteKeyedRow[]): Promise<void>
-  /** 변경 알림 구독. 반환값을 호출하면 구독을 푼다 */
-  subscribe(table: string, onChange: () => void): Promise<() => void>
+  /**
+   * 변경 알림 구독. 반환값을 호출하면 구독을 푼다.
+   * onStatus 는 구독이 살아 있는지(true = 변경이 실시간으로 온다) 바뀔 때 불린다 — 엔진이 이걸 보고 폴링을 멈춘다
+   */
+  subscribe(
+    table: string,
+    onChange: () => void,
+    onStatus?: (live: boolean) => void
+  ): Promise<() => void>
   /**
    * 숫자 하나를 돌려주는 서버 함수(rpc). 함수가 없거나 권한이 없으면 null —
    * 디렉터리의 가입 사용자 수처럼 "있으면 보여 주는" 값에 쓴다

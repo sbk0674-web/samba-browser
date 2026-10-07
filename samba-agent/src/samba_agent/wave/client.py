@@ -29,6 +29,8 @@ _STATUS_REASON = {
     403: FailReason.PERMISSION_DENIED,
     404: FailReason.UNKNOWN,
     409: FailReason.DUPLICATE,
+    # 상품주문번호에 행이 여럿(행 id 로 다시 불러야 한다) — 사유는 UNKNOWN, 호출부가 status 로 가른다
+    422: FailReason.UNKNOWN,
     503: FailReason.PERMISSION_DENIED,
 }
 
@@ -128,6 +130,19 @@ def infer_source(product_name: str | None) -> tuple[str, str] | None:
     return None
 
 
+# 마켓이 상품명을 잘라 롯데온 상품번호 뒷자리가 떨어진 것 — 'LE' + 6~9자리로 끝난다
+# (실기 2026-10-07 현대H몰 '… 여자로퍼 LE122077228' → 수집상품 LE1220772281)
+_TRUNCATED_LOTTEON_NO = re.compile(r'(?<!\w)(LE\d{6,9})$')
+
+
+def infer_lotteon_prefix(product_name: str | None) -> str | None:
+    """상품명 끝의 잘린 롯데온 상품번호(접두어). 온전한 번호로 추정되는 상품명이면 None."""
+    if infer_source(product_name) is not None:
+        return None
+    found = _TRUNCATED_LOTTEON_NO.search((product_name or '').rstrip())
+    return found.group(1) if found else None
+
+
 def infer_musinsa_product_id(product_name: str | None) -> str | None:
     """무신사로 추정되면 그 상품번호, 아니면 None."""
     found = infer_source(product_name)
@@ -150,6 +165,10 @@ class WaveOrder(BaseModel):
     # SAMBA 정산금. 목록 응답에 실리면 마진을 정산금 기준으로 계산한다(없으면 판매가 근사)
     revenue: float | None = None
     seller: str | None = None
+    # 중국 크림 주문 — 판매처(得物 …)·판매처 가격(위안)·수집상품 상품코드(식화 품번). 삼바웨이브가 실어 줄 때만
+    source_seller: str | None = None
+    source_price_cny: float | None = None
+    source_product_code: str | None = None
     sourcing_account_id: str | None = None
     sourcing_account_username: str | None = None
     sourcing_account_label: str | None = None
@@ -166,6 +185,8 @@ class WaveOrder(BaseModel):
     # 소싱처가 비어 있어 상품명 끝 숫자로 소싱처·상품번호를 추정했는가(infer_source)
     source_inferred: bool = False
     inferred_product_id: str | None = None
+    # 상품명 끝의 잘린 롯데온 상품번호 — 소싱처는 추정하지 않고 접두어로 수집상품 연결만 시도한다
+    inferred_product_prefix: str | None = None
 
     @model_validator(mode='after')
     def _infer_source(self) -> Self:
@@ -179,6 +200,8 @@ class WaveOrder(BaseModel):
             self.source_url = _INFER_URL[site].format(product_id)
             self.source_inferred = True
             self.inferred_product_id = product_id
+        else:
+            self.inferred_product_prefix = infer_lotteon_prefix(self.product_name)
         return self
 
     @property
@@ -200,6 +223,8 @@ class WaveOrder(BaseModel):
         sku = f'{name} [{option}]' if (name and option) else (name or self.order_number)
         return OrderRef(
             order_no=self.order_number,
+            # 행 id — 같은 상품주문번호의 다른 행(다른 사이즈)과 구분해 조회·기입한다
+            wave_id=(self.id or '').strip() or None,
             source=self.source_site or '',
             seller=(self.seller or '').strip(),
             sku=sku,
@@ -217,10 +242,59 @@ class WaveOrder(BaseModel):
         )
 
 
+class WaveSourceOption(BaseModel):
+    """상품 등록 때 수집한 소싱처 옵션 — 마켓 옵션은 이것으로 만들었다."""
+
+    model_config = ConfigDict(extra='ignore')
+
+    name: str
+    stock: int | None = None
+    sold_out: bool = False
+
+
+def _opt_key(text: str) -> str:
+    """옵션 이름 비교용 — 공백·구두점을 지우고 소문자로."""
+    return re.sub(r'[\s\-_/·,:()\[\]]+', '', text or '').lower()
+
+
+def registered_source_option(
+    market_option: str | None,
+    source_options: list[WaveSourceOption],
+    registered: str | None = None,
+) -> str | None:
+    """주문의 마켓 옵션이 등록 때 어느 소싱처 옵션이었는가. 하나로 정해질 때만 그 이름, 아니면 None.
+
+    1) 포이즌처럼 입찰번호로 삼바웨이브가 찾아 준 옵션(registered)
+    2) 이름이 공백·구두점만 다르고 같은 등록 옵션 하나(마켓 옵션은 등록 옵션 이름으로 만들었다)
+    사용자 2026-09-30: 등록 때 매칭한 옵션이 있는데 옵션 글자를 새로 짐작하다 틀려 취소했다.
+    """
+    if registered and registered.strip():
+        return registered.strip()
+    key = _opt_key(market_option or '')
+    if not key:
+        return None
+    same = [o.name for o in source_options if _opt_key(o.name) == key]
+    return same[0] if len(set(same)) == 1 else None
+
+
 class WaveOrderDetail(WaveOrder):
     """주문 상세 — 배송지가 더 실린다. 배송지는 받는 즉시 쓰고 버린다."""
 
     shipping: WaveShipping = WaveShipping()
+    # 등록 때 매칭한 소싱처 옵션(삼바웨이브가 실어 주면) — 주문 옵션 대신 이것으로 산다
+    source_options: list[WaveSourceOption] = []
+    poison_sizes: dict[str, str] = {}
+    registered_option: str | None = None
+
+    def to_order_ref(self) -> OrderRef:
+        """등록 매칭으로 소싱처 옵션 이름이 정해지면 그 이름을 주문 옵션으로 쓴다(글자 짐작을 건너뛴다)."""
+        ref = super().to_order_ref()
+        source_option = registered_source_option(
+            ref.option, self.source_options, self.registered_option
+        )
+        if not source_option or source_option == ref.option:
+            return ref
+        return ref.model_copy(update={'option': source_option, 'market_option': ref.option})
 
 
 # 감독자 기대값 키 ← 삼바웨이브 응답 필드. 응답에 그 값이 없으면(None) 빼서 '대조 못 함' 으로 남긴다.
@@ -266,6 +340,12 @@ class WaveClient:
         items = body.get('items') if isinstance(body, dict) else None
         return [WaveOrder.model_validate(i) for i in items or []]
 
+    def sourcing_numbers(self, days: int = 14) -> set[str]:
+        """최근 주문에 적힌 소싱주문번호 전부 — 교차 검증이 소싱처 주문 내역과 견준다(삼바에 없는 소싱 주문 찾기)."""
+        body = self._request('GET', '/sourcing-numbers', params={'days': str(days)})
+        numbers = body.get('numbers') if isinstance(body, dict) else None
+        return {str(n) for n in numbers} if isinstance(numbers, list) else set()
+
     def sourcing_account_id(self, source_site: str, username: str) -> str | None:
         """(소싱처, 로그인 아이디) → 삼바웨이브 소싱 계정 id. 못 찾으면 None.
 
@@ -294,6 +374,16 @@ class WaveClient:
                 return str(item.get('id') or '') or None
         return None
 
+    def only_sourcing_account_id(self, source_site: str) -> str | None:
+        """그 소싱처의 활성 계정이 하나뿐이면 그 id(得物 '마놀' 처럼 계정이 하나인 곳). 없거나 여럿이면 None."""
+        try:
+            body = self._request('GET', '/sourcing-accounts', params={'source_site': source_site})
+        except WaveError:
+            return None
+        items = body.get('items') if isinstance(body, dict) else body
+        ids = [str(i.get('id')) for i in items or [] if isinstance(i, dict) and i.get('id')]
+        return ids[0] if len(ids) == 1 else None
+
     def get_order(
         self,
         order_no: str,
@@ -302,10 +392,12 @@ class WaveClient:
     ) -> WaveOrderDetail:
         """주문 1건 상세. 배송지가 실려 온다 — 호출부는 즉시 쓰고 버린다.
 
+        ``order_no`` 는 주문 키 — 행 id(`ord_…`, OrderRef.wave_key) 또는 상품주문번호. 한 상품주문번호에
+        행이 여럿이면 삼바웨이브는 번호만으로는 422 를 준다(실기 2026-10-05 20261005DFA7D9: 230 을 샀는데
+        되읽기가 210 행을 줬다) — 호출부는 행 id 로 부른다. ``sourcing_order_number`` 는 옛 호환(그 번호가
+        적힌 행).
         ``order_type`` 을 주면 그 종류의 배송지(까대기 = 사무실)를 달라고 요청한다. 삼바웨이브가
         아직 이 인자를 모르면 응답의 order_type 이 다르게 오고, 호출부가 그걸 보고 멈춘다.
-        한 상품주문번호에 행이 여럿이면 삼바웨이브는 아직 안 산 행을 준다. 기입 되읽기는
-        ``sourcing_order_number`` 로 방금 적은 행을 고른다(실기 20260927C5313B 240·260).
         """
         params: dict[str, str] = {}
         if order_type:
@@ -328,6 +420,8 @@ class WaveClient:
         replace: bool = False,
     ) -> WaveOrder:
         """소싱주문번호·매입금액을 삼바웨이브 행에 기입한다. 다른 번호가 이미 있으면 409(DUPLICATE).
+
+        ``order_no`` 는 주문 키(행 id 또는 상품주문번호) — 행이 여럿인 상품주문번호는 422 로 막힌다.
 
         replace=True 는 소싱처 주문을 취소하고 다시 산 경우(사용자 지시) — 다른 번호가 있어도 덮어쓴다.
 
@@ -367,6 +461,18 @@ class WaveClient:
         )
         return body if isinstance(body, dict) else {}
 
+    def link_collected(self, order_no: str, collected_product_id: str) -> dict[str, object]:
+        """소싱처 미등록 주문을 수집상품 번호(cp_…)로 연결한다 — 판매자상품코드에서 읽은 번호다.
+
+        그 수집상품이 없으면(지워짐) 삼바웨이브가 404 를 준다.
+        """
+        body = self._request(
+            'POST',
+            f'/orders/{order_no}/link-product',
+            json={'collected_product_id': collected_product_id},
+        )
+        return body if isinstance(body, dict) else {}
+
     def set_cancel_requested(self, order_no: str, reason: str, flag: str | None = None) -> bool:
         """이행하지 못한 발주 전 주문을 '취소중'(cancelling)으로 바꾼다(flag 를 주면 가격X·재고X 태그도 붙인다).
 
@@ -378,6 +484,63 @@ class WaveClient:
             payload['flag'] = flag
         body = self._request('PUT', f'/orders/{order_no}/status', json=payload)
         return bool(body.get('changed')) if isinstance(body, dict) else False
+
+    def dewu_tracking_targets(self, limit: int = 30) -> list[dict[str, str]]:
+        """중국 크림 得物 주문 중 해외송장이 빈 건 — [{order_number, sourcing_order_number}]."""
+        body = self._request('GET', '/cn-dewu-tracking-targets', params={'limit': limit})
+        return [x for x in body if isinstance(x, dict)] if isinstance(body, list) else []
+
+    def write_overseas_tracking(self, order_no: str, company: str, number: str) -> bool:
+        """중국 크림 주문의 해외 택배사·송장을 넣는다(배송중으로 바뀐다). 허브넷 전송은 삼바웨이브 CN 루프가 한다."""
+        body = self._request(
+            'PUT',
+            f'/orders/{order_no}/overseas-tracking',
+            json={'company': company, 'number': number},
+        )
+        return bool(body.get('rows')) if isinstance(body, dict) else False
+
+    def list_lotteon_gift_pending(self, *, days: int = 45) -> list[dict[str, object]]:
+        """송장이 아직 없는 롯데ON 선물 주문 — [{order_number, sourcing_order_number, customer_name, product_name, status}]."""
+        body = self._request('GET', '/lotteon-gift-tracking/pending', params={'days': days})
+        rows = body.get('rows') if isinstance(body, dict) else None
+        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+    def write_lotteon_gift_tracking(
+        self,
+        *,
+        company: str,
+        number: str,
+        sourcing_order_number: str = '',
+        customer_name: str = '',
+        product_text: str = '',
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        """롯데ON 선물 주문에 택배사·송장을 넣고 마켓으로 보낸다(카카오톡 알림에서 읽은 값).
+
+        주문은 삼바웨이브가 정한다 — 롯데ON 주문번호, 없으면 받는 사람 이름 + 품번. 정확히 1건일 때만 넣는다.
+        돌려주는 것: {ok, action(shipped·dry_run·skipped·rejected), reason, order_number, market_sent, message}.
+        """
+        body = self._request(
+            'PUT',
+            '/lotteon-gift-tracking',
+            json={
+                'company': company,
+                'number': number,
+                'sourcing_order_number': sourcing_order_number or None,
+                'customer_name': customer_name or None,
+                'product_text': product_text or None,
+                'dry_run': dry_run,
+            },
+        )
+        return body if isinstance(body, dict) else {}
+
+    def add_memo(self, order_no: str, line: str) -> bool:
+        """주문 메모에 한 줄을 덧붙인다(상태·소싱 값은 그대로). 새로 붙였으면 True, 이미 같은 줄이 있으면 False.
+
+        사용자 2026-10-01: 카카오페이가 최저가인데 폰 비밀번호를 못 받으면 다른 수단으로 사지 않고 메모만 남긴다.
+        """
+        body = self._request('POST', f'/orders/{order_no}/memo', json={'line': line})
+        return bool(body.get('rows')) if isinstance(body, dict) else False
 
     def close(self) -> None:
         self._client.close()

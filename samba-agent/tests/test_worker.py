@@ -457,6 +457,59 @@ def test_작업이_끝나면_그_작업이_연_탭을_닫는다(setup):
     assert tabs.closed == ['t-order'] and 't-samba' in tabs.open
 
 
+def test_결제_시작_뒤_끝나지_못한_작업은_결제창_탭을_닫지_않는다(tmp_path):
+    """실기 2026-10-06 토스: 폰 승인 도중 하네스가 bridge_down 으로 접고 결제창 탭을 닫아, 폰에서는 승인됐는데
+    PC 쪽 주문이 마무리되지 않았다. 결제 단계에 들어간 뒤 done 이 아니면 탭을 남긴다(다음 작업 시작 때 정리)."""
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    tabs = _FakeTabs()
+    w = Worker(
+        WorkerDeps(
+            queue=q, graph=None, version='vtest', report=lambda j, s: None, parse_order=order_of
+        )
+    )
+    w.d.tabs = tabs
+
+    def payer_cut(_a):
+        tabs.open.add('t-pay-popup')  # 결제창이 떠 있는 채로
+        return AgentResult(
+            status='needs_human', reason='브릿지 끊김', fail_reason=FailReason.BRIDGE_DOWN
+        )
+
+    log: list[str] = []
+    w.d.graph = build_supervisor(
+        reg,
+        agents(log) | {'payer': payer_cut},
+        checkpointer=MemorySaver(),
+        gate=False,
+        on_stage_start=w.mark_stage,
+    )
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    assert w.tick().state == 'needs_human'
+    assert tabs.closed == [] and 't-pay-popup' in tabs.open
+
+    # 결제 전(구매 단계)에서 실패한 작업은 예전처럼 바로 닫는다
+    tabs2 = _FakeTabs()
+    w.d.tabs = tabs2
+    w.d.graph = build_supervisor(
+        reg,
+        agents(log, fail_at='buy'),
+        checkpointer=MemorySaver(),
+        gate=False,
+        on_stage_start=w.mark_stage,
+    )
+    orig = w.d.graph.invoke
+
+    def invoke_and_open_tab(*a, **k):
+        tabs2.open.add('t-order')
+        return orig(*a, **k)
+
+    w.d.graph.invoke = invoke_and_open_tab  # type: ignore[method-assign]
+    q.enqueue('A2', 'U1', {}, 'ts2')
+    assert w.tick().state in ('needs_human', 'failed', 'fail')
+    assert tabs2.closed == ['t-order']
+
+
 def test_승인_대기_중에는_탭을_닫지_않고_재개_뒤에_닫는다(setup):
     q, _log, _sent, make = setup
     w = make(gate=True)
@@ -501,7 +554,9 @@ def test_소싱처가_범위_밖으로_바뀐_주문은_돌리지_않는다(tmp_
             graph=graph,
             version='vtest',
             report=lambda job, line: sent.append(line),
-            parse_order=lambda job: OrderRef(order_no=job.order_no, source='LOTTEON', seller='포이즌', sku='티셔츠', qty=1),
+            parse_order=lambda job: OrderRef(
+                order_no=job.order_no, source='LOTTEON', seller='포이즌', sku='티셔츠', qty=1
+            ),
             sources=frozenset({'MUSINSA', '29CM'}),
         )
     )
@@ -563,10 +618,113 @@ def test_품절_실패는_자동으로_재고X_를_붙이지_않는다(setup, re
     )
     job, _ = q.enqueue('S1', 'U1', {}, 'ts1')
     result = AgentResult(status='fail', reason=reason, fail_reason=FailReason.OUT_OF_STOCK)
-    w._apply(job, {'outcome': 'needs_human', 'fail_reason': 'out_of_stock', 'results': {'buyer.musinsa': result}})
+    w._apply(
+        job,
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'out_of_stock',
+            'results': {'buyer.musinsa': result},
+        },
+    )
     assert (marked == [('S1', 'out_of_stock')]) is flagged
     if not flagged:
         assert any('재고X 보류' in s for s in sent)
+
+
+def _auto_worker(setup, marked):
+    q, log, sent, _make = setup
+    reg = Registry.load(DEFAULT_ROOT)
+    graph = build_supervisor(reg, agents(log, None), checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(
+            queue=q,
+            graph=graph,
+            version='vtest',
+            report=lambda job, line: sent.append(line),
+            parse_order=order_of,
+            dry_run=False,
+            flag_order=lambda no, err, ev=None: marked.append((no, err, ev)) or '표시함',
+        )
+    )
+    return q, sent, w
+
+
+def _ref(seller: str) -> OrderRef:
+    return OrderRef(
+        order_no='X1',
+        source='MUSINSA',
+        seller=seller,
+        sku='상품',
+        revenue=43600,
+        product_url='https://www.musinsa.com/products/1',
+    )
+
+
+def test_확정_품절은_근거를_적고_자동으로_취소중(setup):
+    """사용자 2026-09-29: 페이지에서 확인한 품절은 사람 검수 없이 취소중 — 근거(사유 글자)를 메모에 싣는다."""
+    marked: list = []
+    q, sent, w = _auto_worker(setup, marked)
+    job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
+    result = AgentResult(
+        status='fail',
+        reason='확정 품절: a — a: 주문 옵션 품절 표시 [95 품절]',
+        fail_reason=FailReason.OUT_OF_STOCK,
+    )
+    w._apply(
+        job,
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'out_of_stock',
+            'order': _ref('KT알파쇼핑'),
+            'results': {'buyer.musinsa': result},
+        },
+    )
+    assert len(marked) == 1 and marked[0][1] == 'out_of_stock'
+    assert '품절 확인' in marked[0][2] and '95 품절' in marked[0][2]
+    assert any('자동 취소중' in s for s in sent)
+
+
+def test_포이즌_품절도_자동으로_취소중(setup):
+    """패널티 금액 확인은 보류 — 포이즌도 근거가 있으면 바로 취소중(사용자 2026-09-30)."""
+    marked: list = []
+    q, sent, w = _auto_worker(setup, marked)
+    job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
+    result = AgentResult(
+        status='fail', reason='확정 품절: a — a: 품절', fail_reason=FailReason.OUT_OF_STOCK
+    )
+    w._apply(
+        job,
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'out_of_stock',
+            'order': _ref('poison(x)'),
+            'results': {'buyer.musinsa': result},
+        },
+    )
+    assert len(marked) == 1
+    assert any('자동 취소중' in s for s in sent)
+
+
+def test_마진_미달은_주문서_원가가_있으면_자동으로_취소중(setup):
+    marked: list = []
+    q, sent, w = _auto_worker(setup, marked)
+    job, _ = q.enqueue('X1', 'U1', {}, 'ts1')
+    buy = AgentResult(
+        status='ok',
+        reason='ok',
+        payload={'cost': 48480, 'margin_pct': -9.0, 'account': 'buyer01', 'card': '무신사페이'},
+    )
+    w._apply(
+        job,
+        {
+            'outcome': 'needs_human',
+            'fail_reason': 'margin',
+            'order': _ref('KT알파쇼핑'),
+            'results': {'buyer.musinsa': buy},
+        },
+    )
+    assert len(marked) == 1 and marked[0][1] == 'margin'
+    assert '48,480' in marked[0][2] and '43,600' in marked[0][2]
 
 
 @pytest.mark.parametrize(
@@ -625,3 +783,188 @@ def test_검증_전_결제수단은_자동_승인하지_않는다(tmp_path):
     assert job.state == 'needs_human'
     assert 'pay' not in log
     assert any('수동 승인 필요' in s for s in sent)
+
+
+def test_카카오페이_비밀번호_미입력이면_다른_수단으로_사지_않고_메모만_남긴다(tmp_path):
+    """사용자 2026-10-01: 카카오페이 최저가면 결제 시도·알림 뒤 안 되면 네이버페이로 사지 말고 메모만 — 사람이 산다."""
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    acts = agents([])
+    acts['payer'] = lambda _a: AgentResult(
+        status='needs_human',
+        reason='카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인) [카카오페이 54,000원]',
+        fail_reason=FailReason.PAY_INTERRUPTED,
+    )
+    memos: list[tuple[str, str]] = []
+    graph = build_supervisor(reg, acts, checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(
+            queue=q,
+            graph=graph,
+            version='vtest',
+            report=lambda j, l: None,
+            parse_order=order_of,
+            dry_run=False,
+            add_memo=lambda no, line: memos.append((no, line)) or True,
+        )
+    )
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    w.tick()
+    job = q.get('A1')
+    assert job.state == 'needs_human'
+    assert not job.options.get('card')  # 네이버페이로 다시 사지 않는다
+    assert memos and memos[0][0] == 'A1' and '54,000원' in memos[0][1]
+
+
+def test_끝난_작업은_뒤처리를_부르고_결과를_보고한다(setup):
+    q, log, sent, make = setup
+    w = make(gate=False)
+    w.d.dry_run = False
+    calls: list[str] = []
+    w.d.after_done = lambda job, out: calls.append(job.order_no) or 'SSG 선물 받기 완료'
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    assert w.tick().state == 'done'
+    assert calls == ['A1']
+    assert any('SSG 선물 받기 완료' in s for s in sent)
+
+
+def test_폰_구매_소싱처는_그래프_없이_처리기로_끝낸다(setup):
+    """중국 크림(SHIHUO) 주문 — 得物 앱 처리기(사용자 2026-10-01)."""
+    q, log, sent, make = setup
+    w = make(gate=False)
+    w.d.dry_run = False
+    w.d.parse_order = lambda job: OrderRef(
+        order_no=job.order_no, source='SHIHUO', seller='크림', sku='S1', qty=1
+    )
+    w.d.phone_sources = {'SHIHUO': lambda job, order: ('done', None, '得物 110 원가 117,439원')}
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    assert w.tick().state == 'done'
+    assert log == []  # 브라우저 그래프(구매·결제·기록)는 돌지 않았다
+    assert any('得物 110' in s for s in sent)
+
+
+def test_네이버페이_창_계정_불일치면_그_계정만_빼고_한_번_다시_산다(tmp_path):
+    """실기 2026-10-01: ABC cannonfort 프로필의 네이버가 키마스터 연결 계정(edelvise06)이 아닌 계정으로 로그인돼
+    결제 비밀번호를 넣지 않고 멈췄다 — 결제는 안 됐으니 그 계정을 빼고 다시 산다(두 번은 하지 않는다)."""
+    from samba_agent.agents.payer import NAVERPAY_MISMATCH_MARK, naverpay_mismatch
+    from samba_agent.queue.worker import ACCOUNT_RETRY_KEY
+
+    raw = (
+        'fill_secret 거절: refused: NAVERPAY_ACCOUNT_MISMATCH — the Naver Pay window is signed in as cannonfort, '
+        'but the KeyMaster account to pay with is edelvise06. Sign out inside the Naver Pay window'
+    )
+    assert naverpay_mismatch(raw) == ('cannonfort', 'edelvise06')
+    assert naverpay_mismatch('ok: the app entered the payment password') is None
+
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    acts = agents([])
+    acts['payer'] = lambda _a: AgentResult(
+        status='needs_human',
+        reason=f'{NAVERPAY_MISMATCH_MARK}: 프로필 cannonfort 의 네이버페이 창은 cannonfort 로 로그인돼 있고 키마스터 연결 '
+        '계정은 edelvise06 다 — 결제 비밀번호는 넣지 않았다(결제 안 됨)',
+        fail_reason=FailReason.PERMISSION_DENIED,
+    )
+    sent: list[str] = []
+    graph = build_supervisor(reg, acts, checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(
+            queue=q,
+            graph=graph,
+            version='vtest',
+            report=lambda j, l: sent.append(l),
+            parse_order=order_of,
+            dry_run=False,
+        )
+    )
+    q.enqueue('A1', 'U1', {}, 'ts1')
+    w.tick()
+    job = q.get('A1')
+    assert job.state == 'queued'  # 다시 큐에 들어갔다
+    assert job.options.get('skip_accounts') == 'cannonfort' and job.options.get(ACCOUNT_RETRY_KEY)
+    assert any('cannonfort 계정을 빼고' in s for s in sent)
+    # 두 번째도 같은 사유면 더 돌리지 않고 사람에게 남긴다
+    w.tick()
+    assert q.get('A1').state == 'needs_human'
+
+
+def test_결제창_로그인_화면으로_멈춘_계정을_알아낸다():
+    from samba_agent.queue.worker import _mismatch_profile
+
+    reason = (
+        '결제창이 로그인 화면이다(id.payco.com) — 프로필 rbf15 에서 결제 앱(네이버 등)에 '
+        '먼저 로그인해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)'
+    )
+    assert _mismatch_profile(reason) == 'rbf15'
+    # 계정을 모르면 뺄 계정도 없다
+    assert _mismatch_profile(reason.replace('rbf15', '-')) == ''
+    assert _mismatch_profile('옵션 불일치') == ''
+
+
+# ==================== 같은 상품주문번호 두 행 ====================
+
+
+def test_같은_주문번호_두_행을_각각_끝까지_돌린다(setup):
+    """실기 20261005DFA7D9 — 230·210 이 각각 작업이다. 승인 버튼 값은 행 id 라 서로 섞이지 않는다."""
+    q, log, _sent, make = setup
+    q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_A')
+    q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
+    w = make(gate=True)
+    asked: list[tuple[str, str]] = []
+    w.d.approval_report = lambda job, key, stage, summary: asked.append((key, stage))
+
+    first = w.tick()
+    assert first.wave_id == 'ord_A' and first.state == 'needs_human'
+    second = w.tick()
+    assert second.wave_id == 'ord_B' and second.state == 'needs_human'
+    assert asked == [('ord_A', 'pay'), ('ord_B', 'pay')]
+
+    # 둘째 행만 승인 — 첫 행은 그대로 대기
+    done = w.resume('ord_B', approved=True, by='U9', stage='pay')
+    assert done.wave_id == 'ord_B' and done.state == 'done'
+    assert q.get('ord_A').state == 'needs_human'
+    assert log == ['buy', 'buy', 'pay', 'record', 'verify']
+    done_a = w.resume('ord_A', approved=True, by='U9', stage='pay')
+    assert done_a.state == 'done'
+    assert all(j.state == 'done' for j in (q.get('ord_A'), q.get('ord_B')))
+
+
+def test_표시_취소와_메모는_행_id_로_부른다(tmp_path):
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    log: list[str] = []
+    sent: list[str] = []
+    marked: list[tuple[str, str]] = []
+    graph = build_supervisor(reg, agents(log, None), checkpointer=MemorySaver(), gate=False)
+    w = Worker(
+        WorkerDeps(
+            queue=q,
+            graph=graph,
+            version='vtest',
+            report=lambda job, line: sent.append(line),
+            parse_order=order_of,
+            dry_run=False,
+            flag_order=lambda key, err: marked.append((key, err)) or '표시함',
+        )
+    )
+    job, _ = q.enqueue('X', 'intake', {}, 'ts1', wave_id='ord_B')
+    w._apply(job, {'outcome': 'failed', 'fail_reason': 'bridge_down'})
+    assert marked == [('ord_B', 'bridge_down')]
+    assert any(s.startswith('X ') for s in sent)  # 보고는 사람이 아는 주문번호로
+
+
+def test_주문_조회가_행이_여럿이라_실패하면_사람에게_넘긴다(setup):
+    from samba_agent.queue.orders import AmbiguousOrder
+
+    q, _log, sent, make = setup
+    q.enqueue('X', 'U1', {}, 'ts1')  # 슬랙 수동 접수 — 행 id 없음
+    w = make(gate=False)
+
+    def ambiguous(_job):
+        raise AmbiguousOrder('행이 여럿인 주문 — 행 id 로 접수: ord_A(230), ord_B(210)')
+
+    w.d.parse_order = ambiguous
+    job = w.tick()
+    assert job.state == 'needs_human'
+    assert 'ord_A' in job.error and 'ord_B' in job.error
+    assert any('행 id 로 접수' in s for s in sent)

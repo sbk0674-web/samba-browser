@@ -60,6 +60,11 @@ class FakeRepo implements DeviceRepo {
   list(): PhoneRowLike[] {
     return [...this.rows]
   }
+
+  setWifiAddress(id: number, address: string | null): void {
+    const row = this.rows.find((r) => r.id === id)
+    if (row) row.wifiAddress = address
+  }
 }
 
 const ONE = 'List of devices attached\nR3CRA05HY3R device usb:1-4 model:SM_A546S transport_id:3\n'
@@ -632,5 +637,59 @@ describe('지운 폰은 다시 끌어오지 않는다', () => {
     expect(h.adb.calls.filter((c) => c[0] === 'disconnect')).toEqual([
       ['disconnect', '192.168.45.212:5555']
     ])
+  })
+})
+
+describe('고정 포트(adb tcpip 5555)로 무선 연결을 유지한다', () => {
+  // 실기 2026-10-01 SM-A426N: 무선 디버깅은 와이파이가 끊길 때마다 폰이 스스로 꺼서 결제 승인이 멈췄다.
+  // 고정 포트 접속은 mDNS 에 안 나오므로 폰에 시리얼을 물어 같은 폰으로 알아본다
+  const TLS = 'adb-R5CR30LFATY-mPzLR3._adb-tls-connect._tcp'
+  const HEAD = 'List of devices attached\n'
+  const MDNS_HEAD = 'List of discovered mdns services\n'
+  const MDNS = MDNS_HEAD + 'adb-R5CR30LFATY-mPzLR3\t_adb-tls-connect._tcp\t192.168.45.116:46055\n'
+  const SEEN = { serial: 'R5CR30LFATY', model: 'SM_A426N', transport: 'usb', state: 'online', at: 1 }
+
+  it('무선 디버깅으로만 붙은 폰은 고정 포트로 전환하고 그 주소를 기억한다', async () => {
+    const h = makeHarness({ autoReconnect: false })
+    h.adb.reply('devices -l', HEAD + TLS + ' device model:SM_A426N\n')
+    h.adb.reply('mdns services', MDNS)
+    await h.manager.refresh()
+    expect(h.adb.calls).toContainEqual(['-s', TLS, 'tcpip', '5555'])
+    expect(h.repo.rows[0]).toMatchObject({
+      serial: 'R5CR30LFATY',
+      wifiAddress: '192.168.45.116:5555'
+    })
+    // 한 번 시도한 폰을 주기마다 다시 전환하지 않는다
+    await h.manager.refresh()
+    expect(h.adb.calls.filter((c) => c[2] === 'tcpip')).toHaveLength(1)
+  })
+
+  it('고정 포트로만 붙어 있어도(mDNS 에 없음) 같은 폰으로 알아본다', async () => {
+    const h = makeHarness({ autoReconnect: false })
+    h.repo.upsertSeen(SEEN)
+    h.adb.reply('devices -l', HEAD + '192.168.45.116:5555 device model:SM_A426N\n')
+    h.adb.reply('mdns services', MDNS_HEAD)
+    h.adb.reply('getprop ro.serialno', 'R5CR30LFATY\n')
+    const list = await h.manager.refresh()
+    expect(h.repo.rows.map((r) => r.serial)).toEqual(['R5CR30LFATY'])
+    expect(list).toHaveLength(1)
+    expect(list[0]).toMatchObject({ serial: '192.168.45.116:5555', state: 'online' })
+    expect(h.repo.rows[0].wifiAddress).toBe('192.168.45.116:5555')
+    // 이미 고정 포트면 전환하지 않는다
+    expect(h.adb.calls.some((c) => c[2] === 'tcpip')).toBe(false)
+  })
+
+  it('끊긴 폰은 기억한 고정 주소로 다시 붙인다', async () => {
+    const h = makeHarness({ autoReconnect: false })
+    const row = h.repo.upsertSeen(SEEN)
+    h.repo.setWifiAddress(row.id, '192.168.45.116:5555')
+    h.adb.reply('devices -l', HEAD)
+    h.adb.reply('mdns services', MDNS_HEAD)
+    h.adb.reply('connect 192.168.45.116:5555', 'connected to 192.168.45.116:5555')
+    await h.manager.refresh()
+    expect(h.adb.calls).toContainEqual(['connect', '192.168.45.116:5555'])
+    // 쉬는 시간 안에는 다시 두드리지 않는다
+    await h.manager.refresh()
+    expect(h.adb.calls.filter((c) => c[0] === 'connect')).toHaveLength(1)
   })
 })

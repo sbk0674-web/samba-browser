@@ -6,7 +6,7 @@
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const code = (String(args.sku || '').match(/products\/(\d+)|^(\d{5,})$/) || []).slice(1).find(Boolean)
-const R = { my_price: null, max_reward: 0, list_price: null, shown_price: null, points_in_price: 0, prepay_in_price: 0, grade_reward: 0, pay_reward: 0, logged_in: null, sold_out: false, product_url: code ? 'https://www.musinsa.com/products/' + code : null, note: null }
+const R = { my_price: null, max_reward: 0, list_price: null, shown_price: null, points_in_price: 0, pay_discount_in_price: 0, prepay_in_price: 0, grade_reward: 0, pay_reward: 0, logged_in: null, sold_out: false, product_url: code ? 'https://www.musinsa.com/products/' + code : null, note: null }
 if (!code) return { ...R, note: 'no product code in sku' }
 const get = async o => { for (let i = 0; i < 5; i++) { try { return (await page.get(o)).tree } catch (e) { await sleep(500) } } return '' }
 const id = (String(await tabs.open({ ...(args.profile ? { profile: args.profile } : {}), url: R.product_url })).match(/tab (\S+)/) || [])[1]
@@ -46,7 +46,11 @@ const rw = tx.slice(tx.indexOf('최대 적립'))
 const grade = num((rw.match(/등급 적립 \([^)]*\)\s*([\d,]+)원/) || [])[1]) || num((ps.match(/([\d,]+)원/) || [])[1])
 R.grade_reward = R.prepay_in_price ? 0 : grade
 R.pay_reward = num((rw.match(/무신사머니 결제 시 [\d.]+% 적립\s*([\d,]+)원/) || [])[1])
-R.my_price = R.shown_price + R.points_in_price
+// 결제수단 즉시할인(2026-10 신설: 토스페이×계좌 9만원 이상 -9,000원 등) — 나의 할인가에 가장 큰 것이 들어 있다.
+// 주문서 총액은 수단을 고르기 전이라 이 할인이 없다 → 적립금처럼 되더해 주문서와 같은 기준으로 맞춘다
+const pd = (d.split('결제수단 즉시할인')[1] || '').split(/적용 안함|최대 적립/)[0]
+R.pay_discount_in_price = Math.max(0, ...[...pd.matchAll(/-([\d,]+)원/g)].map(m => num(m[1])))
+R.my_price = R.shown_price + R.points_in_price + R.pay_discount_in_price
 R.max_reward = R.grade_reward + R.pay_reward
 R.note = /적립 상세|등급 적립/.test(rw) ? null : '적립 내역을 못 펼침 — 결제수단 적립 0으로 둠'
 return R

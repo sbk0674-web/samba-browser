@@ -353,6 +353,82 @@ export class BookmarkRepo {
     this.record(id, 'upsert')
   }
 
+  /**
+   * 링크를 toFolderId 폴더의 toIndex 자리에 놓는다(끌어 옮기기). 같은 폴더 안 순서 바꾸기와
+   * 다른 폴더로 옮기기를 한 번에 처리하고, 옮긴 뒤 두 폴더의 형제 position 을 0부터 다시 매긴다.
+   * toIndex 가 범위를 벗어나면 끝으로 간다
+   */
+  placeLink(id: number, toFolderId: number | null, toIndex: number): void {
+    const rows = this.bookmarkRows()
+    const me = rows.find((b) => b.id === id)
+    if (!me) return
+    const from = rows
+      .filter((b) => b.folderId === me.folderId && b.id !== id)
+      .sort((a, b) => a.position - b.position)
+    const to =
+      me.folderId === toFolderId
+        ? from
+        : rows.filter((b) => b.folderId === toFolderId).sort((a, b) => a.position - b.position)
+    const at = Math.max(0, Math.min(to.length, Math.trunc(toIndex)))
+    const placed = [...to.slice(0, at), me, ...to.slice(at)]
+    this.d.transaction(() => {
+      placed.forEach((b, i) => {
+        this.d
+          .update(bookmarks)
+          .set({ folderId: toFolderId, position: i, updatedAt: Date.now() })
+          .where(eq(bookmarks.id, b.id))
+          .run()
+      })
+      if (me.folderId !== toFolderId) {
+        from.forEach((b, i) => {
+          this.d.update(bookmarks).set({ position: i }).where(eq(bookmarks.id, b.id)).run()
+        })
+      }
+    })
+    this.db.scheduleSave()
+    // 자리가 바뀐 행은 전부 동기화 대상이다(순서가 다른 PC 에도 같게 보이도록)
+    for (const b of placed) this.record(b.id, 'upsert')
+    if (me.folderId !== toFolderId) for (const b of from) this.record(b.id, 'upsert')
+  }
+
+  /** 폴더를 toFolderId 아래 toIndex 자리에 놓는다. 자기 자신·자손 아래로는 못 간다 */
+  placeFolder(id: number, toFolderId: number | null, toIndex: number): void {
+    if (this.isSelfOrDescendant(id, toFolderId)) {
+      throw new Error('cannot move folder into itself or its descendant')
+    }
+    const rows = this.folderRows()
+    const me = rows.find((f) => f.id === id)
+    if (!me) return
+    const from = rows
+      .filter((f) => f.parentId === me.parentId && f.id !== id)
+      .sort((a, b) => a.position - b.position)
+    const to =
+      me.parentId === toFolderId
+        ? from
+        : rows.filter((f) => f.parentId === toFolderId).sort((a, b) => a.position - b.position)
+    const at = Math.max(0, Math.min(to.length, Math.trunc(toIndex)))
+    const placed = [...to.slice(0, at), me, ...to.slice(at)]
+    this.d.transaction(() => {
+      placed.forEach((f, i) => {
+        this.d
+          .update(bookmarkFolders)
+          .set({ parentId: toFolderId, position: i })
+          .where(eq(bookmarkFolders.id, f.id))
+          .run()
+      })
+      if (me.parentId !== toFolderId) {
+        from.forEach((f, i) => {
+          this.d
+            .update(bookmarkFolders)
+            .set({ position: i })
+            .where(eq(bookmarkFolders.id, f.id))
+            .run()
+        })
+      }
+    })
+    this.db.scheduleSave()
+  }
+
   // 폴더 제거(cascade) — DB 에 부모→자식 FK 가 없어(자기참조) 하위 폴더/링크를 직접 수집해 지운다
   removeFolder(id: number): void {
     const folders = this.folderRows()

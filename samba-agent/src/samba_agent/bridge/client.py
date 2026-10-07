@@ -18,6 +18,10 @@ import httpx
 from samba_agent.failures import FailReason
 
 DEFAULT_TIMEOUT_S = 95.0  # 앱 쪽 도구 제한 90초보다 조금 길게
+# 폰을 기다리는 긴 도구(결제 승인·인증번호) — 앱 쪽 제한 7분(LONG_TOOL_TIMEOUT_MS)보다 조금 길게.
+# 실기 2026-10-06: 폰에서는 토스 결제가 됐는데 95초에 끊겨 bridge_down 으로 접고 결제창을 닫아 PC 주문이 안 끝났다
+LONG_TOOL_TIMEOUT_S = 7 * 60.0 + 10.0
+LONG_TOOLS = frozenset({'phone_approve_payment', 'wait_for_sms_code'})
 DEFAULT_BUSY_RETRIES = 3
 DEFAULT_BUSY_WAIT_S = 1.0
 
@@ -115,6 +119,12 @@ class BridgeClient:
     def allowed(self) -> tuple[str, ...]:
         return self._allowed
 
+    def timeout_for(self, name: str) -> float:
+        """도구별 HTTP 제한 시간 — 폰을 기다리는 긴 도구만 길게, 나머지는 기본값."""
+        if name in LONG_TOOLS:
+            return max(self._timeout_s, LONG_TOOL_TIMEOUT_S)
+        return self._timeout_s
+
     def health(self) -> list[str]:
         """앱이 살아 있는지 + 부를 수 있는 도구 이름."""
         try:
@@ -146,6 +156,7 @@ class BridgeClient:
                     f'{self._url}/tool/{name}',
                     headers=self._headers(),
                     json={'args': args},
+                    timeout=self.timeout_for(name),
                 )
             except httpx.TimeoutException as e:
                 raise BridgeError(FailReason.BRIDGE_DOWN, f'도구 시간 초과: {name}') from e

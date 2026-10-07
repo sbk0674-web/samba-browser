@@ -289,3 +289,23 @@ describe('click 결과의 팝업 안내', () => {
     pageBridge.type.mockImplementation(async () => 'ok')
   })
 })
+
+describe('buildTargets — 프로필', () => {
+  it('프로필을 준 탭·팝업은 목록에 프로필이 실린다(같은 주문서 주소의 탭을 계정으로 가린다)', () => {
+    const targets = buildTargets(
+      [
+        { id: 't1', title: '주문서', url: 'https://www.29cm.co.kr/order/checkout', profile: 'a' },
+        { id: 't2', title: '주문서', url: 'https://www.29cm.co.kr/order/checkout', profile: 'b' }
+      ],
+      [{ id: 'p1', title: '결제', url: 'https://pay.example', openerId: 't2', profile: 'b' }],
+      't1',
+      null
+    )
+    expect(targets.map((t) => t.profile)).toEqual(['a', 'b', 'b'])
+  })
+
+  it('프로필을 안 주면 그 값이 없다', () => {
+    const [only] = buildTargets([{ id: 't1', title: '', url: 'about:blank' }], [], 't1', null)
+    expect('profile' in only).toBe(false)
+  })
+})

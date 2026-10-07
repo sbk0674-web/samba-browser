@@ -418,7 +418,8 @@ def test_주문_상세에_적립이_없으면_견적의_적립으로_원가를_�
     a.mark_status = False
     out = a(assignment(reg, dry_run=False, handoff={'reward': 1640, 'points_used': 14200}))
     assert out.status == 'ok'
-    assert json.loads(put.calls[0].request.content)['cost'] == 57560
+    # 네이버페이 = 현대카드 청구할인 2.7%(사용자 2026-10-02): 45,000 × 0.973 − 1,640 + 14,200
+    assert json.loads(put.calls[0].request.content)['cost'] == 56345
 
 
 @respx.mock
@@ -555,3 +556,23 @@ def test_주문_계정과_같은_계정으로_사도_id_가_비어_있으면_조
     out = recorder_with_wave(reg)(a)
     assert out.status == 'ok'
     assert json.loads(put.calls[0].request.content)['sourcing_account_id'] == 'sa-edel'
+
+
+def test_상세에_카드사가_없으면_구매때_고른_카드사로_청구할인을_곱한다():
+    from samba_agent.agents.source_detail import actual_cost, with_pay_card
+
+    # 롯데온 L.PAY 롯데카드(실기 2026-10-06): 결제 78,950 · 적립 437 → 78,950×0.98 − 437 = 76,934
+    detail = {'paid': 78950, 'reward': 437, 'card': '간편결제'}
+    assert actual_cost(detail) == 78513  # 계수 없이 계산하면 틀린 값
+    shaped = with_pay_card(detail, {'card_issuer': '롯데카드'})
+    assert shaped['card'] == '롯데카드'
+    assert actual_cost(shaped) == 76934
+
+
+def test_상세에_청구할인_카드사가_읽혔으면_구매때_카드사로_덮지_않는다():
+    from samba_agent.agents.source_detail import with_pay_card
+
+    detail = {'paid': 50000, 'card': '현대카드'}
+    assert with_pay_card(detail, {'card_issuer': '롯데카드'})['card'] == '현대카드'
+    # 구매 때 카드사가 청구할인 대상이 아니면 그대로 둔다
+    assert with_pay_card({'paid': 50000, 'card': ''}, {'card_issuer': '신한카드'})['card'] == ''

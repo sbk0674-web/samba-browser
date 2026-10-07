@@ -86,6 +86,7 @@ class Intake:
         poison_only: bool = False,
         all_sellers_sources: frozenset[str] = frozenset(),
         on_unfulfillable: Callable[[str, str], str | None] | None = None,
+        on_unlinked: Callable[[str, str | None], str | None] | None = None,
     ) -> None:
         self._wave = wave
         self._queue = queue
@@ -101,10 +102,13 @@ class Intake:
         self._poison_only = poison_only
         # 포이즌 제한의 예외 — 이 소싱처는 판매처와 무관하게 모두 이행(사용자 2026-09-24: 무신사)
         self._all_sellers = frozenset(x.upper() for x in all_sellers_sources)
-        # 이행 불가 주문 처리(가격X·재고X 표시 + 취소요청) — (주문번호, 실패 사유)
+        # 이행 불가 주문 처리(가격X·재고X 표시 + 취소요청) — (주문 키(행 id), 실패 사유)
         self._on_unfulfillable = on_unfulfillable
         # 범위 밖 소싱처 미등록 주문 중 이미 연결을 시도한 주문(주기마다 되풀이하지 않는다)
         self._linked_only: set[str] = set()
+        # 소싱처를 추정도 못 한 주문 — 샵마인·EMP 의 판매자상품코드를 읽어 달라고 넘긴다(주문번호, 판매처)
+        self._on_unlinked = on_unlinked
+        self._lookup_asked: set[str] = set()
         # 슬랙 `수집 중지` 가 세우는 깃발. 세워져 있으면 run_once 는 아무것도 하지 않는다
         self.paused = False
 
@@ -129,21 +133,32 @@ class Intake:
         for wave_order in sorted(orders, key=_paid_key):
             seen += 1
             order = wave_order.to_order_ref()
+            self._ask_lookup(wave_order)
+            if wave_order.inferred_product_prefix and not (wave_order.source_site or '').strip():
+                # 상품명이 잘려 소싱처를 추정 못 한 주문 — 접두어 연결만 한 번 부탁하고 접수하지 않는다
+                # (소싱처가 없어 살 수 없다). 연결되면 다음 주기에 소싱처가 채워져 들어온다
+                if order.wave_key not in self._linked_only:
+                    self._linked_only.add(order.wave_key)
+                    self._link_prefix(wave_order)
+                continue
             if not self._in_scope(wave_order):
                 # 이행 범위 밖이라도 소싱처 미등록 주문은 상품관리 상품에 연결만 해 둔다(사용자 2026-09-25 — ABC마트).
                 # 연결되면 소싱처가 채워져 다음 주기부터는 추정 주문이 아니다
-                if wave_order.source_inferred and order.order_no not in self._linked_only:
-                    self._linked_only.add(order.order_no)
+                if wave_order.source_inferred and order.wave_key not in self._linked_only:
+                    self._linked_only.add(order.wave_key)
                     self._link_inferred(wave_order, None, None)
                 continue
-            if order.order_no in handled or self._already_queued(order.order_no):
+            # 작업은 삼바웨이브 행(id) 단위다 — 같은 상품주문번호라도 행(사이즈)이 다르면 따로 산다
+            if order.wave_key in handled or self._already_queued(order):
                 skipped_live += 1
                 continue
             if enqueued + unsupported >= self._max_new:
                 break
-            handled.add(order.order_no)
+            handled.add(order.wave_key)
             ts = self._post_new(intake_line(order))
-            job, _created = self._queue.enqueue(order.order_no, self._requester, {}, thread_ts=ts)
+            job, _created = self._queue.enqueue(
+                order.order_no, self._requester, {}, thread_ts=ts, wave_id=order.wave_id
+            )
             if self._supported(order):
                 if wave_order.source_inferred and not self._link_inferred(wave_order, job.id, ts):
                     continue
@@ -157,6 +172,43 @@ class Intake:
             seen=seen, enqueued=enqueued, skipped_live=skipped_live, unsupported=unsupported
         )
 
+    def _ask_lookup(self, wave_order: WaveOrder) -> None:
+        """소싱처가 없고 상품명으로 추정도 못 한 주문 — 판매자상품코드 읽기를 한 번 요청한다."""
+        if self._on_unlinked is None or (wave_order.source_site or '').strip():
+            return
+        if wave_order.order_number in self._lookup_asked:
+            return
+        self._lookup_asked.add(wave_order.order_number)
+        target = self._on_unlinked(wave_order.order_number, wave_order.seller)
+        if target:
+            log.info(
+                '소싱처 미등록 주문 %s — 판매자상품코드 읽기 요청(%s)',
+                wave_order.order_number,
+                target,
+            )
+
+    def _link_prefix(self, wave_order: WaveOrder) -> None:
+        """상품명이 잘려 롯데온 상품번호 뒷자리가 없는 주문 — 접두어로 수집상품에 연결만 한다.
+
+        삼바웨이브가 접두어에 맞는 수집상품이 정확히 하나일 때만 잇는다(없거나 여럿이면 409). 실패는 근거만
+        남긴다 — 이 주문은 소싱처가 비어 있어 어차피 범위 밖이고, 판매자상품코드 읽기(_ask_lookup)가 따로 돈다.
+        """
+        prefix = wave_order.inferred_product_prefix or ''
+        key = (wave_order.id or '').strip() or wave_order.order_number
+        try:
+            out = self._wave.link_product(key, prefix, 'LOTTEON')
+        except WaveError as e:
+            log.info(
+                '잘린 상품번호 연결 실패 %s LOTTEON %s*: %s', wave_order.order_number, prefix, e
+            )
+            return
+        log.info(
+            '잘린 상품번호 연결 %s → LOTTEON %s* 상품관리 상품에 연결(주문 %s건)',
+            wave_order.order_number,
+            prefix,
+            out.get('linked_orders', 1),
+        )
+
     def _link_inferred(self, wave_order: WaveOrder, job_id: int | None, ts: str | None) -> bool:
         """소싱처 미등록 주문(상품명 숫자로 무신사·ABC마트 추정)을 수집상품에 연결한다. 이행을 이어 가면 True.
 
@@ -166,15 +218,16 @@ class Intake:
         site = wave_order.source_site or 'MUSINSA'
         product_id = wave_order.inferred_product_id or ''
         label = f'{site} {product_id}'
+        key = (wave_order.id or '').strip() or wave_order.order_number
         try:
-            out = self._wave.link_product(wave_order.order_number, product_id, site)
+            out = self._wave.link_product(key, product_id, site)
         except WaveError as e:
             log.info('소싱처 미등록 주문 연결 실패 %s %s: %s', wave_order.order_number, label, e)
             if e.status == 404:
                 if job_id is not None:
                     self._queue.finish(job_id, 'needs_human', error=str(FailReason.OUT_OF_STOCK))
                 done = (
-                    self._on_unfulfillable(wave_order.order_number, str(FailReason.OUT_OF_STOCK))
+                    self._on_unfulfillable(key, str(FailReason.OUT_OF_STOCK))
                     if self._on_unfulfillable
                     else None
                 )
@@ -214,14 +267,15 @@ class Intake:
                 return False
         return True
 
-    def _already_queued(self, order_no: str) -> bool:
-        """큐에 어떤 상태로든 이미 있는 주문인가.
+    def _already_queued(self, order: OrderRef) -> bool:
+        """큐에 어떤 상태로든 이미 있는 삼바웨이브 행인가.
 
         살아 있는 건은 물론이고 needs_human·failed·cancelled 로 끝난 건도 건너뛴다 — 삼바웨이브에서는
         여전히 미이행이라 매 주기 되살아나 사람이 정리하기 전까지 무한 반복된다. 다시 돌리는 건
-        슬랙 `이어서`(retry) 나 사람의 결정이다. done 은 기입이 끝나 미이행 목록에서 빠진다.
+        슬랙 `이어서`(retry) 나 사람의 결정이다. 행 id 로 찾고, 행 id 가 없는 옛 행은 같은 상품주문번호면
+        막되 done 이면 막지 않는다(이미 기입한 다른 행 — 실기 20261005DFA7D9 230 done 뒤 210 이 안 들어갔다).
         """
-        return self._queue.get(order_no) is not None
+        return self._queue.find(order.order_no, order.wave_id) is not None
 
     def _supported(self, order: OrderRef) -> bool:
         """이 소싱처를 맡을 구매 에이전트가 있는가.

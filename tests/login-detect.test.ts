@@ -27,6 +27,19 @@ describe('findLoginFields 픽스처', () => {
     expect(f.username).toBe(idOfName(snap, 'uid'))
   })
 
+  it('Nexacro: div 로 그린 로그인 버튼을 제출 버튼으로 찾는다(찾기·재발급은 아니다)', () => {
+    const snap = snapshotWith(`
+      <div><input type="text" name="uid" id="f.edt_userId:input"></div>
+      <div><input type="text" name="upw" autocomplete="new-password" id="f.edt_password:input"></div>
+      <div id="find" tabindex="0" style="cursor:pointer">아이디 찾기</div>
+      <div id="go" tabindex="0" style="cursor:pointer">로그인</div>
+    `)
+    const f = findLoginFields()
+    const go = snap.elements.find((e) => e.text === '로그인' || e.name === '로그인')
+    expect(go).toBeDefined()
+    expect(f.submit).toBe(go?.id)
+  })
+
   it('네이버: 아이디 또는 전화번호 라벨', () => {
     const snap = snapshotWith(`
       <form id="frmNIDLogin">
