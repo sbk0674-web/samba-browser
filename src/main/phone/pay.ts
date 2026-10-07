@@ -68,6 +68,11 @@ export interface PayProviderSpec {
    * 그 앱이 앞에 있어도 알리페이 화면으로 본다 — 알리페이 앱을 따로 열면 결제창이 가려져 'stuck' 이 된다(실기 2026-10-07)
    */
   hostPackages?: string[]
+  /**
+   * 숫자 키패드(0~9)가 함께 보일 때만 비밀 화면으로 보는 글자 — 淘宝 안의 알리페이 결제창은 중국어('订单金额'·'国际卡手续费')라
+   * passwordHint 에 안 걸리고, 제목 '支付成功得15积分'(적립 안내)이 successHint 에 걸려 비밀번호도 안 넣고 ok 로 끝났다(실기 2026-10-07)
+   */
+  keypadSecretHint?: RegExp
   /** 웹 결제창 없이 앱 안에서 끝나는 결제(식화·得物 → 알리페이) — 웹 성공 확인을 하지 않는다 */
   appOnly?: boolean
   /**
@@ -159,6 +164,7 @@ export const PAY_PROVIDERS: Record<PayProvider, PayProviderSpec> = {
     openBy: 'app',
     keepIfForeground: true,
     hostPackages: ['com.taobao.taobao'],
+    keypadSecretHint: /订单金额|国际卡手续费|支付密码/,
     appOnly: true,
     multiStep: true,
     // 'CVV를 입력하세요' 제목 화면은 실제로는 6자리 결제 비밀번호 키패드다 — 실기 2026-10-03 唯品会: 결제 비밀번호 6자리를
@@ -306,7 +312,12 @@ export function findPayNotification(
 /** 지금 화면이 비밀번호(보안 키패드) 화면인가. 스크린샷 저장·전송 판정에도 쓴다 */
 export function isSecretScreen(screen: PhoneScreen, spec: PayProviderSpec): boolean {
   if (screen.elements.some((e) => e.isSecret)) return true
-  return hasText(screen, spec.passwordHint)
+  if (hasText(screen, spec.passwordHint)) return true
+  if (spec.keypadSecretHint && hasText(screen, spec.keypadSecretHint)) {
+    const digits = new Set(screen.elements.map((e) => e.text.trim()).filter((t) => /^\d$/.test(t)))
+    return digits.size === 10
+  }
+  return false
 }
 
 /** 카드사 이름과 앱에 보이는 카드 상품명이 다른 경우 */

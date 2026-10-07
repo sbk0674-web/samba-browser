@@ -20,6 +20,7 @@ import {
   findPayNotification,
   parseAppNotifications,
   checkPaymentGate,
+  isSecretScreen,
   nextPayState,
   runPayApproval,
   type PayRequest,
@@ -378,6 +379,24 @@ describe('runPayApproval', () => {
 
     expect(r).toEqual({ ok: true })
     expect(h.deps.launchApp).not.toHaveBeenCalled()
+  })
+
+  it('淘宝 알리페이 결제창은 중국어 글자와 숫자 키패드로 비밀 화면을 알아보고, 제목의 支付成功 안내에 속지 않는다', () => {
+    const tb = 'com.taobao.taobao'
+    const digits = '1234567890'.split('').map((d, i) => el(10 + i, d, { clickable: true }))
+    const pw = screen(tb, [
+      el(1, '支付成功得15积分', { clickable: false }),
+      el(2, '订单金额', { clickable: false }),
+      ...digits
+    ])
+    expect(isSecretScreen(pw, PAY_PROVIDERS.alipay)).toBe(true)
+    expect(nextPayState('await_app', pw, PAY_PROVIDERS.alipay).state).toBe('password')
+    // 키패드 없는 결제 완료 화면은 비밀 화면이 아니다
+    const done = screen(tb, [
+      el(1, '支付成功', { clickable: false }),
+      el(2, '订单金额', { clickable: false })
+    ])
+    expect(isSecretScreen(done, PAY_PROVIDERS.alipay)).toBe(false)
   })
 
   it('결제앱에 맞는 금고 결제 수단을 비밀번호 입력기에 넘긴다', async () => {
