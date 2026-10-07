@@ -19,6 +19,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 _log = logging.getLogger(__name__)
 
@@ -82,12 +83,28 @@ def parse_detail(out: dict[str, object], office_hint: str) -> SourceDetail | Non
     # '배송 완료 10.01(목) 도착 <브랜드> 판매자 정보 <상품> / 1개 …' — 상태는 맨 앞 낱말들, 상품은 '판매자 정보' 뒤
     status = re.split(r'\s\d{2}\.\d{2}\(|판매자 정보', body, maxsplit=1)[0].strip()[:20]
     product = body.split('판매자 정보', 1)[-1].split(' / ')[0].strip()[:60]
-    return SourceDetail(status=status, product=product, to_office=bool(office_hint) and office_hint in head)
+    return SourceDetail(
+        status=status, product=product, to_office=bool(office_hint) and office_hint in head
+    )
+
+
+# 개인 용도로 산 소싱처 주문번호 — 삼바에 기록이 없어도 알리지 않는다(사용자가 알려 준 것만 이 파일에 적는다)
+PERSONAL_ORDERS_FILE = Path(__file__).resolve().parents[3] / 'personal_source_orders.json'
+
+
+def personal_source_orders() -> set[str]:
+    try:
+        data = json.loads(PERSONAL_ORDERS_FILE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return set()
+    return {str(x) for x in data if isinstance(x, str) and x}
 
 
 def is_ignorable(detail: SourceDetail) -> bool:
     """삼바에 기록이 없어도 되는 주문인가 — 취소·반품이 끝났거나 상품권이다."""
-    return bool(_VOID_STATUS.search(detail.status)) or any(w in detail.product for w in NOT_STOCK_WORDS)
+    return bool(_VOID_STATUS.search(detail.status)) or any(
+        w in detail.product for w in NOT_STOCK_WORDS
+    )
 
 
 class SourceAudit:

@@ -51,6 +51,7 @@ from samba_agent.ops.source_audit import (
     SourceAudit,
     SourceDetail,
     parse_detail,
+    personal_source_orders,
     run_js_json,
 )
 from samba_agent.ops.ssg_gift_accept import make_after_done
@@ -558,9 +559,11 @@ def main() -> None:
 
         def _known_numbers() -> set[str] | None:
             try:
-                return wave.sourcing_numbers(14) | {
-                    r.source_order_no for r in crosscheck_ledger.recent(14)
-                }
+                return (
+                    wave.sourcing_numbers(14)
+                    | {r.source_order_no for r in crosscheck_ledger.recent(14)}
+                    | personal_source_orders()
+                )
             except WaveError:
                 return None
 
