@@ -3783,6 +3783,15 @@ class BuyerAgent(AgentBase):
             except (WaveError, AgentFailure):
                 ship0 = {}
             if lotteon_undeliverable(str(ship0.get('address') or '')):
+                # 이 사이트로는 못 산다 — 교차 비교 짝(SSG)만 견적해 산다(봇 차단 때와 같은 경로)
+                self.note(
+                    '교차 비교',
+                    '롯데온 판매자가 이 받는 곳으로 못 보내는 지역(학습) — 짝 소싱처만 견적한다',
+                )
+                if self.sibling is not None:
+                    delegated0 = self._cross_compare(a, None, None)
+                    if delegated0 is not None:
+                        return delegated0
                 raise AgentFailure(
                     'fail',
                     '롯데온 판매자가 이 받는 곳으로 배송하지 못하는 지역(학습) — 건너뛴다',
