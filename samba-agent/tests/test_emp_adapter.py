@@ -102,3 +102,62 @@ def test_취소할_주문이_없으면_화면을_건드리지_않는다():
     ui = FakeUi()
     assert EmpCancelAdapter(ui).complete_pending([]) == set()
     assert ui.calls == []
+
+
+class _UiProbe:
+    """PywinautoEmpUi.write 의 칸 입력 순서·실패 뒷정리만 보는 가짜 — 실제 창은 건드리지 않는다."""
+
+    def __init__(self, fail_on: str | None = None) -> None:
+        from samba_agent.export.desktop.emp_ui import PywinautoEmpUi
+
+        self.write = PywinautoEmpUi.write.__get__(self)
+        self.fail_on = fail_on
+        self.calls: list[str] = []
+        self._guard = True
+
+    def read(self, order_no):
+        return CellValues(cost=0, shipping_fee=0, memo='')
+
+    def _edit_cell(self, order_no, prefix, column, value):
+        self.calls.append(f'edit {column}')
+        if column == self.fail_on:
+            raise AdapterRetry(ExportFail.TIMEOUT, 'EMP 칸 편집 상자가 열리지 않았다')
+
+    def _stop_if_user_back(self):
+        pass
+
+    def _cleanup(self):
+        import contextlib
+
+        return contextlib.nullcontext()
+
+    def _close_editor(self):
+        self.calls.append('close_editor')
+
+    def reload(self):
+        self.calls.append('reload')
+
+    def save(self):
+        self.calls.append('save')
+
+
+def test_한줄메모를_먼저_넣고_저장한다():
+    ui = _UiProbe()
+    ui.write('E1', 72418, 2300, '2026100700955')
+    assert ui.calls == ['edit 한줄메모', 'edit 원가', 'edit 배송비', 'save', 'reload']
+
+
+def test_메모_칸이_실패하면_아무것도_저장하지_않고_편집을_버린다():
+    """실기 2026-10-07: 원가·배송비만 들어간 채 남아 '저장하시겠습니까?' 가 떴다."""
+    ui = _UiProbe(fail_on='한줄메모')
+    with pytest.raises(AdapterRetry):
+        ui.write('E1', 72418, 2300, '2026100700955')
+    assert ui.calls == ['edit 한줄메모', 'close_editor', 'reload']
+    assert 'save' not in ui.calls
+
+
+def test_원가_칸이_실패해도_넣다_만_메모를_버린다():
+    ui = _UiProbe(fail_on='원가')
+    with pytest.raises(AdapterRetry):
+        ui.write('E1', 72418, 2300, '2026100700955')
+    assert ui.calls == ['edit 한줄메모', 'edit 원가', 'close_editor', 'reload']

@@ -911,6 +911,10 @@ class PywinautoEmpUi:
             self._click_dialog_button(buttons, NO_BUTTONS)
             log.warning('EMP 에 저장 안 된 편집이 남아 있어 버렸다')
             self._wait_enabled()
+        elif not self._main.is_enabled():
+            # 대화상자는 UIA 로 늦게 읽힌다 — 3초 안에 못 읽었어도 창이 막혀 있으면 '저장하시겠습니까' 를 닫는다
+            # (실기 2026-10-07: 창이 그대로 남아 사람 눈에 '메모 없이 저장하려는' 것으로 보였다)
+            self._wait_enabled(40.0)
         time.sleep(self._poll_s * 4)
         self._refresh()
 
@@ -921,21 +925,23 @@ class PywinautoEmpUi:
         """
         current = self.read(order_no)
         try:
+            # 한줄메모(소싱주문번호)를 맨 먼저 넣는다 — 가장 자주 편집 상자가 안 열리는 칸이라(실기 2026-10-07
+            # 20261007I73659: 원가·배송비는 들어가고 메모에서 timeout) 먼저 실패하면 아무 값도 남지 않는다
+            note = current.memo or ''
+            if memo and memo not in note:
+                self._edit_cell(order_no, CELL_NOTE, COL_NOTE, f'{note} / {memo}' if note else memo)
             if (current.cost or 0) != cost:
                 self._edit_cell(order_no, CELL_COST, COL_COST, cost)
             if (current.shipping_fee or 0) != shipping_fee:
                 self._edit_cell(order_no, CELL_SHIPPING, COL_SHIPPING, shipping_fee)
-            note = current.memo or ''
-            if memo and memo not in note:
-                self._edit_cell(order_no, CELL_NOTE, COL_NOTE, f'{note} / {memo}' if note else memo)
             # 저장을 누르기 직전이 마지막 확인이다 — 누른 뒤에는 안내창을 닫는 데까지 끝낸다
             self._stop_if_user_back()
-        except AdapterRetry as e:
-            if e.reason is ExportFail.BUSY:
-                # 넣다 만 값을 남기지 않는다 — 사람이 저장을 누르면 함께 저장된다
-                with self._cleanup():
-                    self._close_editor()
-                    self.reload()
+        except (AdapterRetry, AdapterReject):
+            # 사유가 무엇이든 넣다 만 값을 남기지 않는다 — 남기면 그리드에 저장 안 된 편집이 쌓여
+            # 사람이 저장을 누르거나 새로고침 때 '저장하시겠습니까?' 가 떠서 메모 없는 값이 저장된다
+            with self._cleanup():
+                self._close_editor()
+                self.reload()
             raise
         with self._cleanup():
             self.save()
