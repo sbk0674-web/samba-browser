@@ -151,3 +151,19 @@ def test_免密支付는_唯品会_앱_화면에서_상한_이하일_때만_누�
     assert '눌렀다' in tb.pay_free('唯品会', 279.0, 550, 1450)
     assert phone.taps == [(550, 1450)] and tb.state.paid and tb.state.paid_cny == 279.0
     assert '이미 결제' in tb.pay_free('唯品会', 279.0, 550, 1450)
+
+
+def test_免密支付_버튼을_눌렀는데_비밀번호_창이_뜨면_결제로_보지_않는다():
+    """실기 2026-10-09: 免密支付 로 보였지만 알리페이 비밀번호 창이 떴다 — 결제됨으로 표시해 pay 가 거절됐다."""
+    phone = FakePhone('com.achievo.vipshop', [])
+
+    def tap(x, y):
+        phone.taps.append((x, y))
+        phone.top = ALIPAY_PKG
+        phone._nodes = _alipay('¥279.00') + [Node('', '密码共6位，已输入0位', '', 359, 978)]
+
+    phone.tap = tap  # type: ignore[method-assign]
+    tb = PhoneToolbox(phone, lambda krw: 'ok', max_cny=366, rate=200.0, sleep=lambda s: None)
+    out = tb.pay_free('唯品会', 279.0, 360, 1446)
+    assert '결제 전' in out and not tb.state.paid
+    assert '완료' in tb.pay('唯品会', 279.0) and tb.state.paid

@@ -266,6 +266,10 @@ class PhoneToolbox:
             return f'실付 ¥{total_cny:g} 이 상한 ¥{self.max_cny:.0f} 을 넘거나 0 이다 — 결제하지 않는다(마진). give_up 하라.'
         self.phone.tap(int(x), int(y))
         self.sleep(6)
+        # 免密支付 로 보였어도 알리페이 비밀번호 창이 뜨면 아직 결제 전이다(실기 2026-10-09 A-SN242762957: '密码共6位，已输入0位')
+        # — 결제로 표시하지 않고 pay 로 넘긴다
+        if alipay_window_front(self.phone):
+            return '알리페이 비밀번호 창이 떴다 — 아직 결제 전이다. 이제 pay(shop, price_cny) 를 불러라.'
         self.state.paid = True
         self.state.item_cny = float(total_cny)
         self.state.paid_cny = float(total_cny)
