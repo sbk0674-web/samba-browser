@@ -369,24 +369,92 @@ def test_하단_결제_버튼이_둘이면_싼_일반배송_가격을_쓴다():
     assert dewu_order.header_price(nodes) == 631.0
 
 
-def test_최저가_판매처가_淘宝이면_得物을_열지_않고_사람에게_넘긴다(monkeypatch):
-    def boom(*a, **k):
-        raise AssertionError('得物을 열면 안 된다')
-
-    monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', boom)
-    monkeypatch.setattr(
-        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
-    )
-    wave = SimpleNamespace(
+def _wave_for(seller: str, records: list):
+    return SimpleNamespace(
         get_order=lambda no: SimpleNamespace(
-            source_seller='淘宝',
+            source_seller=seller,
             source_price_cny=520,
             registered_option='37',
             source_product_code='1203A667-100',
+            product_name='카야노 14',
             revenue=144760,
             sale_price=157000,
-        )
+        ),
+        only_sourcing_account_id=lambda site: f'acct_{site}',
+        record_sourcing=lambda key, **kw: records.append((key, kw)),
     )
-    handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 200.0)
-    result, code, line = handle(None, SimpleNamespace(order_no='A1'))
-    assert result == 'needs_human' and code == 'unknown' and '淘宝' in line
+
+
+class _Buyer:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+
+    def buy(self, toolbox, ctx):
+        self.ctx = ctx
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def _patch_phone(monkeypatch):
+    monkeypatch.setattr(
+        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
+    )
+
+
+def test_최저가_판매처가_淘宝이면_폰_구매_AI가_사고_득물을_열지_않는다(monkeypatch):
+    _patch_phone(monkeypatch)
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order.buy_on_dewu',
+        lambda *a, **k: pytest.fail('得物을 열면 안 된다'),
+    )
+    records: list = []
+    buyer = _Buyer(result=dewu_order.DewuResult('T123456789012', 214.2 * 1.03, 214.2, 200.0))
+    handle = make_shihuo_handler(
+        _wave_for('淘宝', records),
+        lambda krw: 'ok',
+        rate_of=lambda: 200.0,
+        buyer_factory=lambda: buyer,
+    )
+    result, _, line = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'done' and 'T123456789012' in line
+    assert records[0][1]['sourcing_account_id'] == 'acct_TAOBAO'
+    assert '1203A667-100' in buyer.ctx and '淘宝' in buyer.ctx
+
+
+def test_폰_구매_AI가_못_사면_다음_순위_得物으로_넘어간다(monkeypatch):
+    _patch_phone(monkeypatch)
+    calls: list[float] = []
+
+    def fake_dewu(phone, model, eu, *, max_cny, approve, rate):
+        calls.append(max_cny)
+        return dewu_order.DewuResult('D1', 300.0, 291.0, rate)
+
+    monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', fake_dewu)
+    records: list = []
+    handle = make_shihuo_handler(
+        _wave_for('淘宝', records),
+        lambda krw: 'ok',
+        rate_of=lambda: 200.0,
+        buyer_factory=lambda: _Buyer(error=DewuOrderError('가게 불일치')),
+    )
+    result, _, line = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'done' and 'D1' in line and calls
+    assert records[0][1]['sourcing_account_id'] == 'acct_DEWU'
+
+
+def test_폰_구매_AI가_결제한_뒤_실패하면_득물로_넘어가지_않는다(monkeypatch):
+    _patch_phone(monkeypatch)
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order.buy_on_dewu',
+        lambda *a, **k: pytest.fail('이중 결제 위험'),
+    )
+    handle = make_shihuo_handler(
+        _wave_for('淘宝', []),
+        lambda krw: 'ok',
+        rate_of=lambda: 200.0,
+        buyer_factory=lambda: _Buyer(error=DewuOrderError('주문번호 못 읽음', paid=True)),
+    )
+    result, code, _ = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'needs_human' and code == 'pay_interrupted'

@@ -1,0 +1,96 @@
+# 폰 구매 AI 의 결제 안전장치 — 돈이 나가는 길은 pay 하나, 코드가 점검한다
+
+from samba_agent.operator.phone_buyer import PhoneToolbox
+from samba_agent.ops.ssg_gift_accept import Node
+
+ALIPAY_PKG = 'com.eg.android.AlipayGphone'
+
+
+class FakePhone:
+    def __init__(self, top: str, nodes: list[Node]) -> None:
+        self.top = top
+        self._nodes = nodes
+        self.taps: list[tuple[int, int]] = []
+        self.adb = 'adb'
+        self.serial = 'S'
+
+    def top_package(self) -> str:
+        return self.top
+
+    def nodes(self) -> list[Node]:
+        return self._nodes
+
+    def tap(self, x: int, y: int) -> None:
+        self.taps.append((x, y))
+
+    def key(self, code: str) -> None:
+        pass
+
+    def input_text(self, text: str) -> None:
+        pass
+
+
+def _alipay(amount: str) -> list[Node]:
+    return [Node('订单金额', '', '', 100, 400), Node(amount, '', '', 600, 400)]
+
+
+def _box(phone, approved: list[int], max_cny: float = 700.0) -> PhoneToolbox:
+    def approve(krw: int) -> str:
+        approved.append(krw)
+        return 'ok'
+
+    return PhoneToolbox(phone, approve, max_cny=max_cny, rate=200.0, sleep=lambda s: None)
+
+
+def test_화이트리스트가_아닌_가게는_결제하지_않는다():
+    approved: list[int] = []
+    tb = _box(FakePhone(ALIPAY_PKG, _alipay('¥214.20')), approved)
+    assert '화이트리스트' in tb.pay('아무개운동화점', 214.2)
+    assert approved == [] and not tb.state.paid
+
+
+def test_알리페이_창이_앞에_없으면_결제하지_않는다():
+    approved: list[int] = []
+    tb = _box(FakePhone('com.taobao.taobao', []), approved)
+    assert '결제창이 앞에 없다' in tb.pay('后浪潮品奥莱折扣店', 214.2)
+    assert approved == []
+
+
+def test_결제창_금액이_상한이나_AI가_본_가격과_다르면_결제하지_않는다():
+    approved: list[int] = []
+    tb = _box(FakePhone(ALIPAY_PKG, _alipay('¥1090.00')), approved, max_cny=700)
+    assert '상한' in tb.pay('后浪潮品奥莱折扣店', 214.2)
+    tb2 = _box(FakePhone(ALIPAY_PKG, _alipay('¥600.00')), approved, max_cny=700)
+    assert '다르다' in tb2.pay('后浪潮品奥莱折扣店', 214.2)
+    assert approved == []
+
+
+def test_금액과_가게가_맞으면_결제하고_주문번호는_결제_뒤에만_받는다():
+    approved: list[int] = []
+    tb = _box(FakePhone(ALIPAY_PKG, _alipay('¥214.20')), approved)
+    assert '결제하지 않았다' in tb.finish('123456789012345')
+    assert '완료' in tb.pay('后浪潮品奥莱折扣店', 214.2)
+    assert approved == [round(214.2 * 1.03 * 200.0)] and tb.state.paid
+    assert tb.finish('abc').startswith('주문번호는')
+    assert tb.finish('2026100812345678') == '기록했다. 끝내라.'
+    assert tb.state.order_no == '2026100812345678'
+    # 결제 뒤에는 다시 결제하지 못한다
+    assert '이미 결제' in tb.pay('后浪潮品奥莱折扣店', 214.2)
+
+
+def test_알리페이_창이_앞이면_누르기와_입력이_막힌다():
+    phone = FakePhone(ALIPAY_PKG, _alipay('¥214.20'))
+    tb = _box(phone, [])
+    assert '막혀' in tb.tap(300, 300)
+    assert '막혀' in tb.text('123456')
+    assert '막혀' in tb.key('back')
+    assert phone.taps == []
+
+
+def test_조작_횟수가_한도를_넘으면_멈춘다():
+    phone = FakePhone('com.hupu.shihuo', [])
+    tb = _box(phone, [])
+    out = ''
+    for _ in range(170):
+        out = tb.tap(10, 10)
+    assert '넘었다' in out
