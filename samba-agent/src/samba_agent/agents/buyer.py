@@ -473,6 +473,7 @@ DIRECT_ROUTE = 'direct'
 ADPICK_ROUTE = 'adpick'
 # 상품명 속 모델코드(HF5441-100·YUA24B06) — 스크립트 ssg_route_quotes 와 같은 규칙. 한글에 붙어 있어도 잡게 ASCII 경계
 _MODEL_CODE_RE = re.compile(r'\b([A-Z]{1,4}\d{3,6}[A-Z0-9]{0,4})(?:[ _-](\d{3}))?\b', re.ASCII)
+_OLD_NIKE_CODE_RE = re.compile(r'\b(\d{6})[ _-](\d{3})\b', re.ASCII)
 _LOOSE_MODEL_RE = re.compile(r'\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{6,}\b', re.ASCII)
 
 
@@ -498,6 +499,10 @@ def model_code_of(name: str | None) -> str:
     m = _MODEL_CODE_RE.search(name or '')
     if m:
         return f'{m.group(1)}-{m.group(2)}' if m.group(2) else m.group(1)
+    # 나이키 옛 품번(749869 018 — 숫자 여섯 자리 + 색 코드 세 자리)은 영문이 없어 위 규칙에 안 걸린다(실기 2026-10-08)
+    old_nike = _OLD_NIKE_CODE_RE.search(name or '')
+    if old_nike:
+        return f'{old_nike.group(1)}-{old_nike.group(2)}'
     loose = _LOOSE_MODEL_RE.search(name or '')
     return loose.group(0) if loose else ''
 

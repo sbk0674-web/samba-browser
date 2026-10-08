@@ -145,6 +145,30 @@ def order_no_after_label(nodes: list[Node]) -> str | None:
     return None
 
 
+_AMOUNT = re.compile(r'^[¥￥]?\s*(\d+(?:,\d{3})*(?:\.\d+)?)$')
+
+
+def alipay_order_amount(nodes: list[Node]) -> float | None:
+    """알리페이 결제창의 '주문금액(订单金额)' 위안 값. 못 읽으면 None.
+
+    구매창 머리글 가격(¥674)과 실제 결제 금액(¥1090)이 달랐던 사고(2026-10-08 아식스 카야노 14)를 막으려고,
+    비밀번호를 넣기 전에 결제창이 청구하려는 금액을 직접 읽는다. 수수료(3%)는 따로 줄에 붙으므로 뺀 값이다.
+    """
+    labels = ('订单金额', '주문금액', 'Order total')
+    ordered = sorted(nodes, key=lambda n: (n.y, n.x))
+    for i, n in enumerate(ordered):
+        if any(label in n.text for label in labels):
+            # 같은 줄 오른쪽이나 바로 다음 요소에서 금액을 찾는다
+            for m in ordered[i : i + 4]:
+                found = _AMOUNT.match(m.text.strip().replace('¥ ', '¥').replace('￥ ', '￥'))
+                if found:
+                    try:
+                        return float(found.group(1).replace(',', ''))
+                    except ValueError:
+                        return None
+    return None
+
+
 def dismiss_subsidy_dialog(phone: Phone, sleep: Callable[[float], None]) -> bool:
     """'领取补贴 — 실명인증(去实名)' 팝업이 떠 있으면 '再想想'(다시 생각)으로 닫는다. 닫았으면 True.
 
@@ -413,6 +437,18 @@ def buy_on_dewu(
                         sleep(2)
         if phone.top_package() != ALIPAY:
             raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
+    # 결제창이 실제로 청구하려는 금액을 비밀번호 전에 확인한다 — 구매창에서 읽은 가격과 다르거나 상한을 넘으면 멈춘다
+    charge = alipay_order_amount(phone.nodes())
+    if charge is None:
+        raise DewuOrderError('알리페이 결제창의 주문금액을 못 읽었다 — 결제하지 않음')
+    if charge > max_cny:
+        raise DewuOrderError(
+            f'알리페이 결제창 금액 ¥{charge:g} 이 상한 ¥{max_cny:.0f} 을 넘는다(구매창 가격 ¥{price:g}) — 결제하지 않음(마진)'
+        )
+    if charge > price * 1.02 + 1:
+        raise DewuOrderError(
+            f'알리페이 결제창 금액 ¥{charge:g} 이 구매창 가격 ¥{price:g} 과 다르다 — 결제하지 않음'
+        )
     paid_hint = round(price * 1.03 * rate)
     out = approve(paid_hint).strip()
     if not out.startswith('ok'):

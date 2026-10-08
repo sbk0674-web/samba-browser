@@ -81,6 +81,10 @@ class FakePhone:
         return ''
 
 
+ALIPAY_SCREEN = [Node('订单金额', '', '', 80, 200), Node('¥ 564.00', '', '', 300, 200)]
+ALIPAY_SCREEN_HIGH = [Node('订单金额', '', '', 80, 200), Node('¥ 1,090.00', '', '', 300, 200)]
+
+
 def test_가격과_주문번호_읽기():
     assert header_price(SHEET2) == 564
     assert order_no_after_label(DETAIL) == '110213474374883854'
@@ -88,7 +92,22 @@ def test_가격과_주문번호_읽기():
 
 def test_검색부터_알리페이_결제와_주문번호까지():
     phone = FakePhone(
-        [HOME, SEARCH, RESULT, PRODUCT, SHEET, SHEET, SHEET2, PAID, PAID, MY, ORDERS, LIST, DETAIL],
+        [
+            HOME,
+            SEARCH,
+            RESULT,
+            PRODUCT,
+            SHEET,
+            SHEET,
+            SHEET2,
+            ALIPAY_SCREEN,
+            PAID,
+            PAID,
+            MY,
+            ORDERS,
+            LIST,
+            DETAIL,
+        ],
         [ALIPAY],
     )
     paid: list[int] = []
@@ -301,3 +320,42 @@ def test_보조금_실명인증_팝업은_再想想로_닫고_去实名은_누�
     )
     assert dewu_order.dismiss_subsidy_dialog(phone2, lambda s: None) is False  # type: ignore[arg-type]
     assert taps == []
+
+
+def test_알리페이_결제창의_주문금액을_읽는다():
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    korean = [
+        Node('CVV를 입력하세요', '', '', 360, 60),
+        Node('¥', '', '', 100, 120),
+        Node('576.80', '', '', 160, 120),
+        Node('주문금액:', '', '', 80, 200),
+        Node('¥ 560.00', '', '', 300, 200),
+        Node('국제카드 수수료(3%)', '', '', 80, 240),
+        Node('+¥ 16.80', '', '', 300, 240),
+    ]
+    assert dewu_order.alipay_order_amount(korean) == 560.0
+    chinese = [Node('订单金额', '', '', 80, 200), Node('¥ 214.20', '', '', 300, 200)]
+    assert dewu_order.alipay_order_amount(chinese) == 214.2
+    assert dewu_order.alipay_order_amount([Node('다른 화면', '', '', 0, 0)]) is None
+    # 천 단위 쉼표
+    big = [Node('订单金额', '', '', 80, 200), Node('¥ 1,090.00', '', '', 300, 200)]
+    assert dewu_order.alipay_order_amount(big) == 1090.0
+
+
+def test_결제창_금액이_구매창_가격과_다르면_비밀번호를_넣지_않는다():
+    """실기 2026-10-08 아식스 카야노 14: 구매창은 ¥674 였는데 결제창은 ¥1090 이라 상한(¥681)을 넘어 샀다."""
+    phone = FakePhone(
+        [HOME, SEARCH, RESULT, PRODUCT, SHEET, SHEET, SHEET2, ALIPAY_SCREEN_HIGH],
+        [ALIPAY],
+    )
+    with pytest.raises(DewuOrderError, match='결제창 금액'):
+        buy_on_dewu(
+            phone,  # type: ignore[arg-type]
+            'IE7426',
+            '41⅓',
+            max_cny=900,
+            approve=lambda krw: pytest.fail('결제하면 안 된다'),
+            rate=202.16,
+            sleep=lambda s: None,
+        )

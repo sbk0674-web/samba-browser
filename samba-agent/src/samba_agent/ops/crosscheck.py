@@ -79,12 +79,17 @@ class Finding:
     """장부와 다른 값 하나."""
 
     order_no: str
-    field: str  # 'source_order_no' | 'cost' | 'account'
+    field: str  # 'source_order_no' | 'cost' | 'account' | 'margin'
     ledger: str
     actual: str
 
     def line(self) -> str:
-        label = {'source_order_no': '소싱주문번호', 'cost': '실구매가', 'account': '주문계정'}[self.field]
+        label = {
+            'source_order_no': '소싱주문번호',
+            'cost': '실구매가',
+            'account': '주문계정',
+            'margin': '역마진',
+        }[self.field]
         return f'{self.order_no} {label}: 하네스 기입 {self.ledger} → 지금 {self.actual}'
 
 
@@ -235,15 +240,42 @@ def compare(row: LedgerRow, order: WaveOrder) -> list[Finding]:
     found: list[Finding] = []
     actual_no = (order.sourcing_order_number or '').strip()
     if actual_no != row.source_order_no:
-        found.append(Finding(row.order_no, 'source_order_no', row.source_order_no, actual_no or '(빈칸)'))
+        found.append(
+            Finding(row.order_no, 'source_order_no', row.source_order_no, actual_no or '(빈칸)')
+        )
         return found  # 다른 구매 기록이다 — 값 대조는 뜻이 없다
     actual_cost = float(order.cost or 0)
     if abs(actual_cost - row.cost) > max(COST_GAP_MIN_WON, row.cost * COST_GAP_RATE):
         found.append(Finding(row.order_no, 'cost', f'{row.cost:,.0f}원', f'{actual_cost:,.0f}원'))
     actual_account = _login_id(order.sourcing_account_username)
     if row.account and actual_account and actual_account != _login_id(row.account):
-        found.append(Finding(row.order_no, 'account', row.account, order.sourcing_account_username or ''))
+        found.append(
+            Finding(row.order_no, 'account', row.account, order.sourcing_account_username or '')
+        )
+    found.extend(margin_findings(row, order))
     return found
+
+
+def margin_findings(row: LedgerRow, order: WaveOrder) -> list[Finding]:
+    """산 값이 정산금보다 큰 역마진 구매를 잡는다 — 값이 장부와 같아도 한다.
+
+    장부와 삼바웨이브가 같은 값이어도 그 값이 틀리면(구매창 가격 ¥674 를 믿고 실결제 ¥1090 을 낸 득물 건, 2026-10-08)
+    기존 대조는 통과했다. 정산금(revenue)보다 원가+배송비가 크면 알린다. 자동으로 되돌리지 않는다 — 사람이 본다.
+    """
+    revenue = float(getattr(order, 'revenue', 0) or 0)
+    if revenue <= 0:
+        return []
+    total = float(order.cost or 0) + float(order.shipping_fee or 0)
+    if total <= revenue:
+        return []
+    return [
+        Finding(
+            row.order_no,
+            'margin',
+            f'정산 {revenue:,.0f}원',
+            f'원가+배송 {total:,.0f}원(손실 {total - revenue:,.0f}원)',
+        )
+    ]
 
 
 _KST = timezone(timedelta(hours=9))
@@ -299,7 +331,9 @@ class CrossChecker:
         kinds: dict[str, tuple[str, ...]] = {}
         for row in self._ledger.recent(self._days):
             try:
-                order = self._wave.get_order(row.wave_key, sourcing_order_number=row.source_order_no)
+                order = self._wave.get_order(
+                    row.wave_key, sourcing_order_number=row.source_order_no
+                )
             except WaveError as e:
                 _log.debug('교차 검증: %s 조회 실패 — 다음 주기에 다시 본다: %s', row.order_no, e)
                 continue
@@ -313,13 +347,26 @@ class CrossChecker:
             if not found:
                 continue
             all_found.extend(found)
-            if self._restore and row.restored_at is None and self._restore_row(row, order, found):
+            # 역마진은 알리기만 한다 — 장부 값으로 되돌릴 일이 아니다
+            restorable = [f for f in found if f.field != 'margin']
+            if (
+                restorable
+                and self._restore
+                and row.restored_at is None
+                and self._restore_row(row, order, restorable)
+            ):
                 fixed.append(row.order_no)
         fresh = [f for f in all_found if (f.order_no, f.field, f.actual) not in self._told]
         if fresh:
             self._told.update((f.order_no, f.field, f.actual) for f in fresh)
-            lines = [f.line() + (' — 하네스 기입 값으로 되돌림' if f.order_no in fixed else '') for f in fresh]
-            text = f'⚠ [교차 검증] 하네스 기입과 삼바웨이브 값이 다르다 {len(fresh)}건\n' + '\n'.join(lines[:30])
+            lines = [
+                f.line() + (' — 하네스 기입 값으로 되돌림' if f.order_no in fixed else '')
+                for f in fresh
+            ]
+            text = (
+                f'⚠ [교차 검증] 하네스 기입과 삼바웨이브 값이 다르다 {len(fresh)}건\n'
+                + '\n'.join(lines[:30])
+            )
             _log.warning(text)
             if self._alert is not None:
                 try:
@@ -362,7 +409,9 @@ class CrossChecker:
                 continue
             self._told.add((order.order_number, 'stale', today))
             source = (order.source_site or '').strip() or '소싱처 미등록'
-            old.append(f'{order.order_number} ({order.seller or "-"} · {source} · {hours:.0f}시간째)')
+            old.append(
+                f'{order.order_number} ({order.seller or "-"} · {source} · {hours:.0f}시간째)'
+            )
         if not old:
             return
         text = (
@@ -376,15 +425,21 @@ class CrossChecker:
             except Exception:  # noqa: BLE001 — 알림 실패가 점검을 멈추게 하지 않는다
                 _log.exception('교차 검증 알림 실패')
 
-    def _check_sources(self, rows: list[LedgerRow], kinds: dict[str, tuple[str, ...]] | None = None) -> None:
+    def _check_sources(
+        self, rows: list[LedgerRow], kinds: dict[str, tuple[str, ...]] | None = None
+    ) -> None:
         """아직 발송 전인 이행 주문의 소싱처 주문이 취소됐는지 본다(한 주기에 몇 건씩, 주문 작업이 없을 때만).
 
         소싱처에서 취소됐는데 삼바웨이브에는 이행으로 남으면 고객 주문이 방치된다(실기 2026-10-01 비니·나이키).
         """
         if self._source_status is None and self._source_detail is None:
             return
-        since = (datetime.now(UTC) - timedelta(hours=SOURCE_RECHECK_HOURS)).isoformat(timespec='seconds')
-        due = [r for r in rows if r.site in SOURCE_CHECK_SITES and (r.source_checked_at or '') < since]
+        since = (datetime.now(UTC) - timedelta(hours=SOURCE_RECHECK_HOURS)).isoformat(
+            timespec='seconds'
+        )
+        due = [
+            r for r in rows if r.site in SOURCE_CHECK_SITES and (r.source_checked_at or '') < since
+        ]
         for row in due[:SOURCE_CHECKS_PER_CYCLE]:
             if self._idle is not None and not self._idle():
                 return
@@ -402,7 +457,11 @@ class CrossChecker:
                 continue  # 못 읽었다 — 다음 주기에 다시 본다
             self._ledger.mark_source_checked(row)
             # 받는 곳이 기록(직배·까대기)과 다른가 — 직배인데 사무실로 가면 고객이 못 받는다(실기 2026-09-30 롯데온)
-            wrong = delivery_mismatch((kinds or {}).get(row.order_no, ()), detail.to_office) if detail else None
+            wrong = (
+                delivery_mismatch((kinds or {}).get(row.order_no, ()), detail.to_office)
+                if detail
+                else None
+            )
             if wrong and '취소' not in status:
                 text = (
                     f'⚠ [교차 검증] 받는 곳이 기록과 다르다 — {row.order_no} ({row.site} {row.source_order_no}): {wrong}. '
@@ -432,7 +491,11 @@ class CrossChecker:
 
         if any(f.field == 'source_order_no' for f in found):
             return False
-        account_id = self._wave.sourcing_account_id(row.site, row.account) if row.site and row.account else None
+        account_id = (
+            self._wave.sourcing_account_id(row.site, row.account)
+            if row.site and row.account
+            else None
+        )
         try:
             self._wave.record_sourcing(
                 row.wave_key,
@@ -448,7 +511,9 @@ class CrossChecker:
         self._ledger.mark_restored(row)
         return True
 
-    def run_forever(self, should_stop: Callable[[], bool], interval_s: float = DEFAULT_INTERVAL_S) -> None:
+    def run_forever(
+        self, should_stop: Callable[[], bool], interval_s: float = DEFAULT_INTERVAL_S
+    ) -> None:
         import time
 
         while not should_stop():
@@ -544,7 +609,9 @@ def main(argv: list[str] | None = None) -> int:
             print('삼바웨이브 설정이 없다')
             return 2
         wave = WaveClient(
-            settings.wave_url, settings.wave_internal_token.get_secret_value(), settings.wave_tenant_id
+            settings.wave_url,
+            settings.wave_internal_token.get_secret_value(),
+            settings.wave_tenant_id,
         )
         found = CrossChecker(ledger, wave, restore=cmd == 'fix').run_once()
         for f in found:

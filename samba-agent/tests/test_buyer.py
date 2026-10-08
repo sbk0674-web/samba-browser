@@ -2187,3 +2187,14 @@ def test_스케쳐스는_소싱처와_상관없이_까대기로_고정된다(reg
     # 일반 소싱처(무신사)에서도 스케쳐스는 정가 비교 없이 까대기
     a = agent(reg, lambda p, m: m(choice='260', reason='일치'))
     assert a.order_type_of(skx, {'normal_price': 0}) == 'kkadaegi'
+
+
+def test_나이키_옛_품번은_공백으로_띄어_써도_모델코드로_읽는다():
+    from samba_agent.agents.buyer import model_code_of
+
+    assert (
+        model_code_of('매장정품 나이키 여성 MD 러너 2 749869 018 1000772401752 [240]')
+        == '749869-018'
+    )
+    assert model_code_of('나이키 덩크 로우 HF5441-100') == 'HF5441-100'
+    assert model_code_of('상품 1000772401752') != '1000772401-752'
