@@ -174,6 +174,25 @@ class PhoneToolbox:
         self.sleep(1.5)
         return '눌렀다'
 
+    def paste(self) -> str:
+        """클립보드를 붙여넣는다(입력칸이 선택돼 있을 때)."""
+        blocked = self._guard()
+        if blocked:
+            return blocked
+        self.phone._run('shell', 'input', 'keyevent', '279')
+        self.sleep(1.5)
+        return '붙여넣었다'
+
+    def clear_field(self) -> str:
+        """선택된 입력칸의 글자를 모두 지운다."""
+        blocked = self._guard()
+        if blocked:
+            return blocked
+        self.phone._run('shell', 'input', 'keyevent', '123')
+        self.phone._run('shell', 'input', 'keyevent', *(['67'] * 120))
+        self.sleep(1)
+        return '지웠다'
+
     def text(self, value: str) -> str:
         blocked = self._guard()
         if blocked:
