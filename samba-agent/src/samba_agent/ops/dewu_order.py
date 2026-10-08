@@ -566,6 +566,12 @@ def make_shihuo_handler(
         )
         if max_cny <= 0:
             return 'needs_human', 'margin', '정산금을 몰라 마진을 볼 수 없다 — 결제하지 않음'
+        # 삼바 수집이 고른 최저 판매처(淘宝 화이트리스트 가게 등)가 得物이 아니면 그 가격이 상한이다 —
+        # 得物이 더 비싸면 사지 않고 사람에게 넘긴다(사용자 2026-10-08: 淘宝 ¥520 인데 得物 ¥674 에서 삼)
+        seller_name = str(getattr(detail, 'source_seller', '') or '').strip()
+        seller_cny = float(getattr(detail, 'source_price_cny', 0) or 0)
+        if seller_name and '得物' not in seller_name and seller_cny > 0:
+            max_cny = min(max_cny, seller_cny)
         serial = find_phone_serial(adb_path, want)
         if serial is None:
             return 'needs_human', 'unknown', '결제 폰(임성희폰)이 연결돼 있지 않다'
