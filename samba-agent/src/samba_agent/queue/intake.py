@@ -23,6 +23,9 @@ from samba_agent.wave.client import WaveClient, WaveError, WaveOrder, flag_text
 
 log = logging.getLogger(__name__)
 
+# 소싱처를 끝내 못 찾은 주문을 취소중으로 정리하기까지 기다리는 시간 — 추정·접두어 연결·판매자상품코드 읽기가 돌 틈을 준다
+UNLINKED_CANCEL_AFTER = timedelta(minutes=60)
+
 # 슬랙 최상위 메시지에 싣는 상품명 길이 — 길면 스레드 제목이 읽히지 않는다
 SKU_LIMIT = 40
 # run_forever 가 멈춤 신호를 확인하는 간격(초). 주기가 길어도 종료는 빠르게 한다
@@ -108,6 +111,9 @@ class Intake:
         self._lookup_asked: set[str] = set()
         # 마켓 취소로 이미 취소중 정리를 끝낸 주문 행 id
         self._cancel_settled: set[str] = set()
+        # 소싱처가 비어 있는 채로 처음 본 시각(주문 행 id) — 오래 비어 있으면 취소중으로 정리한다
+        self._unlinked_since: dict[str, datetime] = {}
+        self._unlinked_cancelled: set[str] = set()
         # 슬랙 `수집 중지` 가 세우는 깃발. 세워져 있으면 run_once 는 아무것도 하지 않는다
         self.paused = False
 
@@ -134,6 +140,8 @@ class Intake:
             seen += 1
             order = wave_order.to_order_ref()
             self._ask_lookup(wave_order)
+            if self._cancel_unlinked(wave_order):
+                continue
             if wave_order.inferred_product_prefix and not (wave_order.source_site or '').strip():
                 # 상품명이 잘려 소싱처를 추정 못 한 주문 — 접두어 연결만 한 번 부탁하고 접수하지 않는다
                 # (소싱처가 없어 살 수 없다). 연결되면 다음 주기에 소싱처가 채워져 들어온다
@@ -175,6 +183,41 @@ class Intake:
         return IntakeReport(
             seen=seen, enqueued=enqueued, skipped_live=skipped_live, unsupported=unsupported
         )
+
+    def _cancel_unlinked(self, wave_order: WaveOrder) -> bool:
+        """소싱처 매칭에 끝내 실패한 주문을 취소중으로 정리한다. 정리했으면 True(접수하지 않는다).
+
+        상품명 끝 번호 추정·접두어 연결·판매자상품코드 읽기를 다 거쳐도 소싱처가 비어 있으면 살 수 없는 주문이다.
+        방치하지 않고 근거를 남겨 취소중으로 둔다(사용자 2026-10-08: "매칭이 안 되면 취소중인 거 몰라?").
+        처음 본 뒤 UNLINKED_CANCEL_AFTER 가 지나야 한다 — 연결이 돌 틈을 준다. 하네스가 이미 다루는 주문은 건드리지 않는다.
+        """
+        if (wave_order.source_site or '').strip() or wave_order.source_inferred:
+            return False
+        if wave_order.inferred_product_prefix:
+            return False  # 접두어 연결이 아직 가능성이 있다
+        key = (wave_order.id or '').strip()
+        if not key or key in self._unlinked_cancelled:
+            return key in self._unlinked_cancelled
+        job = self._queue.find(wave_order.order_number, key)
+        if job is not None:
+            return False
+        first = self._unlinked_since.setdefault(key, datetime.now(UTC))
+        if datetime.now(UTC) - first < UNLINKED_CANCEL_AFTER:
+            return False
+        try:
+            changed = self._wave.set_cancel_requested(
+                key,
+                '소싱처 매칭 실패 — 상품명 끝 번호 추정·접두어 연결·판매자상품코드 읽기로도 소싱처를 못 찾아 살 수 없음',
+            )
+        except WaveError as e:
+            log.info('소싱처 미등록 주문 취소중 정리 실패 %s: %s', wave_order.order_number, e)
+            return False
+        self._unlinked_cancelled.add(key)
+        if changed:
+            line = f'{wave_order.order_number} 소싱처 매칭 실패 — 취소중으로 정리'
+            log.info(line)
+            self._post_new(line)
+        return True
 
     def _ask_lookup(self, wave_order: WaveOrder) -> None:
         """소싱처가 없고 상품명으로 추정도 못 한 주문 — 판매자상품코드 읽기를 한 번 요청한다."""
