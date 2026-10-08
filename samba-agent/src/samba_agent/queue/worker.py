@@ -61,6 +61,8 @@ class WorkerDeps:
     add_memo: Callable[[str, str], bool] | None = None
     # 끝난(done) 작업 뒤처리 — (작업, 그래프 결과) → 보고할 한 줄(할 일 없으면 None). SSG 선물 수락(폰)에 쓴다
     after_done: Callable[[Job, dict], str | None] | None = None
+    # AI 대행 — 결제 전에 막힌 작업의 판단을 맡긴다. (작업, 오류 코드, 사유) → 맡았으면 True
+    operator: Callable[[Job, str | None, str], bool] | None = None
     # 브라우저 그래프 대신 폰으로 사는 소싱처(대문자 id → 처리기). 처리기는 (작업, 주문) → (결과, 오류 코드, 보고)
     # 중국 크림(SHIHUO) 주문 — 得物 앱 구매(사용자 2026-10-01)
     phone_sources: dict[str, Callable[[Job, OrderRef], tuple[str, str | None, str]]] = field(
@@ -443,6 +445,8 @@ class Worker:
             retried = self._retry_transient(job, _failed_reason(out))
             if retried is not None:
                 return retried
+            if self.d.operator is not None:
+                self.d.operator(job, fail and str(fail), _failed_reason(out))
         tries = int(job.options.get(ACCOUNT_RETRY_KEY) or 0)
         if outcome == 'needs_human' and not self.d.dry_run and tries < ACCOUNT_RETRY_MAX:
             reason = _failed_reason(out)

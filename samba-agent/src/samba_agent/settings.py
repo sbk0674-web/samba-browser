@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     repair_enabled: bool = Field(default=False, alias='SAMBA_REPAIR_ENABLED')
     repair_model: str = Field(default='claude-opus-5-5', alias='SAMBA_REPAIR_MODEL')
     repair_timeout_s: float = Field(default=900.0, ge=60, alias='SAMBA_REPAIR_TIMEOUT_S')
+    # AI 대행 — 결제 전에 막힌 작업의 상황 판단(retry·cancel·human). 화면은 읽기만 한다
+    operator_enabled: bool = Field(default=False, alias='SAMBA_OPERATOR_ENABLED')
+    operator_model: str = Field(default='claude-opus-5-5', alias='SAMBA_OPERATOR_MODEL')
+    operator_timeout_s: float = Field(default=480.0, ge=60, alias='SAMBA_OPERATOR_TIMEOUT_S')
     site_scripts_file: Path = Field(
         default=DEFAULT_SITE_SCRIPTS_FILE, alias='SAMBA_SITE_SCRIPTS_FILE'
     )

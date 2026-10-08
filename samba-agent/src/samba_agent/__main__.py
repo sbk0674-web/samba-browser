@@ -372,6 +372,40 @@ def main() -> None:
 
     _report, _approval_report = make_reporters(lambda: bot)
 
+    operator_service = None
+    if settings.operator_enabled and app_supports_pay_guard(bridge.scoped(['run_js'])):
+        # AI 대행 — 결제 전에 막힌 작업을 AI 가 읽기 전용으로 보고 retry·cancel·human 을 고른다(사용자 2026-10-08)
+        from samba_agent.operator.agent import OperatorAgent
+        from samba_agent.operator.service import OperatorService
+
+        def _describe(job: Job) -> tuple[str, str]:
+            order = _parse_order(job.order_no, job.options, job.wave_id)
+            option = getattr(order, 'option', '') or ''
+            return order.source, f'{order.source} · {order.sku} · 옵션 {option}'.strip()
+
+        operator_bridge = bridge.scoped(['run_js']).with_lane('operator')
+
+        def _operator_call(tool: str, args: dict[str, object]) -> str:
+            try:
+                return operator_bridge.call(tool, **args).result
+            except BridgeError as e:
+                return f'Error: {e}'
+
+        operator_service = OperatorService(
+            OperatorAgent(model=settings.operator_model, timeout_s=settings.operator_timeout_s),
+            call=_operator_call,
+            queue=queue,
+            flag_order=flagger.mark if flagger is not None else None,
+            report=_report,
+            describe=_describe,
+            events_path=settings.root / 'events.sqlite',
+        )
+        log.info('AI 대행을 켠다 — 결제 전에 막힌 작업의 상황 판단')
+    elif settings.operator_enabled:
+        log.warning(
+            '앱이 결제 버튼 차단(safety no_pay)을 지원하지 않아 AI 대행을 끈다 — 앱 재시작 필요'
+        )
+
     worker = Worker(
         WorkerDeps(
             queue=queue,
@@ -404,6 +438,7 @@ def main() -> None:
             add_memo=wave.add_memo if wave is not None else None,
             # SSG 선물 주문은 결제 뒤 폰 카카오톡에서 선물을 받아야 발송된다(사용자 2026-10-01 하네스 이식)
             after_done=make_after_done(_source_sku_of),
+            operator=operator_service.submit if operator_service is not None else None,
             # 중국 크림(식화) 주문은 폰 得物 앱으로 산다 — 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다
             phone_sources=(
                 {
