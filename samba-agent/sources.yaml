@@ -103,7 +103,8 @@ sources:
     shipping_confirm: true
     payment_quotes: true  # 2026-09-27 ssg_payment_quotes(SSGPAY 등록 카드·SSG MONEY 충전결제)
     mall_item: true  # 2026-09-27 ssg_find_mall_item — 주문 링크가 신세계몰이 아니면 신세계몰 같은 모델 상품으로 산다
-    route_compare: true  # 2026-09-27 ssg_route_quotes — 직접·애드픽(적립) 경로 원가 비교, 애드픽이 비싸면 패스
+    route_compare: true  # 2026-09-27 ssg_route_quotes — 직접·다나와·애드픽(적립) 경로 원가 비교, 가장 싼 경로로 산다
+    routes: [danawa, adpick]  # 직접 경로는 신세계몰 상품 주문서(first)로 비교에 들어간다. 사용자 2026-10-01·10-08: SSG 는 다나와 비교검색 기본(신세계몰 줄 ED901 만 — 개인판매자 제외). 애드픽은 적립을 원가에 넣지 않는다
     allow_department: true  # 사용자 2026-09-27: 신세계백화점(6009)도 허용. 이마트·트레이더스 등은 금지
     # 2026-09-29 사용자: 까대기(포이즌·라자다) 제외 전부 선물하기. 스냅샷(바로구매 주문서)으로 견적한 뒤 배송지 단계에서
     # ssg_gift_enter → ssg_gift_address(없으면 ssg_set_shipping{gift} → 전화 → ssg_gift_save_address) → ssg_login_check 로 선물 주문서로 바꿔 탄다

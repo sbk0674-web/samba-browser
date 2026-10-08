@@ -175,8 +175,8 @@ def test_신세계몰이_아니면_같은_모델_후보를_싼_순서로_보고_
 
 
 @respx.mock
-def test_기본은_애드픽_경로_스냅샷_하나로_산다(ssg) -> None:
-    """SSG 는 상품 페이지를 네 번쯤 열면 봇 차단 — 주문서 금액은 경로와 무관하니 애드픽 하나만 연다(2026-09-27)."""
+def test_기본은_다나와_애드픽_경로를_견적하고_쓸_수_있는_경로로_산다(ssg) -> None:
+    """SSG 는 다나와 비교검색 기본(사용자 2026-10-01·10-08) — 다나와·애드픽 경로를 견적한다. 이 견적에서는 애드픽만 쓸 수 있다."""
     calls: Calls = []
     mock_scripts(
         {
@@ -190,7 +190,7 @@ def test_기본은_애드픽_경로_스냅샷_하나로_산다(ssg) -> None:
     snap = ssg._snapshot(assignment(MALL_B), 'acc1')
     assert [n for n, _ in calls] == ['ssg_route_quotes', 'ssg_product_snapshot']
     route_args = calls[0][1]
-    assert route_args['routes'] == ['adpick'] and route_args['allow_department'] is True
+    assert route_args['routes'] == ['danawa', 'adpick'] and route_args['allow_department'] is True
     shot = snapshots(calls)[0]
     assert (shot['route'], shot['entry_url'], shot['adpick_percent']) == ('adpick', ADPICK, 1.6)
     assert snap['route'] == 'adpick'
@@ -252,8 +252,9 @@ def test_쓸_수_있는_경로가_없으면_직접_경로로_산다(ssg) -> None
                 'ok': False,
                 'routes': [
                     {'route': 'adpick', 'entry_url': None, 'note': '애드픽 링크 없음'},
-                    # 요청하지 않은 경로는 쓰지 않는다
-                    {'route': 'danawa', 'entry_url': 'https://danawa.example', 'mall_ok': True},
+                    {'route': 'danawa', 'entry_url': None, 'note': '다나와 신세계몰 줄 없음'},
+                    # 요청하지 않은 경로(에누리)는 쓰지 않는다
+                    {'route': 'enuri', 'entry_url': 'https://enuri.example', 'mall_ok': True},
                 ],
             },
         },
