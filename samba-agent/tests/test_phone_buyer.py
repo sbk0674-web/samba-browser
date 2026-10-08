@@ -83,7 +83,7 @@ def test_알리페이_창이_앞이면_누르기와_입력이_막힌다():
     tb = _box(phone, [])
     assert '막혀' in tb.tap(300, 300)
     assert '막혀' in tb.text('123456')
-    assert '막혀' in tb.key('back')
+    assert '막혀' in tb.key('home')
     assert phone.taps == []
 
 

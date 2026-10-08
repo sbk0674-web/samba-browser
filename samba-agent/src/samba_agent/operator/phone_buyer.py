@@ -121,6 +121,13 @@ class PhoneToolbox:
         )
         return _shrink(done.stdout)
 
+    def reset(self) -> None:
+        """시작 전 초기화 — 淘宝·식화 앱을 끄고 홈으로. 지난 시도가 남긴 결제창에 갇히지 않게 한다(미결제 주문은 그대로 남는다)."""
+        for package in ('com.taobao.taobao', 'com.hupu.shihuo'):
+            self.phone._run('shell', 'am', 'force-stop', package)
+        self.phone.key('3')
+        self.sleep(1.5)
+
     # --- 조작(알리페이 창이 앞이면 막힌다) ---
     def _guard(self) -> str | None:
         self.state.actions += 1
@@ -155,7 +162,7 @@ class PhoneToolbox:
 
     def key(self, name: str) -> str:
         blocked = self._guard()
-        if blocked:
+        if blocked and not (name == 'back' and alipay_window_front(self.phone)):
             return blocked
         code = {'back': '4', 'home': '3', 'enter': '66'}.get(name)
         if code is None:
@@ -277,6 +284,7 @@ class PhoneBuyer:
     def buy(self, toolbox: PhoneToolbox, ctx: str) -> DewuResult:
         """산다. 못 사면 DewuOrderError(결제 전), 결제됐는데 주문번호가 없으면 paid=True 로 던진다."""
         state = toolbox.state
+        toolbox.reset()
         _log_actions(toolbox)
         try:
             _run_sync(asyncio.wait_for(self._loop(toolbox, ctx), timeout=self.timeout_s))
