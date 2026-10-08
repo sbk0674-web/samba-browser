@@ -724,25 +724,35 @@ def make_shihuo_handler(
             seller_name = '得物'
         if seller_name and '唯品会' in seller_name:
             # 唯品会 최저가 — 임성희폰 唯品会 앱으로 산다(10/6 실기 성공 절차 이식, 사용자 2026-10-08)
-            from samba_agent.ops.vip_order import buy_on_vip
+            # 唯品会 앱 상품 화면은 버튼·사이즈가 화면 요소로 읽히지 않는다(실기 2026-10-08 U509BC) — 고정 스크립트 대신
+            # 화면을 이미지로 보는 폰 구매 AI 가 산다. 결제는 pay 도구(결제창 금액·상한 확인)로만 나간다
+            from samba_agent.operator.phone_buyer import PhoneBuyer, PhoneToolbox
 
+            vip_ctx = LINE_BREAK.join(
+                [
+                    '# 唯品会 구매(식화 최저가 판매처가 唯品会)',
+                    f'품번 {model} · EU 사이즈 {eu} · 상품 {getattr(detail, "product_name", "")}',
+                    f'결제 상한(마진 > 0): 상품가 ¥{max_cny:.0f} 이하',
+                    '순서: launch com.achievo.vipshop → 위 검색칸(360,95)에 품번 type_text → 搜索(642,93) → 같은 품번 상품을 연다',
+                    '→ 아래쪽 사이즈 줄에서 EU 사이즈를 고른다 → 오른쪽 아래 「特卖价 抢」 → 购物车(장바구니)',
+                    '→ 장바구니에 다른 상품이 있으면 그 상품들의 체크를 모두 끄고 이 상품·이 사이즈 1개만 체크한다(다른 상품을 같이 사면 안 된다)',
+                    '→ 结算 → 确认订单: 배송지 HUBNET 확인, 결제수단 支付宝 → 支付宝支付 → 알리페이 결제창이 뜨면 pay(shop="唯品会", price_cny=상품가)',
+                    '→ 결제 뒤 查看订单 의 订单编号 로 finish. 식화 앱은 쓰지 않는다(판매처가 이미 唯品会로 정해졌다)',
+                ]
+            )
             try:
                 with PHONE_BUSY:
-                    vip = buy_on_vip(
-                        Phone(adb_path, serial),
-                        model,
-                        eu,
-                        max_cny=max_cny,
-                        approve=approve,
-                        rate=rate,
-                    )
+                    tb = PhoneToolbox(Phone(adb_path, serial), approve, max_cny=max_cny, rate=rate)
+                    vip = (buyer_factory() if buyer_factory else PhoneBuyer()).buy(tb, vip_ctx)
             except DewuOrderError as e:
                 if e.paid:
                     return 'needs_human', 'pay_interrupted', f'唯品会: {e}'
                 log.info('唯品会 구매 실패 — 다음 순위 得物: %s', e)
                 seller_name = '得物'
             else:
-                cost = round(vip.paid_cny * rate * HYUNDAI_BILLING_FACTOR)
+                # 폰 AI 의 paid_cny 는 결제창 주문금액(수수료 전)이다 — 알리페이 국제카드 수수료 3% 를 더해 원가를 낸다
+                vip_paid = round(vip.paid_cny * 1.03, 2)
+                cost = round(vip_paid * rate * HYUNDAI_BILLING_FACTOR)
                 wave.record_sourcing(  # type: ignore[attr-defined]
                     wave_key,
                     sourcing_order_number=vip.order_no,
@@ -750,7 +760,7 @@ def make_shihuo_handler(
                     shipping_fee=CN_SHIPPING_FEE,
                     sourcing_account_id=wave.only_sourcing_account_id('VIPSHOP'),  # type: ignore[attr-defined]
                     notes=(
-                        f'唯品会 앱(임성희폰) 결제 ¥{vip.paid_cny:g}(상품 ¥{vip.item_cny:g}+알리페이 카드수수료 3%) × {rate:g}'
+                        f'唯品会 앱(임성희폰, 폰 AI) 결제 ¥{vip_paid:g}(상품 ¥{vip.paid_cny:g}+알리페이 카드수수료 3%) × {rate:g}'
                         f' × 현대카드 청구할인 {HYUNDAI_BILLING_FACTOR} · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
                     ),
                 )

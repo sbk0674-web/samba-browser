@@ -534,40 +534,38 @@ def test_95分_중고_표시가_있으면_중고로_본다():
     )
 
 
-def test_唯品会_최저가면_唯品会_앱으로_사고_VIPSHOP_계정으로_기입한다(monkeypatch):
+def test_唯品会_최저가면_폰_AI가_唯品会_앱으로_사고_VIPSHOP_계정으로_기입한다(monkeypatch):
     _patch_phone(monkeypatch)
     monkeypatch.setattr(
         'samba_agent.ops.dewu_order.buy_on_dewu', lambda *a, **k: pytest.fail('得物을 열면 안 된다')
     )
-    monkeypatch.setattr(
-        'samba_agent.ops.vip_order.buy_on_vip',
-        lambda phone, model, eu, **kw: dewu_order.DewuResult(
-            '2610081234567890', 257.5, 250.0, 200.0
-        ),
-    )
     records: list = []
+    buyer = _Buyer(result=dewu_order.DewuResult('2610081234567890', 250.0, 250.0, 200.0))
     handle = make_shihuo_handler(
-        _wave_for('唯品会', records), lambda krw: 'ok', rate_of=lambda: 200.0
+        _wave_for('唯品会', records),
+        lambda krw: 'ok',
+        rate_of=lambda: 200.0,
+        buyer_factory=lambda: buyer,
     )
     result, _, line = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'done' and '2610081234567890' in line
     assert records[0][1]['sourcing_account_id'] == 'acct_VIPSHOP'
+    assert records[0][1]['cost'] == round(round(250.0 * 1.03, 2) * 200.0 * 0.973)
+    assert 'com.achievo.vipshop' in buyer.ctx and '장바구니' in buyer.ctx
 
 
 def test_唯品会에서_못_사면_다음_순위_得物로_넘어간다(monkeypatch):
     _patch_phone(monkeypatch)
-
-    def fail_vip(phone, model, eu, **kw):
-        raise DewuOrderError('唯品会 사이즈 37 已抢光')
-
-    monkeypatch.setattr('samba_agent.ops.vip_order.buy_on_vip', fail_vip)
     monkeypatch.setattr(
         'samba_agent.ops.dewu_order.buy_on_dewu',
         lambda phone, model, eu, **kw: dewu_order.DewuResult('D9', 300.0, 291.0, 200.0),
     )
     records: list = []
     handle = make_shihuo_handler(
-        _wave_for('唯品会', records), lambda krw: 'ok', rate_of=lambda: 200.0
+        _wave_for('唯品会', records),
+        lambda krw: 'ok',
+        rate_of=lambda: 200.0,
+        buyer_factory=lambda: _Buyer(error=DewuOrderError('唯品会 사이즈 37 已抢光')),
     )
     result, _, line = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'done' and 'D9' in line

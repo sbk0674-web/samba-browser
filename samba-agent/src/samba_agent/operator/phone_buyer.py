@@ -29,7 +29,8 @@ from samba_agent.repair.agent import DEFAULT_REPAIR_MODEL, _run_sync
 log = logging.getLogger(__name__)
 
 # 식화 화이트리스트 가게 — kream_shadow._SUP_ALLOW_NAMES 와 같은 이름. 唯品会·得物 은 플랫폼 단위 화이트리스트다
-ALLOWED_SHOPS = ('后浪潮品奥莱折扣店', '品牌官方店')
+# 唯品会 는 플랫폼 단위 화이트리스트(식화 _SUP_ALLOW_STORES) — 唯品会 앱 구매에서 shop='唯品会' 로 결제한다
+ALLOWED_SHOPS = ('后浪潮品奥莱折扣店', '品牌官方店', '唯品会')
 MAX_ACTIONS = 160
 NETWORK_RETRIES = 3
 NETWORK_MARKS = ('网络异常', '网络', '네트워크')
