@@ -416,6 +416,7 @@ def test_최저가_판매처가_淘宝이면_폰_구매_AI가_사고_득물을_�
         lambda krw: 'ok',
         rate_of=lambda: 200.0,
         buyer_factory=lambda: buyer,
+        phone_buyer_enabled=True,
     )
     result, _, line = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'done' and 'T123456789012' in line
@@ -438,6 +439,7 @@ def test_폰_구매_AI가_못_사면_다음_순위_得物으로_넘어간다(mon
         lambda krw: 'ok',
         rate_of=lambda: 200.0,
         buyer_factory=lambda: _Buyer(error=DewuOrderError('가게 불일치')),
+        phone_buyer_enabled=True,
     )
     result, _, line = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'done' and 'D1' in line and calls
@@ -455,6 +457,20 @@ def test_폰_구매_AI가_결제한_뒤_실패하면_득물로_넘어가지_않�
         lambda krw: 'ok',
         rate_of=lambda: 200.0,
         buyer_factory=lambda: _Buyer(error=DewuOrderError('주문번호 못 읽음', paid=True)),
+        phone_buyer_enabled=True,
     )
     result, code, _ = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'needs_human' and code == 'pay_interrupted'
+
+
+def test_폰_구매_AI가_꺼져_있으면_淘宝_최저가_주문은_득물도_열지_않고_사람에게_넘긴다(monkeypatch):
+    monkeypatch.setattr(
+        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
+    )
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order.buy_on_dewu',
+        lambda *a, **k: pytest.fail('得物을 열면 안 된다'),
+    )
+    handle = make_shihuo_handler(_wave_for('淘宝', []), lambda krw: 'ok', rate_of=lambda: 200.0)
+    result, code, line = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'needs_human' and code == 'unknown' and '샵백' in line

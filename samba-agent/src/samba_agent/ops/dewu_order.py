@@ -538,6 +538,7 @@ def make_shihuo_handler(
     rate_of: Callable[[], float] = cny_krw_rate,
     buyer_factory: Callable[[], Any] | None = None,
     approve_other: Callable[[int], str] | None = None,
+    phone_buyer_enabled: bool = False,
 ) -> Callable[[object, object], tuple[str, str | None, str]]:
     """워커가 SHIHUO 주문에 부르는 처리기 — (작업, 주문) → (결과 'done'|'needs_human', 오류 코드, 보고 한 줄)."""
     import os
@@ -596,6 +597,16 @@ def make_shihuo_handler(
         res = None
         shop = '得物'
         failures: list[str] = []
+        if seller_name and '得物' not in seller_name and not phone_buyer_enabled:
+            # 淘宝는 샵백(PC 브라우저)을 켜고 사야 한다 — 폰 앱 구매는 샵백 적립이 빠진다(사용자 2026-10-08 반복 지적).
+            # PC 샵백 구매 흐름이 생기기 전까지 득물도 열지 않고 사람에게 넘긴다
+            price = float(getattr(detail, 'source_price_cny', 0) or 0)
+            return (
+                'needs_human',
+                'unknown',
+                f'식화 최저가 판매처가 {seller_name}{f" ¥{price:g}" if price else ""} 이다 — 샵백을 켠 PC 구매 흐름이 '
+                '아직 없어 폰 앱·得物으로 사지 않았다. 사람이 샵백 경유로 구매',
+            )
         if seller_name and '得物' not in seller_name:
             from samba_agent.operator.phone_buyer import PhoneBuyer, PhoneToolbox
 
