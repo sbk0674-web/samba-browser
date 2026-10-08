@@ -640,3 +640,17 @@ def test_포장_하자_표시_버튼도_중고로_보고_뺀다():
         Node('¥278', '', '', 603, 1438),
     ]
     assert [n.text for n in new_buy_buttons(nodes)] == ['¥288', '¥287']
+
+
+def test_가볍게_사용_표시_버튼도_중고로_보고_뺀다():
+    """실기 2026-10-09 A-SN242628053: ¥200 버튼 옆 '轻微使用' — 누르면 95分 闲置 목록이 떴다."""
+    from samba_agent.ops.dewu_order import new_buy_buttons
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    nodes = [
+        Node('使用', '', 'id/paymentTitle', 210, 1351),
+        Node('轻微使用', '', 'id/tvChannelTip', 657, 1397),
+        Node('¥488', '', '', 125, 1438),
+        Node('¥200', '', '', 472, 1438),
+    ]
+    assert [n.text for n in new_buy_buttons(nodes)] == ['¥488']
