@@ -29,12 +29,16 @@ KAKAO = 'com.kakao.talk'
 PHONE_BUSY = threading.Lock()
 # 사람이(또는 다른 세션이) 폰을 직접 만지는 동안 samba-agent 폴더에 만들어 두는 파일 — 있으면 주기 작업이 폰에 손대지 않는다
 PHONE_HOLD_FILE = 'PHONE_HOLD'
-_AGENT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_AGENT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 
 def phone_on_hold() -> bool:
     """PHONE_HOLD 파일이 있으면 True(2026-10-03: 得物 송장 루프가 앱 결제 중인 폰을 가로채 결제가 끊겼다)."""
     return os.path.exists(os.path.join(_AGENT_ROOT, PHONE_HOLD_FILE))
+
+
 CHANNEL = 'SSG닷컴'
 GO_GIFT = '선물 받으러 가기'
 CHECK_BTN = '옵션/배송지 확인'
@@ -362,7 +366,9 @@ def accept_ssg_gift(
             pages += 1
             if pages > MAX_PAGES or tried >= MAX_NOTICES:
                 _close_browser(phone, sleep)
-                raise GiftAcceptError(f'알림 {tried}건을 봤지만 이 주문({wanted})의 선물을 못 찾았다')
+                raise GiftAcceptError(
+                    f'알림 {tried}건을 봤지만 이 주문({wanted})의 선물을 못 찾았다'
+                )
             phone.swipe_down()
             sleep(1.2)
             nodes = phone.nodes()
@@ -371,7 +377,9 @@ def accept_ssg_gift(
         tried += 1
         if tried > MAX_NOTICES:
             _close_browser(phone, sleep)
-            raise GiftAcceptError(f'알림 {MAX_NOTICES}건을 봤지만 이 주문({wanted})의 선물을 못 찾았다')
+            raise GiftAcceptError(
+                f'알림 {MAX_NOTICES}건을 봤지만 이 주문({wanted})의 선물을 못 찾았다'
+            )
         phone.tap(gos[idx].x, gos[idx].y)
         idx += 1
         # 3) 선물받기 화면 → 옵션/배송지 확인(글자 뒤에 '10/9(금) 23:59까지 …' 기한이 붙는다)
@@ -467,6 +475,23 @@ def source_order_no_of(out: dict) -> str:
         if isinstance(payload, dict) and payload.get('source_order_no'):
             return str(payload['source_order_no'])
     return ''
+
+
+def wait_foreground(
+    phone: 'Phone', package: str, seconds: float = 25.0, sleep: Callable[[float], None] = time.sleep
+) -> bool:
+    """그 앱이 앞으로 나올 때까지 기다린다(콜드 스타트 5~20초). 나왔으면 True.
+
+    앱을 열자마자 화면 글자를 읽으면 아직 앞에 있는 홈 화면(런처)의 앱 이름들을 읽고 '화면이 떴다'로 착각해
+    카카오톡 방을 못 열었다고 끝났다(실기 2026-10-08: 롯데ON 선물 송장·SSG 선물 수락이 반나절 같은 사유로 멈춤).
+    """
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if phone.top_package() == package:
+            sleep(1.5)  # 첫 화면이 그려질 때까지 조금 더
+            return True
+        sleep(1.0)
+    return False
 
 
 def make_after_done(

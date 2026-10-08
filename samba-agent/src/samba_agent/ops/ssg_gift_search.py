@@ -18,13 +18,14 @@ from samba_agent.ops.ssg_gift_accept import (
     DONE,
     GO_LABELS,
     KAKAO,
+    SSG_APP,
     GiftAcceptError,
     Node,
-    SSG_APP,
     Phone,
     _close_browser,
     find_text,
     has_text,
+    wait_foreground,
 )
 
 # 720×1600 기준 좌표
@@ -84,7 +85,7 @@ def accept_ssg_gift_by_search(
     phone.key('3')  # HOME
     sleep(1)
     phone.launch(KAKAO)
-    sleep(3)
+    wait_foreground(phone, KAKAO, 25, sleep)
     nodes = wait_for(has_any_text, 25)
     for _ in range(5):
         if in_ssg_room(nodes):
@@ -127,7 +128,9 @@ def accept_ssg_gift_by_search(
     button: Node | None = None
     for _ in range(MAX_PAGES):
         screen = phone.nodes()
-        target = next((n for n in screen if _NOTICE_TITLE in n.text and f'{who}님에게' in n.text), None)
+        target = next(
+            (n for n in screen if _NOTICE_TITLE in n.text and f'{who}님에게' in n.text), None
+        )
         if target is not None:
             below = [b for b in screen if b.text in GO_LABELS and b.y > target.y]
             if below:
@@ -145,7 +148,9 @@ def accept_ssg_gift_by_search(
     if phone.top_package() == SSG_APP:
         # '선물 확인하기'류는 SSG 앱으로 열린다 — 이 화면은 좌표로 받지 않고 사람에게 넘긴다(받았다고 하지 않는다)
         phone.key('3')
-        raise GiftAcceptError('수락 알림이 SSG 앱으로 열렸다 — 이미 받았거나 앱 화면이라 사람이 확인')
+        raise GiftAcceptError(
+            '수락 알림이 SSG 앱으로 열렸다 — 이미 받았거나 앱 화면이라 사람이 확인'
+        )
     nodes = wait_for(lambda ns: any('선물 받기' in n.text or '배송정보' in n.text for n in ns), 40)
     if has_text(nodes, DONE):
         _close_browser(phone, sleep)

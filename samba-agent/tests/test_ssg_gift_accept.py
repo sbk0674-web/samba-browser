@@ -194,3 +194,16 @@ def test_다른_상품의_완료_화면을_이_주문의_성공으로_돌려주�
         # 이 주문 품번이 어느 알림에도 없다 — 모든 알림이 다른 상품의 완료 화면
         phone.bottom = 'other_done'
         accept_ssg_gift(phone, 'ZZ9999-999', sleep=lambda s: None)  # type: ignore[arg-type]
+
+
+def test_앱이_앞으로_나올_때까지_기다린다():
+    from types import SimpleNamespace
+
+    from samba_agent.ops.ssg_gift_accept import wait_foreground
+
+    tops = iter(['launcher', 'launcher', 'com.kakao.talk'])
+    phone = SimpleNamespace(top_package=lambda: next(tops))
+    assert wait_foreground(phone, 'com.kakao.talk', 25, lambda s: None) is True  # type: ignore[arg-type]
+    # 끝내 안 나오면 False — 런처 글자를 읽고 '방을 열었다'고 착각하지 않는다
+    phone2 = SimpleNamespace(top_package=lambda: 'launcher')
+    assert wait_foreground(phone2, 'com.kakao.talk', 0.01, lambda s: None) is False  # type: ignore[arg-type]

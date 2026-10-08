@@ -34,6 +34,7 @@ from samba_agent.ops.ssg_gift_accept import (
     find_phone_serial,
     find_text,
     phone_on_hold,
+    wait_foreground,
 )
 
 log = logging.getLogger(__name__)
@@ -122,7 +123,7 @@ def pair_order_no(notice: GiftNotice, all_notices: list[GiftNotice]) -> str:
 def open_room(phone: Phone, *, sleep: Callable[[float], None] = time.sleep) -> bool:
     """카카오톡 '롯데ON' 방을 맨 아래(최근 알림)에서 연다."""
     phone.launch(KAKAO)
-    sleep(3)
+    wait_foreground(phone, KAKAO, 25, sleep)
     reopened = False
     for _ in range(5):
         nodes = phone.nodes()
