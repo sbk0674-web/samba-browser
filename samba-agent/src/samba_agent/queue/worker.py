@@ -572,6 +572,7 @@ TRANSIENT_MARKS = (
     '立即购买 를 못 찾',
     '브릿지가 계속 busy',
     'not-on-order-form',
+    '배송지 입력 검증에 실패했다: 주문서 없음',
 )
 # 결제가 됐을 수 있는 사유 — 절대 자동으로 다시 사지 않는다(중복 결제)
 PAID_RISK_MARKS = (
