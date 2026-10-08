@@ -135,7 +135,7 @@ def make_export(settings: 'Settings') -> tuple[ExportQueue, ExportFn] | None:
     )
 
 
-def _alipay_approve(bridge: BridgeClient) -> Callable[[int], str]:
+def _alipay_approve(bridge: BridgeClient, merchant: str = '得物') -> Callable[[int], str]:
     """알리페이 결제창 비밀번호 — 앱의 phone_approve_payment(provider='alipay')가 키마스터에서 넣는다."""
 
     def approve(amount_krw: int) -> str:
@@ -144,7 +144,7 @@ def _alipay_approve(bridge: BridgeClient) -> Callable[[int], str]:
                 'phone_approve_payment',
                 provider='alipay',
                 amountKrw=max(int(amount_krw), 1),
-                merchant='得物',
+                merchant=merchant,
                 methodLabel='알리페이',
             ).result
         except BridgeError as e:
@@ -443,7 +443,11 @@ def main() -> None:
             phone_sources=(
                 {
                     'SHIHUO': make_shihuo_handler(
-                        wave, _alipay_approve(bridge.scoped(['phone_approve_payment']))
+                        wave,
+                        _alipay_approve(bridge.scoped(['phone_approve_payment'])),
+                        approve_other=_alipay_approve(
+                            bridge.scoped(['phone_approve_payment']), merchant='淘宝'
+                        ),
                     )
                 }
                 if wave is not None

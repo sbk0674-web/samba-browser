@@ -523,6 +523,7 @@ def make_shihuo_handler(
     phone_serial: str | None = None,
     rate_of: Callable[[], float] = cny_krw_rate,
     buyer_factory: Callable[[], Any] | None = None,
+    approve_other: Callable[[int], str] | None = None,
 ) -> Callable[[object, object], tuple[str, str | None, str]]:
     """워커가 SHIHUO 주문에 부르는 처리기 — (작업, 주문) → (결과 'done'|'needs_human', 오류 코드, 보고 한 줄)."""
     import os
@@ -597,7 +598,12 @@ def make_shihuo_handler(
             )
             try:
                 with PHONE_BUSY:
-                    tb = PhoneToolbox(Phone(adb_path, serial), approve, max_cny=max_cny, rate=rate)
+                    tb = PhoneToolbox(
+                        Phone(adb_path, serial),
+                        approve_other or approve,
+                        max_cny=max_cny,
+                        rate=rate,
+                    )
                     res = (buyer_factory() if buyer_factory else PhoneBuyer()).buy(tb, ctx)
                 shop = f'{seller_name}(식화 링크, 폰 AI)'
             except DewuOrderError as e:

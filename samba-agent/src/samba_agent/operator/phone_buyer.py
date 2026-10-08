@@ -13,6 +13,7 @@
 
 import asyncio
 import base64
+import io
 import logging
 import re
 import subprocess
@@ -33,6 +34,33 @@ MAX_ACTIONS = 160
 DEFAULT_MAX_TURNS = 120
 DEFAULT_TIMEOUT_S = 900.0
 _ORDER_NO = re.compile(r'^\d{12,25}$')
+
+
+def _shrink(png: bytes) -> bytes:
+    """스크린샷을 JPEG 로 줄인다 — PNG(1MB↑)는 SDK 메시지 버퍼 한도(1MB)를 넘는다. 해상도는 그대로(좌표 유지)."""
+    if not png:
+        return png
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(png)).convert('RGB')
+        out = io.BytesIO()
+        img.save(out, format='JPEG', quality=55, optimize=True)
+        return out.getvalue()
+    except Exception:  # noqa: BLE001 — 줄이지 못하면 이미지 없이 글자 목록만 준다
+        log.warning('스크린샷 JPEG 변환 실패')
+        return b''
+
+
+def alipay_window_front(phone: Phone) -> bool:
+    """알리페이 결제창이 앞에 있나. 得物·식화는 알리페이 앱이 뜨고, 淘宝는 淘宝 앱 안에 결제창이 뜬다(실기 2026-10-08)."""
+    if phone.top_package() == ALIPAY:
+        return True
+    nodes = phone.nodes()
+    if alipay_order_amount(nodes) is None:
+        return False
+    texts = ' '.join((n.text or n.desc or '') for n in nodes)
+    return any(k in texts for k in ('密码共', '国际卡手续费', '手续费'))
 
 
 @dataclass
@@ -91,7 +119,7 @@ class PhoneToolbox:
             check=False,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
-        return done.stdout
+        return _shrink(done.stdout)
 
     # --- 조작(알리페이 창이 앞이면 막힌다) ---
     def _guard(self) -> str | None:
@@ -100,7 +128,7 @@ class PhoneToolbox:
             return f'조작 {MAX_ACTIONS}회를 넘었다 — give_up 으로 끝내라.'
         if self.state.paid:
             return '이미 결제했다 — finish 로 주문번호를 남겨라.'
-        if self.phone.top_package() == ALIPAY:
+        if alipay_window_front(self.phone):
             return '알리페이 결제창이 앞에 있다 — 누르기·입력은 막혀 있다. 금액·가게를 확인했으면 pay 를 불러라.'
         return None
 
@@ -209,11 +237,25 @@ SYSTEM_PROMPT = """너는 SAMBA 주문 하네스의 폰 구매 담당이다. 한
 4. 넘어간 상품 페이지에 가게 이름이 화이트리스트인지 화면에서 읽어 확인한다. 아니면 뒤로 가서 다른 행을 고른다.
 5. 색상(품번)·사이즈를 고르고 立即支付/立即购买 → 주문 확인 화면. 배송지가 HUBNET 배대지인지, 합계 ¥ 가 상한 이하인지 확인한다.
    결제수단은 支付宝(알리페이, 大陆版). '개인정보 국경 간 전송 동의' 체크칸이 있으면 체크한다. 立即支付 로 알리페이 결제창을 띄운다.
-6. 알리페이 결제창이 뜨면 pay(shop, price_cny) 를 부른다 — shop 은 화면에서 읽은 가게 이름, price_cny 는 상품 가격(수수료 제외).
+6. 알리페이 결제창(淘宝는 淘宝 앱 안에 '订单金额·国际卡手续费·密码共6位' 창이 뜬다)이 뜨면 pay(shop, price_cny) 를 부른다.
+   '待付款'(미결제) 주문이 이미 남아 있으면 새로 만들지 말고 그 주문의 '去支付' 로 결제한다. 결제창이 뜬 뒤에는 누르지 말고 pay 만 부른다 — shop 은 화면에서 읽은 가게 이름, price_cny 는 상품 가격(수수료 제외).
    코드가 결제창 금액·상한을 다시 확인하고 비밀번호를 넣는다. 결제 뒤 주문 내역(我的·待发货)에서 订单编号 를 읽어 finish(order_no).
 7. 최저가 판매처에서 못 사면(품절·가게 없음·상한 초과) 다음으로 싼 화이트리스트 판매처로 넘어간다. 마진이 남는 가격(상한 이하)일 때만 산다.
    더 갈 곳이 없으면 give_up(reason) — 이유를 화면에서 본 글자로 적는다.
 screen 으로 화면을 읽고(글자 목록 + 이미지) 누른다. 좌표는 720x1600 화면 기준이다. 의심스러우면 give_up. 결제 비밀번호는 네가 다루지 않는다."""
+
+
+def _log_actions(tb: PhoneToolbox) -> None:
+    """AI 가 부른 폰 도구를 로그에 남긴다(감시용) — 입력값은 좌표·품번·가게 이름뿐이라 비밀이 없다."""
+    for name in ('tap', 'swipe', 'key', 'text', 'launch', 'pay', 'finish', 'give_up'):
+        original = getattr(tb, name)
+
+        def wrapped(*args: Any, _orig: Any = original, _name: str = name) -> Any:
+            out = _orig(*args)
+            log.info('폰 AI %s%s → %s', _name, args, str(out)[:160])
+            return out
+
+        setattr(tb, name, wrapped)
 
 
 class PhoneBuyer:
@@ -235,6 +277,7 @@ class PhoneBuyer:
     def buy(self, toolbox: PhoneToolbox, ctx: str) -> DewuResult:
         """산다. 못 사면 DewuOrderError(결제 전), 결제됐는데 주문번호가 없으면 paid=True 로 던진다."""
         state = toolbox.state
+        _log_actions(toolbox)
         try:
             _run_sync(asyncio.wait_for(self._loop(toolbox, ctx), timeout=self.timeout_s))
         except TimeoutError:
@@ -274,7 +317,7 @@ class PhoneBuyer:
                     {
                         'type': 'image',
                         'data': base64.b64encode(png).decode(),
-                        'mimeType': 'image/png',
+                        'mimeType': 'image/jpeg',
                     }
                 )
             return {'content': blocks}
@@ -351,5 +394,4 @@ class PhoneBuyer:
         )
         query_fn = self._query_fn or default_query
         async for _message in query_fn(prompt=ctx, options=options):
-            if tb.state.order_no is not None or tb.state.gave_up is not None:
-                break
+            pass
