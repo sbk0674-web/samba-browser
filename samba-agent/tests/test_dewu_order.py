@@ -361,58 +361,32 @@ def test_결제창_금액이_구매창_가격과_다르면_비밀번호를_넣�
         )
 
 
-def _fallback_wave(seller: str):
-    return SimpleNamespace(
+def test_하단_결제_버튼이_둘이면_싼_일반배송_가격을_쓴다():
+    """실기 2026-10-08: 품牌官方 ¥1090(왼쪽) / 일반배송 ¥631(오른쪽) — 왼쪽을 눌러 ¥1090 을 결제했다."""
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    nodes = [Node('¥1090', '', '', 240, 1540), Node('¥631', '', '', 760, 1548)]
+    assert dewu_order.header_price(nodes) == 631.0
+
+
+def test_최저가_판매처가_淘宝이면_得物을_열지_않고_사람에게_넘긴다(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError('得物을 열면 안 된다')
+
+    monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', boom)
+    monkeypatch.setattr(
+        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
+    )
+    wave = SimpleNamespace(
         get_order=lambda no: SimpleNamespace(
-            source_seller=seller,
+            source_seller='淘宝',
+            source_price_cny=520,
             registered_option='37',
             source_product_code='1203A667-100',
             revenue=144760,
             sale_price=157000,
-        ),
-        only_sourcing_account_id=lambda site: 'sa_x',
-        record_sourcing=lambda *a, **k: None,
+        )
     )
-
-
-def test_최저가_판매처가_淘宝이면_淘宝를_먼저_사고_못_사면_得物로_넘어간다(monkeypatch):
-    calls: list[str] = []
-
-    def fake_taobao(phone, model, eu, *, max_cny, approve, rate):
-        calls.append('taobao')
-        raise DewuOrderError('淘宝 화이트리스트 가게를 못 찾았다')
-
-    def fake_dewu(phone, model, eu, *, max_cny, approve, rate):
-        calls.append('dewu')
-        return dewu_order.DewuResult(order_no='D1', paid_cny=300.0, item_cny=291.0, rate=rate)
-
-    monkeypatch.setattr('samba_agent.ops.taobao_order.buy_on_taobao', fake_taobao)
-    monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', fake_dewu)
-    monkeypatch.setattr(
-        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
-    )
-    handle = make_shihuo_handler(_fallback_wave('淘宝'), lambda krw: 'ok', rate_of=lambda: 200.0)
-    result, _, line = handle(None, SimpleNamespace(order_no='A1'))
-    assert calls == ['taobao', 'dewu']
-    assert result == 'done' and 'D1' in line
-
-
-def test_결제됐을_수_있는_실패는_다음_판매처로_넘어가지_않는다(monkeypatch):
-    calls: list[str] = []
-
-    def fake_taobao(phone, model, eu, *, max_cny, approve, rate):
-        calls.append('taobao')
-        raise DewuOrderError('주문번호를 못 읽었다', paid=True)
-
-    def fake_dewu(phone, model, eu, *, max_cny, approve, rate):
-        calls.append('dewu')
-        raise AssertionError('이중 결제 위험 — 호출되면 안 된다')
-
-    monkeypatch.setattr('samba_agent.ops.taobao_order.buy_on_taobao', fake_taobao)
-    monkeypatch.setattr('samba_agent.ops.dewu_order.buy_on_dewu', fake_dewu)
-    monkeypatch.setattr(
-        'samba_agent.ops.ssg_gift_accept.find_phone_serial', lambda adb, want: 'SERIAL'
-    )
-    handle = make_shihuo_handler(_fallback_wave('淘宝'), lambda krw: 'ok', rate_of=lambda: 200.0)
-    result, code, _ = handle(None, SimpleNamespace(order_no='A1'))
-    assert calls == ['taobao'] and result == 'needs_human' and code == 'pay_interrupted'
+    handle = make_shihuo_handler(wave, lambda krw: 'ok', rate_of=lambda: 200.0)
+    result, code, line = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'needs_human' and code == 'unknown' and '淘宝' in line

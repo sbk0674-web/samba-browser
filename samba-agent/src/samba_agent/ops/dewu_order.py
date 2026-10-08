@@ -5,7 +5,7 @@
 6자리 결제 비밀번호) → phone_approve_payment(provider='alipay') → '支付成功' → 완료 → 我·订单의 주문 상세 '订单编号'.
 
 원가 = 알리페이 청구 위안(상품 + 국제카드 수수료 3%) × CNY/KRW 환율(크림 엔진과 같은 frankfurter) × 현대카드 청구할인 0.973, 배송비 8,500원 고정.
-판매처가 淘宝이면 taobao_order 로, 唯品会 면 사람에게 넘긴다.
+판매처가 淘宝·唯品会 이면 得物을 열지 않고 사람에게 넘긴다(식화 링크로 들어가는 흐름이 생기기 전까지).
 """
 
 import json
@@ -101,11 +101,14 @@ def header_price(nodes: list[Node]) -> float | None:
         m = _PRICE.match(n.text.replace(' ', ''))
         if m and n.y < 330:
             return float(m.group(1))
-    # 아래 줄에 배송 선택지가 둘이면(¥378 顺丰 / ¥348 일반) 왼쪽이 기본 선택이다
-    for n in sorted(nodes, key=lambda n: (-n.y, n.x)):
-        m = _PRICE.match(n.text.replace(' ', ''))
-        if m and n.y >= 1300:
-            return float(m.group(1))
+    # 아래 줄에 결제 버튼이 둘이면(품牌官方 ¥1090 / 일반배송 ¥631, 실기 2026-10-08) 가장 싼 쪽이 일반배송이다
+    prices = [
+        float(m.group(1))
+        for n in nodes
+        if n.y >= 1300 and (m := _PRICE.match(n.text.replace(' ', '')))
+    ]
+    if prices:
+        return min(prices)
     return None
 
 
@@ -341,13 +344,12 @@ def buy_on_dewu(
             f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)'
         )
     # 5) 하단 결제 버튼 → 바로 알리페이가 뜨거나, 먼저 '确认订单'(주문 확인) 화면이 뜬다
-    pay = next(
-        (
-            n
-            for n in sorted(nodes, key=lambda n: -n.y)
-            if n.y > 1380 and _PRICE.match(n.text.replace(' ', ''))
-        ),
-        None,
+    # 하단 버튼이 둘이면(品牌官方 ¥1090 / 일반배송 ¥631) 싼 일반배송을 누른다 — 왼쪽(비싼 쪽)을 눌러 ¥1090 을 결제한 사고(2026-10-08)
+    buttons = [n for n in nodes if n.y > 1380 and _PRICE.match(n.text.replace(' ', ''))]
+    pay = min(
+        buttons,
+        key=lambda n: float(_PRICE.match(n.text.replace(' ', '')).group(1)),  # type: ignore[union-attr]
+        default=None,
     )
     if pay is None:
         raise DewuOrderError('得物 결제 버튼을 못 찾았다')
@@ -570,73 +572,51 @@ def make_shihuo_handler(
         serial = find_phone_serial(adb_path, want)
         if serial is None:
             return 'needs_human', 'unknown', '결제 폰(임성희폰)이 연결돼 있지 않다'
-        # 식화 화이트리스트 판매처 중 최저가부터 — 삼바 수집이 고른 최저 판매처(source_seller)를 먼저 하고, 거기서 못 사면(품절·
-        # 가게 불일치·상한 초과) 다음 순위로 넘어간다. 어느 쪽이든 마진이 남을 때(max_cny 이내)만 결제한다(사용자 2026-10-08)
-        order_of = ('taobao', 'dewu') if '淘宝' in seller_name else ('dewu', 'taobao')
-        failures: list[tuple[str, DewuOrderError]] = []
-        res = None
-        via_taobao = False
-        for route in order_of:
-            via_taobao = route == 'taobao'
-            try:
-                # 폰을 쓰는 주기 작업(롯데ON 선물 송장·得物 송장)과 겹치지 않게 — 겹치면 카카오톡이 앞으로 와 화면을 못 읽는다
-                with PHONE_BUSY:
-                    if via_taobao:
-                        from samba_agent.ops.taobao_order import buy_on_taobao
-
-                        res = buy_on_taobao(
-                            Phone(adb_path, serial),
-                            model,
-                            eu,
-                            max_cny=max_cny,
-                            approve=approve,
-                            rate=rate,
-                        )
-                    else:
-                        res = buy_on_dewu(
-                            Phone(adb_path, serial),
-                            model,
-                            eu,
-                            max_cny=max_cny,
-                            approve=approve,
-                            rate=rate,
-                        )
-                break
-            except DewuOrderError as e:
-                failures.append((route, e))
-                if e.paid:
-                    # 결제됐을 수 있다 — 다른 판매처로 넘어가면 이중 결제. 여기서 끝낸다
-                    return 'needs_human', 'pay_interrupted', str(e)
-        if res is None:
-            vip = '唯品会(앱 흐름 없음, 사람이 구매) → ' if '唯品会' in seller_name else ''
-            reasons = vip + ' / '.join(
-                f'{"淘宝" if r == "taobao" else "得物"}: {e}' for r, e in failures
+        # 식화 화이트리스트 판매처 중 최저가에서 산다. 최저가가 淘宝·唯品会 이면 득물을 열지 않고 사람에게 넘긴다 —
+        # 그 판매처는 식화 상세에서 링크로 들어가야 하고(淘宝 검색으로 사면 블랙리스트 가게를 고른다), 득물은 더 비싸다
+        # (사용자 2026-10-08: "더우는 왜 켜, 식화에서 타고 들어가야지")
+        if seller_name and '得物' not in seller_name:
+            price = float(getattr(detail, 'source_price_cny', 0) or 0)
+            return (
+                'needs_human',
+                'unknown',
+                f'식화 최저가 판매처가 {seller_name}{f" ¥{price:g}" if price else ""} 이다 — 식화 링크로 들어가는 구매 흐름이 '
+                '아직 없어 得物을 열지 않았다. 사람이 그 판매처에서 구매',
             )
-            if all(e.out_of_stock for _, e in failures):
-                # 모든 판매처에서 화면으로 확인한 품절 — 재고X·취소중 으로 마감하고 근거를 메모에 남긴다(사용자 2026-10-07)
+        try:
+            # 폰을 쓰는 주기 작업(롯데ON 선물 송장·得物 송장)과 겹치지 않게 — 겹치면 카카오톡이 앞으로 와 화면을 못 읽는다
+            with PHONE_BUSY:
+                res = buy_on_dewu(
+                    Phone(adb_path, serial), model, eu, max_cny=max_cny, approve=approve, rate=rate
+                )
+        except DewuOrderError as e:
+            if e.paid:
+                return 'needs_human', 'pay_interrupted', str(e)
+            if e.out_of_stock:
+                # 得物 화면에서 확인한 품절 — 재고X·취소중 으로 마감하고 근거를 메모에 남긴다(사용자 2026-10-07)
                 flagged = ''
                 try:
                     from samba_agent.wave.flags import FlagMarker
 
                     flagged = (
                         FlagMarker(wave).mark(  # type: ignore[arg-type]
-                            wave_key, 'out_of_stock', f'{reasons} (임성희폰 직접 확인)'
+                            wave_key, 'out_of_stock', f'{e} (임성희폰 得物 앱 직접 확인)'
                         )
                         or ''
                     )
                 except Exception as exc:  # noqa: BLE001 — 표시 실패가 보고를 막으면 안 된다
                     flagged = f'재고X 표시 실패: {type(exc).__name__}'
-                return 'needs_human', 'out_of_stock', f'{reasons} · {flagged}'.strip(' ·')
-            fail = 'margin' if any('마진' in str(e) for _, e in failures) else 'unknown'
-            return 'needs_human', fail, reasons
-        shop = '淘宝 후랑차오(식화 화이트리스트)' if via_taobao else '得物'
+                return 'needs_human', 'out_of_stock', f'{e} · {flagged}'.strip(' ·')
+            fail = 'margin' if '마진' in str(e) else 'unknown'
+            return 'needs_human', fail, str(e)
+        shop = '得物'
         note = (
             f'{shop} 앱(임성희폰) 결제 ¥{res.paid_cny:g}(상품 ¥{res.item_cny:g}+알리페이 카드수수료) × {res.rate:g} × 현대카드 청구할인 {HYUNDAI_BILLING_FACTOR}'
             f' · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
         )
         # 주문계정(得物 계정)을 같이 넣어야 삼바 상태가 배송대기중으로 넘어간다(사용자 2026-10-01: 계정을 안 골라
         # 주문접수로 남았다)
-        account_id = wave.only_sourcing_account_id('TAOBAO' if via_taobao else 'DEWU')  # type: ignore[attr-defined]
+        account_id = wave.only_sourcing_account_id('DEWU')  # type: ignore[attr-defined]
         wave.record_sourcing(  # type: ignore[attr-defined]
             wave_key,
             sourcing_order_number=res.order_no,
@@ -649,7 +629,7 @@ def make_shihuo_handler(
         return (
             'done',
             None,
-            f'{"淘宝" if via_taobao else "得物"} {res.order_no} 원가 {res.cost_krw:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%',
+            f'得物 {res.order_no} 원가 {res.cost_krw:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%',
         )
 
     return handle
