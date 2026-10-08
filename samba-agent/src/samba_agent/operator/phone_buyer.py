@@ -191,7 +191,7 @@ class PhoneToolbox:
             return '이미 결제했다 — finish 로 주문번호를 남겨라.'
         if not any(allowed in (shop or '') for allowed in ALLOWED_SHOPS):
             return f'가게 "{shop}" 는 화이트리스트({" · ".join(ALLOWED_SHOPS)})가 아니다 — 결제하지 않는다.'
-        if self.phone.top_package() != ALIPAY:
+        if not alipay_window_front(self.phone):
             return (
                 '알리페이 결제창이 앞에 없다 — 주문 확인 화면에서 立即支付 로 결제창을 먼저 띄워라.'
             )

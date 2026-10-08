@@ -150,6 +150,7 @@ def order_no_after_label(nodes: list[Node]) -> str | None:
     return None
 
 
+_LABELED_AMOUNT = re.compile(r'(?:订单金额|주문금액)[,，:：\s]*[¥￥]\s*(\d+(?:,\d{3})*(?:\.\d+)?)')
 _AMOUNT = re.compile(r'^[¥￥]?\s*(\d+(?:,\d{3})*(?:\.\d+)?)$')
 
 
@@ -160,17 +161,30 @@ def alipay_order_amount(nodes: list[Node]) -> float | None:
     비밀번호를 넣기 전에 결제창이 청구하려는 금액을 직접 읽는다. 수수료(3%)는 따로 줄에 붙으므로 뺀 값이다.
     """
     labels = ('订单金额', '주문금액', 'Order total')
+
+    def shown(n: Node) -> str:
+        # 淘宝 앱 안 결제창은 글자가 접근성 설명(content-desc)에만 있다 — '订单金额,¥ 549.00' 한 덩어리로 온다(실기 2026-10-08)
+        return (n.text or n.desc or '').strip()
+
+    for n in nodes:
+        combined = _LABELED_AMOUNT.search(shown(n))
+        if combined:
+            try:
+                return float(combined.group(1).replace(',', ''))
+            except ValueError:
+                return None
     ordered = sorted(nodes, key=lambda n: (n.y, n.x))
     for i, n in enumerate(ordered):
-        if any(label in n.text for label in labels):
+        if any(label in shown(n) for label in labels):
             # 같은 줄 오른쪽이나 바로 다음 요소에서 금액을 찾는다
             for m in ordered[i : i + 4]:
-                found = _AMOUNT.match(m.text.strip().replace('¥ ', '¥').replace('￥ ', '￥'))
+                found = _AMOUNT.match(shown(m).replace('¥ ', '¥').replace('￥ ', '￥'))
                 if found:
                     try:
                         return float(found.group(1).replace(',', ''))
                     except ValueError:
                         return None
+    return None
     return None
 
 

@@ -94,3 +94,21 @@ def test_조작_횟수가_한도를_넘으면_멈춘다():
     for _ in range(170):
         out = tb.tap(10, 10)
     assert '넘었다' in out
+
+
+def test_淘宝_앱_안_결제창의_설명_글자에서도_주문금액을_읽는다():
+    """실기 2026-10-08: 淘宝 결제창은 글자가 content-desc 에만 있다('订单金额,¥ 549.00')."""
+    from samba_agent.ops.dewu_order import alipay_order_amount
+
+    nodes = [
+        Node('', '支付金额565.47元', '', 359, 255),
+        Node('', '订单金额,¥ 549.00', '', 359, 456),
+        Node('', '国际卡手续费(3%),+¥ 16.47', '', 359, 508),
+        Node('', '密码共6位，已输入0位', '', 359, 978),
+    ]
+    assert alipay_order_amount(nodes) == 549.0
+    phone = FakePhone('com.taobao.taobao', nodes)
+    approved: list[int] = []
+    tb = _box(phone, approved, max_cny=680)
+    out = tb.pay('后浪潮品奥莱折扣店', 549.0)
+    assert '완료' in out and approved == [round(549.0 * 1.03 * 200.0)]
