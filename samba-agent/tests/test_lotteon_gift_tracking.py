@@ -316,3 +316,23 @@ def test_주문번호_옆에_송장이_없으면_품번으로_다시_찾는다(t
     assert phone.typed == [order_no, 'NJ3LS06J']
     assert res == {'read': 1, 'sent': 1, 'skipped': 0}
     assert wave.calls[0]['sourcing_order_number'] == order_no
+
+
+def test_택배사를_못_읽은_송장은_롯데택배로_넣지_않고_건너뛴다(monkeypatch, tmp_path):
+    from samba_agent.ops import lotteon_gift_tracking as g
+
+    notice = g.GiftNotice(recipient='이받음', product='상품', carrier='', number='537655612222')
+    sent: list[dict] = []
+
+    class Wave:
+        def write_lotteon_gift_tracking(self, **kw):
+            sent.append(kw)
+            return {'action': 'shipped'}
+
+    monkeypatch.setattr(g, 'read_notices', lambda *a, **k: [notice])
+    monkeypatch.setattr(g, 'pair_order_no', lambda n, ns: '')
+    phone = type('P', (), {'key': lambda self, k: None, '_run': lambda self, *a, **k: ''})()
+    out = g.collect_lotteon_gift_tracking(
+        Wave(), phone, g.SeenStore(tmp_path / 'seen.json'), idle=None
+    )
+    assert sent == [] and out is not None and out['skipped'] == 1

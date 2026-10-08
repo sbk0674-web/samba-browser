@@ -438,8 +438,14 @@ def collect_lotteon_gift_tracking(
         out['read'] += 1
         if seen.done(notice.number):
             continue
+        if not notice.carrier:
+            # 택배사를 못 읽었으면 롯데택배로 넣지 않는다 — 한진 송장이 롯데택배로 저장돼 조회가 안 되던 건(2026-10-08 부천 소사구).
+            # 알림 글이 잘려 택배사 줄이 빠졌을 수 있다 — 다음 바퀴에 다시 본다
+            log.warning('[롯데ON 선물 송장] 택배사를 못 읽어 건너뜀 — 송장 %s', notice.number)
+            out['skipped'] += 1
+            continue
         res = wave.write_lotteon_gift_tracking(  # type: ignore[attr-defined]
-            company=notice.carrier or '롯데택배',
+            company=notice.carrier,
             number=notice.number,
             sourcing_order_number=pair_order_no(notice, notices),
             customer_name=notice.recipient,
