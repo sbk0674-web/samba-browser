@@ -120,7 +120,7 @@ export class SyncEngine {
     }
   }
 
-  private async runOnce(opts: { poll?: boolean } = {}): Promise<SyncStatus> {
+  private async runOnce(_opts: { poll?: boolean } = {}): Promise<SyncStatus> {
     try {
       await this.deps.onCycleStart?.()
       // 먼저 받고(pull) 나서 보낸다(push) — 로컬 변경이 원격 최신본 위에 얹히도록
