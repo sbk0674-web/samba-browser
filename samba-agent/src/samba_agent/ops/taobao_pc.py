@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 BridgeCall = Callable[[str, dict[str, object]], str]
 
 SHOPBACK_TAOBAO = 'https://www.shopback.co.kr/redirect/alink/8906'
+# 샵백 티몰(Tmall) 4% — 상품 주소가 detail.tmall.com 이면 이쪽으로 들어간다(2026-10-09 확인)
+SHOPBACK_TMALL = 'https://www.shopback.co.kr/redirect/alink/8907'
 ALLOWED_SHOPS = ('后浪潮品奥莱折扣店', '品牌官方店')
 CN_MONTHS = (
     '一月',
@@ -133,7 +135,8 @@ def buy_on_taobao_pc(
         return page
 
     # 1) 샵백 진입 → 2) 상품
-    call('new_tab', {'url': SHOPBACK_TAOBAO, 'profile': profile})
+    entry = SHOPBACK_TMALL if 'tmall.com' in item_url else SHOPBACK_TAOBAO
+    call('new_tab', {'url': entry, 'profile': profile})
     sleep(8)
     call('new_tab', {'url': item_url, 'profile': profile})
     page = wait_tree(r'"(领券购买|立即购买)"')

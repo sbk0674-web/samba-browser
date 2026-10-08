@@ -704,7 +704,7 @@ def make_shihuo_handler(
         res = None
         shop = '得物'
         failures: list[str] = []
-        if seller_name and '淘宝' in seller_name and pc_call is not None:
+        if seller_name and ('淘宝' in seller_name or '天猫' in seller_name) and pc_call is not None:
             pc = _buy_taobao_pc(
                 pc_call,
                 detail,

@@ -133,13 +133,14 @@ def parse_suppliers(payload: dict[str, Any]) -> list[SupplierLink]:
 
 
 def whitelisted_taobao(rows: list[SupplierLink]) -> list[SupplierLink]:
-    """淘宝 화이트리스트 가게 행만(상품 주소가 있는 것) — 싼 순."""
+    """淘宝·天猫 화이트리스트 가게 행만(상품 주소가 있는 것) — 싼 순."""
+    # 天猫(티몰)도 淘宝 결제(알리페이 결제대)를 쓴다 — 品牌官方店 행은 detail.tmall.com 주소다(실기 2026-10-09 A-SN241632285)
     return [
         r
         for r in rows
-        if '淘宝' in r.store
+        if ('淘宝' in r.store or '天猫' in r.store)
         and any(shop in r.name for shop in ALLOWED_SHOPS)
-        and r.url.startswith('https://item.taobao.com/')
+        and r.url.startswith(('https://item.taobao.com/', 'https://detail.tmall.com/'))
     ]
 
 

@@ -100,3 +100,31 @@ def test_사이즈의_식화_sku를_고른다():
     assert sku_id_of(html, '37') == '395390827'
     with pytest.raises(ShihuoLinkError):
         sku_id_of(html, '45')
+
+
+def test_天猫_品牌官方店_행도_PC_구매_후보다():
+    """실기 2026-10-09 A-SN241632285: 최저가가 天猫 品牌官方店(detail.tmall.com)."""
+    payload = {
+        'data': {
+            'list': [
+                {
+                    'supplier_info': {
+                        'store_name': '天猫',
+                        'supplier_name': '品牌官方店',
+                        'display_price': '300',
+                        'href': _href('https://detail.tmall.com/item.htm?id=852893547534&skuId=1'),
+                    }
+                },
+                {
+                    'supplier_info': {
+                        'store_name': '淘宝',
+                        'supplier_name': '雷动体育',
+                        'display_price': '500',
+                        'href': _href('https://item.taobao.com/item.htm?id=1084695554250'),
+                    }
+                },
+            ]
+        }
+    }
+    rows = whitelisted_taobao(parse_suppliers(payload))
+    assert [(r.store, r.name) for r in rows] == [('天猫', '品牌官方店')]
