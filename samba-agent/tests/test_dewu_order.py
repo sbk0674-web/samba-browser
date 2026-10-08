@@ -518,3 +518,17 @@ def test_淘宝_PC_구매가_결제됐을_수_있으면_다음_순위로_넘어�
     )
     result, code, _ = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'needs_human' and code == 'pay_interrupted'
+
+
+def test_95分_중고_표시가_있으면_중고로_본다():
+    """실기 2026-10-08 A-SN242815440: 95分 중고(SS级) 카드를 골라 결제했다."""
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    assert dewu_order.used_marker([Node('SS级 44⅔码', '', '', 447, 638)]) == 'SS级'
+    assert dewu_order.used_marker([Node('', '闲置商品仅此一件', '', 300, 1140)]) == '闲置'
+    assert (
+        dewu_order.used_marker(
+            [Node('立即购买', '', '', 360, 1450), Node('¥426', '', '', 600, 1450)]
+        )
+        is None
+    )

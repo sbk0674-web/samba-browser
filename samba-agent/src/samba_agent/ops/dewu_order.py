@@ -188,6 +188,21 @@ def alipay_order_amount(nodes: list[Node]) -> float | None:
     return None
 
 
+# 득물 안의 중고 매장(95分) 표시 — 실기 2026-10-08 A-SN242815440: 검색 결과에서 95分 중고(SS级) 카드를 골라 결제했다.
+# 크림은 새상품만 판다 — 이 표시가 보이면 결제하지 않는다
+USED_MARKERS = ('95分', 'SS级', '闲置', '二手')
+
+
+def used_marker(nodes: list[Node]) -> str | None:
+    """화면에 중고 표시가 있으면 그 글자, 없으면 None."""
+    for n in nodes:
+        t = f'{n.text or ""} {n.desc or ""}'
+        for m in USED_MARKERS:
+            if m in t:
+                return m
+    return None
+
+
 def dismiss_subsidy_dialog(phone: Phone, sleep: Callable[[float], None]) -> bool:
     """'领取补贴 — 실명인증(去实名)' 팝업이 떠 있으면 '再想想'(다시 생각)으로 닫는다. 닫았으면 True.
 
@@ -313,6 +328,11 @@ def buy_on_dewu(
         raise DewuOrderError(f'得物 검색 결과에 {model} 상품이 없다')
     phone.tap(card.x, card.y)
     nodes = wait_for(lambda ns: find_text(ns, '立即购买') is not None, 15)
+    used = used_marker(nodes)
+    if used:
+        raise DewuOrderError(
+            f'得物 상품 화면에 중고 표시({used})가 있다 — 95分 중고 상품은 사지 않는다(결제하지 않음)'
+        )
     buy = find_text(nodes, '立即购买')
     if buy is None:
         raise DewuOrderError('상품 화면에서 立即购买 를 못 찾았다')
@@ -358,6 +378,11 @@ def buy_on_dewu(
     if price > max_cny:
         raise DewuOrderError(
             f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)'
+        )
+    used = used_marker(nodes)
+    if used:
+        raise DewuOrderError(
+            f'得物 구매창에 중고 표시({used})가 있다 — 95分 중고 상품은 사지 않는다(결제하지 않음)'
         )
     # 5) 하단 결제 버튼 → 바로 알리페이가 뜨거나, 먼저 '确认订单'(주문 확인) 화면이 뜬다
     # 하단 버튼이 둘이면(品牌官方 ¥1090 / 일반배송 ¥631) 싼 일반배송을 누른다 — 왼쪽(비싼 쪽)을 눌러 ¥1090 을 결제한 사고(2026-10-08)
