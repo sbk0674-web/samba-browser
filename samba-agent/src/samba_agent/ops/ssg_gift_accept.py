@@ -18,6 +18,7 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Self
 
 log = logging.getLogger(__name__)
 
@@ -25,13 +26,84 @@ DEFAULT_ADB = os.path.expanduser(r'~\Downloads\pt\platform-tools\adb.exe')
 # 결제 폰(임성희 폰 SM-A426N) — 무선 디버깅이면 기기 이름이 'adb-<시리얼>-…' 이나 IP:포트라 시리얼을 품은 줄을 찾는다
 DEFAULT_PHONE = 'R5CR30LFATY'
 KAKAO = 'com.kakao.talk'
-# 폰을 쓰는 주기 작업(得物 송장·롯데ON 선물 송장)이 서로 겹치지 않게 잡는 자물쇠
-PHONE_BUSY = threading.Lock()
+# 폰을 쓰는 모든 작업(得物 구매·송장, 롯데ON 선물 송장, SSG 선물 수락)이 서로 겹치지 않게 잡는 자물쇠 — 아래 PhoneLock
 # 사람이(또는 다른 세션이) 폰을 직접 만지는 동안 samba-agent 폴더에 만들어 두는 파일 — 있으면 주기 작업이 폰에 손대지 않는다
 PHONE_HOLD_FILE = 'PHONE_HOLD'
 _AGENT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
+
+
+class PhoneLock:
+    """폰 하나를 한 번에 한 작업만 쓰게 하는 자물쇠 — 스레드 사이는 RLock, 프로세스 사이는 파일 잠금.
+
+    예전엔 threading.Lock 이라 같은 프로세스 안에서만 통했다. 그래서 다른 프로세스(수동 스크립트·다른 세션)나
+    잠금을 안 쓰던 SSG 선물 수락이 득물 구매·롯데ON 선물 송장과 폰 화면을 두고 부딪쳐 검색 버튼·결제창을 못 찾고
+    멈췄다(2026-10-08). 파일 잠금은 프로세스가 죽으면 운영체제가 풀어 줘서 남는 잠금이 없다.
+    같은 스레드가 다시 들어와도(재진입) 막히지 않는다.
+    """
+
+    def __init__(self, path: str, poll_s: float = 0.5) -> None:
+        self._path = path
+        self._poll = poll_s
+        self._rlock = threading.RLock()
+        self._depth = 0
+        self._fh: object | None = None
+
+    def _try_file_lock(self) -> bool:
+        fh = open(self._path, 'a+b')  # noqa: SIM115 — 잠금을 쥐고 있는 동안 열어 둔다
+        try:
+            if os.name == 'nt':
+                import msvcrt
+
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fh.close()
+            return False
+        self._fh = fh
+        return True
+
+    def acquire(self, timeout: float | None = None) -> bool:
+        if not self._rlock.acquire(timeout=-1 if timeout is None else timeout):
+            return False
+        if self._depth == 0:
+            end = None if timeout is None else time.monotonic() + timeout
+            while not self._try_file_lock():
+                if end is not None and time.monotonic() >= end:
+                    self._rlock.release()
+                    return False
+                time.sleep(self._poll)
+        self._depth += 1
+        return True
+
+    def release(self) -> None:
+        self._depth -= 1
+        if self._depth == 0 and self._fh is not None:
+            fh, self._fh = self._fh, None
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+
+                    fh.seek(0)  # type: ignore[attr-defined]
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+            finally:
+                fh.close()  # type: ignore[attr-defined]
+        self._rlock.release()
+
+    def __enter__(self) -> Self:
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.release()
+
+
+PHONE_BUSY = PhoneLock(os.path.join(_AGENT_ROOT, 'phone.lock'))
 
 
 def phone_on_hold() -> bool:
@@ -523,22 +595,22 @@ def make_after_done(
         if serial is None:
             return 'SSG 선물 수락 못 함 — 결제 폰이 연결돼 있지 않다(카카오톡에서 직접 수락 필요, 기한 1주일)'
         phone = Phone(adb_path, serial)
-        try:
-            # 주문번호로 카톡 검색해 받는다(스크롤 탐색은 알림이 쌓이면 못 찾는다) — 번호를 모르거나 실패하면 옛 방식으로
-            order_no = source_order_no_of(out)
-            if order_no:
-                from samba_agent.ops.ssg_gift_search import accept_ssg_gift_by_search
+        # 득물 구매·롯데ON 선물 송장과 폰 화면을 두고 부딪치지 않게 자물쇠를 잡고 한다
+        with PHONE_BUSY:
+            try:
+                # 주문번호로 카톡 검색해 받는다(스크롤 탐색은 알림이 쌓이면 못 찾는다) — 번호를 모르거나 실패하면 옛 방식으로
+                order_no = source_order_no_of(out)
+                if order_no:
+                    from samba_agent.ops.ssg_gift_search import accept_ssg_gift_by_search
 
-                try:
-                    return 'SSG ' + accept_ssg_gift_by_search(phone, order_no)
-                except GiftAcceptError as e:
-                    log.warning('선물 수락(카톡 검색) 실패 — 옛 방식으로 다시: %s', e)
-            return 'SSG ' + accept_ssg_gift(phone, model_code_of(sku) or '', sku=sku)
-        except GiftAcceptError as e:
-            return f'SSG 선물 수락 실패 — {e}(카카오톡에서 직접 수락 필요)'
-        except (OSError, subprocess.TimeoutExpired) as e:
-            return (
-                f'SSG 선물 수락 실패 — 폰 명령 오류 {type(e).__name__}(카카오톡에서 직접 수락 필요)'
-            )
+                    try:
+                        return 'SSG ' + accept_ssg_gift_by_search(phone, order_no)
+                    except GiftAcceptError as e:
+                        log.warning('선물 수락(카톡 검색) 실패 — 옛 방식으로 다시: %s', e)
+                return 'SSG ' + accept_ssg_gift(phone, model_code_of(sku) or '', sku=sku)
+            except GiftAcceptError as e:
+                return f'SSG 선물 수락 실패 — {e}(카카오톡에서 직접 수락 필요)'
+            except (OSError, subprocess.TimeoutExpired) as e:
+                return f'SSG 선물 수락 실패 — 폰 명령 오류 {type(e).__name__}(카카오톡에서 직접 수락 필요)'
 
     return after
