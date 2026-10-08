@@ -529,6 +529,51 @@ def _latest_order_no(phone: Phone, sleep: Callable[[float], None]) -> str | None
     return None
 
 
+def _buy_taobao_pc(
+    pc_call: Callable[[str, dict[str, object]], str],
+    detail: object,
+    *,
+    eu: str,
+    max_cny: float,
+    rate: float,
+) -> tuple[str, ...] | None:
+    """식화 판매처 목록 → 화이트리스트 淘宝 가게(싼 순) → PC 샵백 경유 구매.
+
+    돌려주는 값: ('done', 주문번호, 청구위안, 가게, 상품위안) · ('paid?', 사유) · ('fail', 사유)
+    """
+    import os
+
+    from samba_agent.ops.shihuo_link import ShihuoLinkError, fetch_suppliers, whitelisted_taobao
+    from samba_agent.ops.taobao_pc import TaobaoPcError, buy_on_taobao_pc
+    from samba_agent.repair.agent import _run_sync
+
+    expiry = os.environ.get('SAMBA_TAOBAO_CARD_EXPIRY', '').strip()
+    if not re.fullmatch(r'\d{2}/\d{2}', expiry):
+        return ('fail', '카드 유효기간(SAMBA_TAOBAO_CARD_EXPIRY)이 없다 — 淘宝 PC 구매 안 함')
+    source_url = str(getattr(detail, 'source_url', '') or '')
+    try:
+        rows = _run_sync(fetch_suppliers(source_url, eu))
+    except (ShihuoLinkError, Exception) as e:  # noqa: BLE001 — 식화 접속 실패는 다음 순위로
+        return ('fail', f'식화 판매처 목록을 못 읽었다: {type(e).__name__}: {str(e)[:80]}')
+    reasons: list[str] = []
+    for cand in whitelisted_taobao(rows):
+        if cand.price_cny > max_cny:
+            reasons.append(f'{cand.name} ¥{cand.price_cny:g} > 상한 ¥{max_cny:.0f}')
+            continue
+        try:
+            res = buy_on_taobao_pc(pc_call, cand.url, max_cny=max_cny, expiry=expiry, eu_size=eu)
+        except TaobaoPcError as e:
+            if e.paid:
+                return ('paid?', str(e))
+            reasons.append(f'{cand.name}: {e}')
+            continue
+        return ('done', res.order_no, res.charge_cny, cand.name, res.item_cny)
+    return (
+        'fail',
+        ' / '.join(reasons) or '식화에 화이트리스트 淘宝 가게(상품 주소 있는 행)가 없다',
+    )
+
+
 def make_shihuo_handler(
     wave: object,
     approve: Callable[[int], str],
@@ -539,6 +584,7 @@ def make_shihuo_handler(
     buyer_factory: Callable[[], Any] | None = None,
     approve_other: Callable[[int], str] | None = None,
     phone_buyer_enabled: bool = False,
+    pc_call: Callable[[str, dict[str, object]], str] | None = None,
 ) -> Callable[[object, object], tuple[str, str | None, str]]:
     """워커가 SHIHUO 주문에 부르는 처리기 — (작업, 주문) → (결과 'done'|'needs_human', 오류 코드, 보고 한 줄)."""
     import os
@@ -597,6 +643,39 @@ def make_shihuo_handler(
         res = None
         shop = '得物'
         failures: list[str] = []
+        if seller_name and '淘宝' in seller_name and pc_call is not None:
+            pc = _buy_taobao_pc(
+                pc_call,
+                detail,
+                eu=eu,
+                max_cny=max_cny,
+                rate=rate,
+            )
+            if pc is not None and pc[0] == 'done':
+                order_no, charge_cny = pc[1], pc[2]
+                cost = round(charge_cny * rate * HYUNDAI_BILLING_FACTOR)
+                wave.record_sourcing(  # type: ignore[attr-defined]
+                    wave_key,
+                    sourcing_order_number=order_no,
+                    cost=cost,
+                    shipping_fee=CN_SHIPPING_FEE,
+                    sourcing_account_id=wave.only_sourcing_account_id('TAOBAO'),  # type: ignore[attr-defined]
+                    notes=(
+                        f'淘宝 {pc[3]}(식화 화이트리스트) PC 샵백 경유 결제 ¥{charge_cny:g}(상품 ¥{pc[4]:g}+카드수수료 3%)'
+                        f' × {rate:g} × 현대카드 청구할인 {HYUNDAI_BILLING_FACTOR} · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
+                    ),
+                )
+                margin = (revenue - cost - CN_SHIPPING_FEE) / revenue * 100
+                return (
+                    'done',
+                    None,
+                    f'淘宝 {order_no} 원가 {cost:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%',
+                )
+            if pc is not None and pc[0] == 'paid?':
+                return 'needs_human', 'pay_interrupted', pc[1]
+            # 淘宝 에서 못 샀다(품절·상한·화면) — 다음 순위 得物 로 넘어간다(마진 상한은 得物 쪽도 그대로)
+            log.info('淘宝 PC 구매 실패 — 다음 순위 得物: %s', pc[1] if pc else '')
+            seller_name = '得物'
         if seller_name and '得物' not in seller_name and not phone_buyer_enabled:
             # 淘宝는 샵백(PC 브라우저)을 켜고 사야 한다 — 폰 앱 구매는 샵백 적립이 빠진다(사용자 2026-10-08 반복 지적).
             # PC 샵백 구매 흐름이 생기기 전까지 득물도 열지 않고 사람에게 넘긴다

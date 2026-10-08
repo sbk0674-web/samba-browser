@@ -474,3 +474,47 @@ def test_폰_구매_AI가_꺼져_있으면_淘宝_최저가_주문은_득물도_
     handle = make_shihuo_handler(_wave_for('淘宝', []), lambda krw: 'ok', rate_of=lambda: 200.0)
     result, code, line = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'needs_human' and code == 'unknown' and '샵백' in line
+
+
+def test_淘宝_최저가면_PC_샵백_경로로_사고_淘宝_계정으로_기입한다(monkeypatch):
+    _patch_phone(monkeypatch)
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order.buy_on_dewu',
+        lambda *a, **k: pytest.fail('得物을 열면 안 된다'),
+    )
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order._buy_taobao_pc',
+        lambda call, detail, **kw: (
+            'done',
+            '5127815341021011940',
+            565.47,
+            '后浪潮品奥莱折扣店',
+            549.0,
+        ),
+    )
+    records: list = []
+    handle = make_shihuo_handler(
+        _wave_for('淘宝', records), lambda krw: 'ok', rate_of=lambda: 200.0, pc_call=lambda t, a: ''
+    )
+    result, _, line = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'done' and '5127815341021011940' in line
+    kw = records[0][1]
+    assert kw['sourcing_account_id'] == 'acct_TAOBAO'
+    assert kw['cost'] == round(565.47 * 200.0 * 0.973)
+
+
+def test_淘宝_PC_구매가_결제됐을_수_있으면_다음_순위로_넘어가지_않는다(monkeypatch):
+    _patch_phone(monkeypatch)
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order.buy_on_dewu',
+        lambda *a, **k: pytest.fail('이중 결제 위험'),
+    )
+    monkeypatch.setattr(
+        'samba_agent.ops.dewu_order._buy_taobao_pc',
+        lambda call, detail, **kw: ('paid?', '결제 완료 화면을 못 봤다'),
+    )
+    handle = make_shihuo_handler(
+        _wave_for('淘宝', []), lambda krw: 'ok', rate_of=lambda: 200.0, pc_call=lambda t, a: ''
+    )
+    result, code, _ = handle(None, SimpleNamespace(order_no='A1'))
+    assert result == 'needs_human' and code == 'pay_interrupted'

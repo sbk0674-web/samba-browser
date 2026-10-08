@@ -153,6 +153,19 @@ def _alipay_approve(bridge: BridgeClient, merchant: str = '得物') -> Callable[
     return approve
 
 
+def _pc_call(bridge: BridgeClient) -> Callable[[str, dict[str, object]], str]:
+    """淘宝 PC 구매용 브릿지 호출(레인 taobao) — 결과 글자만 돌려준다."""
+    scoped = bridge.scoped(['new_tab', 'run_js', 'fill_secret']).with_lane('taobao')
+
+    def call(tool: str, args: dict[str, object]) -> str:
+        try:
+            return scoped.call(tool, **args).result
+        except BridgeError as e:
+            return f'error: {e}'
+
+    return call
+
+
 def make_cancel_export(
     settings: 'Settings', wave: WaveClient
 ) -> Callable[[str], str | None] | None:
@@ -448,6 +461,7 @@ def main() -> None:
                         approve_other=_alipay_approve(
                             bridge.scoped(['phone_approve_payment']), merchant='淘宝'
                         ),
+                        pc_call=_pc_call(bridge),
                     )
                 }
                 if wave is not None
