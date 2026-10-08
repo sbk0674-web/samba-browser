@@ -708,6 +708,44 @@ def make_shihuo_handler(
             # 淘宝 에서 못 샀다(품절·상한·화면) — 다음 순위 得物 로 넘어간다(마진 상한은 得物 쪽도 그대로)
             log.info('淘宝 PC 구매 실패 — 다음 순위 得物: %s', pc[1] if pc else '')
             seller_name = '得物'
+        if seller_name and '唯品会' in seller_name:
+            # 唯品会 최저가 — 임성희폰 唯品会 앱으로 산다(10/6 실기 성공 절차 이식, 사용자 2026-10-08)
+            from samba_agent.ops.vip_order import buy_on_vip
+
+            try:
+                with PHONE_BUSY:
+                    vip = buy_on_vip(
+                        Phone(adb_path, serial),
+                        model,
+                        eu,
+                        max_cny=max_cny,
+                        approve=approve,
+                        rate=rate,
+                    )
+            except DewuOrderError as e:
+                if e.paid:
+                    return 'needs_human', 'pay_interrupted', f'唯品会: {e}'
+                log.info('唯品会 구매 실패 — 다음 순위 得物: %s', e)
+                seller_name = '得物'
+            else:
+                cost = round(vip.paid_cny * rate * HYUNDAI_BILLING_FACTOR)
+                wave.record_sourcing(  # type: ignore[attr-defined]
+                    wave_key,
+                    sourcing_order_number=vip.order_no,
+                    cost=cost,
+                    shipping_fee=CN_SHIPPING_FEE,
+                    sourcing_account_id=wave.only_sourcing_account_id('VIPSHOP'),  # type: ignore[attr-defined]
+                    notes=(
+                        f'唯品会 앱(임성희폰) 결제 ¥{vip.paid_cny:g}(상품 ¥{vip.item_cny:g}+알리페이 카드수수료 3%) × {rate:g}'
+                        f' × 현대카드 청구할인 {HYUNDAI_BILLING_FACTOR} · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
+                    ),
+                )
+                margin = (revenue - cost - CN_SHIPPING_FEE) / revenue * 100
+                return (
+                    'done',
+                    None,
+                    f'唯品会 {vip.order_no} 원가 {cost:,}원 + 배송비 {CN_SHIPPING_FEE:,} · 마진 {margin:.1f}%',
+                )
         if seller_name and '得物' not in seller_name and not phone_buyer_enabled:
             # 淘宝는 샵백(PC 브라우저)을 켜고 사야 한다 — 폰 앱 구매는 샵백 적립이 빠진다(사용자 2026-10-08 반복 지적).
             # PC 샵백 구매 흐름이 생기기 전까지 득물도 열지 않고 사람에게 넘긴다
