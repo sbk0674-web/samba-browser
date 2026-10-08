@@ -609,6 +609,16 @@ def _buy_taobao_pc(
     from samba_agent.repair.agent import _run_sync
 
     expiry = os.environ.get('SAMBA_TAOBAO_CARD_EXPIRY', '').strip()
+    if not expiry:
+        # 하네스는 .env 를 설정 객체로만 읽고 환경변수로 올리지 않는다(실기 2026-10-09: 그래서 PC 경로가 건너뛰어졌다)
+        from pathlib import Path
+
+        env = Path('.env')
+        if env.exists():
+            found = re.search(
+                r'^SAMBA_TAOBAO_CARD_EXPIRY="?(\d{2}/\d{2})', env.read_text(encoding='utf-8'), re.M
+            )
+            expiry = found.group(1) if found else ''
     if not re.fullmatch(r'\d{2}/\d{2}', expiry):
         return ('fail', '카드 유효기간(SAMBA_TAOBAO_CARD_EXPIRY)이 없다 — 淘宝 PC 구매 안 함')
     source_url = str(getattr(detail, 'source_url', '') or '')
