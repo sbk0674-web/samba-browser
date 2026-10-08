@@ -31,6 +31,8 @@ log = logging.getLogger(__name__)
 # 식화 화이트리스트 가게 — kream_shadow._SUP_ALLOW_NAMES 와 같은 이름. 唯品会·得物 은 플랫폼 단위 화이트리스트다
 ALLOWED_SHOPS = ('后浪潮品奥莱折扣店', '品牌官方店')
 MAX_ACTIONS = 160
+NETWORK_RETRIES = 3
+NETWORK_MARKS = ('网络异常', '网络', '네트워크')
 DEFAULT_MAX_TURNS = 120
 DEFAULT_TIMEOUT_S = 900.0
 _ORDER_NO = re.compile(r'^\d{12,25}$')
@@ -282,6 +284,26 @@ class PhoneBuyer:
         self._query_fn = query_fn
 
     def buy(self, toolbox: PhoneToolbox, ctx: str) -> DewuResult:
+        """일시적인 네트워크 오류(식화 앱 网络异常)로만 포기했으면 폰을 초기화하고 최대 3번까지 다시 한다. 결제 뒤엔 다시 하지 않는다."""
+        for attempt in range(NETWORK_RETRIES):
+            try:
+                return self._buy_once(toolbox, ctx)
+            except DewuOrderError as e:
+                transient = (not e.paid) and any(k in str(e) for k in NETWORK_MARKS)
+                if not transient or attempt == NETWORK_RETRIES - 1:
+                    raise
+                log.info(
+                    '폰 구매 AI 네트워크 오류로 포기 — 초기화 후 다시(%d/%d)',
+                    attempt + 1,
+                    NETWORK_RETRIES,
+                )
+                toolbox.state.gave_up = None
+                toolbox.state.notes.clear()
+                toolbox.state.actions = 0
+                toolbox.sleep(20)
+        raise DewuOrderError('폰 구매 AI 재시도 소진')  # 도달하지 않는다
+
+    def _buy_once(self, toolbox: PhoneToolbox, ctx: str) -> DewuResult:
         """산다. 못 사면 DewuOrderError(결제 전), 결제됐는데 주문번호가 없으면 paid=True 로 던진다."""
         state = toolbox.state
         toolbox.reset()
