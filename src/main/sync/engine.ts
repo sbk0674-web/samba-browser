@@ -13,7 +13,7 @@ import { pushAll, type PushDeps } from './push'
 
 // 폴링은 Realtime 이 못 받은 변경을 줍는 보험이다 — 1분 폴링이 PC 여러 대에서 돌며 Supabase 무료 한도(Egress·Log)를
 // 넘겼다(2026-10-06, 10/8 제한 예고). Realtime(publication 등록) 뒤로는 5분이면 충분하다
-export const SYNC_POLL_INTERVAL_MS = 300_000
+export const SYNC_POLL_INTERVAL_MS = 60_000
 
 export interface EngineDeps extends PushDeps {
   /**
@@ -97,7 +97,8 @@ export class SyncEngine {
 
   /**
    * 지금 한 번 동기화한다. 이미 돌고 있으면 그 결과를 함께 기다린다.
-   * poll: 주기 폴링에서 온 호출 — Realtime 이 전부 살아 있으면 당기지 않고(heartbeat·대기 중인 푸시만) 끝낸다
+   * poll: 주기 폴링에서 온 호출. Realtime 이 살아 있어도 항상 당긴다 — 알림 한 번을 놓치면 그 변경을 영영 못 받는다
+   * (2026-10-08 2호기에서 지운 계정이 1호기에 8분 넘게 남았다). 당기기는 커서 이후만 받아 가볍다
    */
   syncNow(opts: { poll?: boolean } = {}): Promise<SyncStatus> {
     if (this.inFlight) return this.inFlight
@@ -122,16 +123,6 @@ export class SyncEngine {
   private async runOnce(opts: { poll?: boolean } = {}): Promise<SyncStatus> {
     try {
       await this.deps.onCycleStart?.()
-      if (opts.poll && this.realtimeLive()) {
-        // 변경은 Realtime 으로 이미 받았다 — 당기지 않는다. 대기 중인 로컬 변경만 있으면 보낸다
-        if (this.deps.outbox.count() > 0) await pushAll(this.deps, {})
-        this.online = true
-        this.authExpiredNotified = false
-        this.cyclesDone += 1
-        const status = this.status()
-        this.emit(status)
-        return status
-      }
       // 먼저 받고(pull) 나서 보낸다(push) — 로컬 변경이 원격 최신본 위에 얹히도록
       const pulled = await pullAll(this.deps)
       this.deps.onAfterPull?.(pulled)

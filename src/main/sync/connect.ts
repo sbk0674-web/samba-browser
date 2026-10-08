@@ -264,11 +264,18 @@ export class SyncConnection {
   private attachRecorders(): void {
     // 기록 시점의 활성 작업공간을 행마다 남긴다 — 나중에 작업공간을 바꿔도
     // 이미 쌓인 변경은 원래 작업공간의 uuid 로 올라간다
-    const recorder = createOutboxRecorder(
+    const base = createOutboxRecorder(
       this.deps.db,
       this.outbox,
       () => this.deps.workspace().localId
     )
+    // 지우거나 고치는 순간 곧바로 서버로 올린다 — 대기열에 쌓아 두고 다음 주기를 기다리면 그 사이 앱이 닫히거나
+    // 다른 PC 가 먼저 옛 값을 올려 삭제가 되살아났다(사용자 2026-10-08 2호기에서 지운 계정이 1호기에 남음).
+    // 짧게 모아(0.8초) 한 번만 돌린다. 대기열은 서버에 못 닿았을 때의 안전장치로만 남는다
+    const recorder: typeof base = (...args) => {
+      base(...args)
+      this.schedulePushNow()
+    }
     this.deps.vault.setOutboxRecorder(recorder)
     this.deps.settings.setOutboxRecorder(recorder)
     this.deps.bookmarks.setOutboxRecorder(recorder)
@@ -279,6 +286,17 @@ export class SyncConnection {
     if (local.getStateNumber(settingUpdatedAtKey('vault.salt')) === null) {
       this.deps.vault.ensureKeyMaterialRecorded?.()
     }
+  }
+
+  private pushTimer: ReturnType<typeof setTimeout> | null = null
+
+  private schedulePushNow(): void {
+    if (this.pushTimer || !this.engine) return
+    this.pushTimer = setTimeout(() => {
+      this.pushTimer = null
+      void this.deps.holder.syncNow()
+    }, 800)
+    this.pushTimer.unref?.()
   }
 
   private detachRecorders(): void {
