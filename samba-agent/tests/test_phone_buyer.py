@@ -13,6 +13,12 @@ class FakePhone:
         self.taps: list[tuple[int, int]] = []
         self.adb = 'adb'
         self.serial = 'S'
+        self.focus = ''
+
+    def _run(self, *args: str) -> str:
+        if args[:3] == ('shell', 'dumpsys', 'window'):
+            return f'  mCurrentFocus=Window{{1 u0 {self.focus}}}' if self.focus else ''
+        return ''
 
     def top_package(self) -> str:
         return self.top
@@ -167,3 +173,27 @@ def test_免密支付_버튼을_눌렀는데_비밀번호_창이_뜨면_결제�
     out = tb.pay_free('唯品会', 279.0, 360, 1446)
     assert '결제 전' in out and not tb.state.paid
     assert '완료' in tb.pay('唯品会', 279.0) and tb.state.paid
+
+
+def test_唯品会_결제_뒤에는_코드가_查看订单_을_눌러_주문_상세를_연다():
+    """실기 2026-10-09 A-SN242790097: 결제 뒤 누르기가 막혀 AI 가 订单编号 를 못 읽고 끝났다."""
+    phone = FakePhone(ALIPAY_PKG, _alipay('¥659.00'))
+    phone.focus = 'com.achievo.vipshop/com.achievo.vipshop.checkout.activity.PaymentSuccessHtmlActivity'
+
+    def tap(x, y):
+        phone.taps.append((x, y))
+        phone.focus = 'com.achievo.vipshop/com.achievo.vipshop.userorder.activity.OrderDetailActivity'
+
+    phone.tap = tap  # type: ignore[method-assign]
+    tb = PhoneToolbox(phone, lambda krw: 'ok', max_cny=700, rate=200.0, sleep=lambda s: None)
+    out = tb.pay('唯品会', 659.0)
+    assert '주문 상세를 열었다' in out and phone.taps == [(244, 360)] and tb.state.paid
+    # 결제 뒤 AI 의 누르기는 여전히 막혀 있다
+    assert '이미 결제' in tb.tap(300, 300)
+
+
+def test_淘宝_결제_뒤에는_唯品会_주문_상세를_누르지_않는다():
+    phone = FakePhone(ALIPAY_PKG, _alipay('¥214.20'))
+    tb = _box(phone, [])
+    assert '淘宝/앱 주문내역' in tb.pay('后浪潮品奥莱折扣店', 214.2)
+    assert phone.taps == []

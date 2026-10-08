@@ -253,7 +253,33 @@ class PhoneToolbox:
         self.state.paid = True
         self.state.item_cny = float(price_cny)
         self.state.paid_cny = charge
+        if self._open_vip_order_detail():
+            return f'결제 승인 완료(¥{charge:g}). 코드가 唯品会 주문 상세를 열었다 — screen 으로 订单编号 를 읽어 finish 를 불러라.'
         return f'결제 승인 완료(¥{charge:g}). 이제 淘宝/앱 주문내역에서 주문번호를 읽어 finish 를 불러라.'
+
+    def _focused_activity(self) -> str:
+        win = self.phone._run('shell', 'dumpsys', 'window')
+        m = re.search(r'mCurrentFocus=Window\{\S+ \S+ ([\w.]+/[\w.$]+)', win or '')
+        return m.group(1) if m else ''
+
+    def _open_vip_order_detail(self) -> bool:
+        """결제 뒤 唯品会 支付成功 화면이면 코드가 '查看订单' 을 눌러 주문 상세를 연다.
+
+        결제 뒤에는 AI 의 누르기가 막혀 있어(재결제·환불 버튼 방지) 订单编号 를 못 읽고 끝났다(실기 2026-10-09
+        A-SN242790097: 결제는 됐는데 번호 미기입). 支付成功 화면은 웹뷰라 요소가 없어 실측 좌표(244,360)를 누른다.
+        """
+        for _ in range(6):
+            if 'PaymentSuccess' in self._focused_activity():
+                break
+            self.sleep(2)
+        else:
+            return False
+        self.phone.tap(244, 360)
+        for _ in range(5):
+            self.sleep(2)
+            if 'OrderDetailActivity' in self._focused_activity():
+                return True
+        return False
 
     def pay_free(self, shop: str, total_cny: float, x: int, y: int) -> str:
         """비밀번호 없는 결제(支付宝免密支付) 버튼을 누른다 — 唯品会 确认订单 화면 전용(사용자 2026-10-09 "결제 전에 금액 뜨잖아").
@@ -278,6 +304,8 @@ class PhoneToolbox:
         self.state.paid = True
         self.state.item_cny = float(total_cny)
         self.state.paid_cny = float(total_cny)
+        if self._open_vip_order_detail():
+            return f'免密支付 로 결제됐다(실付 ¥{total_cny:g}). 코드가 주문 상세를 열었다 — screen 으로 订单编号 를 읽어 finish 를 불러라.'
         return f'免密支付 를 눌렀다(실付 ¥{total_cny:g}) — 결제된 것으로 본다. 订单 화면에서 订单编号 를 읽어 finish 를 불러라.'
 
     def finish(self, order_no: str) -> str:
