@@ -51,6 +51,12 @@ export interface SchedulePlaybookAccess {
   setSchedule(id: string, schedule: PlaybookSchedule): PlaybookDto | null
 }
 
+/** 이 PC 의 식별자(로컬에만 남는다) — 예약의 실행 주체를 가를 때 쓴다 */
+export interface ScheduleDevice {
+  id: string
+  name: string
+}
+
 export interface SchedulerDeps {
   playbooks: SchedulePlaybookAccess
   runs: ScheduleRunStore
@@ -58,6 +64,8 @@ export interface SchedulerDeps {
   isRunning: () => boolean
   /** AI 실행 경로가 연결돼 있는가 */
   aiConnected: () => boolean
+  /** 이 PC. 없으면(테스트) 실행 주체를 가르지 않고 예전처럼 모든 예약을 돌린다 */
+  device?: ScheduleDevice
   /** 렌더러에 "이 문구를 채팅에 넣어라" 고 알린다 */
   dispatch: (req: { token: string; playbookId: string; phrase: string }) => void
   /** 예약 상태가 바뀌었다(화면을 다시 읽게 한다) */
@@ -164,9 +172,12 @@ export class PlaybookScheduler {
     const playbooks = this.safeList()
     this.deps.runs.keepOnly(playbooks.map((p) => p.id))
     for (const playbook of playbooks) this.syncArming(now, playbook)
+    // 같은 계정의 다른 PC 가 맡은 예약은 돌리지 않는다. 주인이 없는 예약은 이 PC 가 자기 것으로 찍는다
+    // (찍힌 값이 동기화되면 다른 PC 는 손을 뗀다 — 그 사이 한 번 겹칠 수 있다)
+    const mine = playbooks.filter((p) => this.claimOrOwned(p))
     // 이미 예약 실행이 돌고 있거나 보내 둔 요청이 있으면 이번 틱은 아무것도 보내지 않는다
     if (this.pending !== null || this.active !== null) return
-    for (const playbook of playbooks) {
+    for (const playbook of mine) {
       const schedule = scheduleOf(playbook.schedule)
       if (dueAt(schedule, this.deps.runs.get(playbook.id), now) === null) continue
       // 다른 작업이 돌고 있으면 미룬다 — 실패도 건너뜀도 아니고 그냥 다음 틱을 기다린다
@@ -178,6 +189,26 @@ export class PlaybookScheduler {
       this.send(playbook, now)
       return
     }
+  }
+
+  /**
+   * 이 예약을 이 PC 가 돌려도 되는가. 주인이 이 PC 면 true, 다른 PC 면 false.
+   * 주인이 없으면(옛 예약·새 예약) 이 PC 를 주인으로 찍고 true — 예약이 아닌 플레이북은 건드리지 않는다
+   */
+  private claimOrOwned(playbook: PlaybookDto): boolean {
+    const device = this.deps.device
+    if (device === undefined) return true
+    const schedule = scheduleOf(playbook.schedule)
+    if (!isArmed(schedule)) return true
+    if (schedule.ownerDeviceId === undefined || schedule.ownerDeviceId === '') {
+      this.deps.playbooks.setSchedule(playbook.id, {
+        ...schedule,
+        ownerDeviceId: device.id,
+        ownerDeviceName: device.name
+      })
+      return true
+    }
+    return schedule.ownerDeviceId === device.id
   }
 
   /** 사용자가 카드에서 [지금 실행] 을 눌렀다. 다른 작업이 돌고 있으면 false */

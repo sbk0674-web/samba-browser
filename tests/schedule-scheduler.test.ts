@@ -37,7 +37,7 @@ interface Harness {
   rows: PlaybookDto[]
 }
 
-function harness(rows: PlaybookDto[], now: number): Harness {
+function harness(rows: PlaybookDto[], now: number, device?: { id: string; name: string }): Harness {
   const sent: { token: string; playbookId: string; phrase: string }[] = []
   const flags = { running: false, connected: true, now }
   const runs = new ScheduleRunStore(null, () => flags.now)
@@ -52,6 +52,7 @@ function harness(rows: PlaybookDto[], now: number): Harness {
       }
     },
     runs,
+    ...(device === undefined ? {} : { device }),
     isRunning: () => flags.running,
     aiConnected: () => flags.connected,
     dispatch: (req) => sent.push(req),
@@ -324,5 +325,61 @@ describe('예약 상태 목록', () => {
   it('수동 플레이북은 일시정지 대상이 아니다', () => {
     const h = harness([playbook('p1')], NOW)
     expect(h.scheduler.setPaused('p1', true)).toBe(false)
+  })
+})
+
+describe('같은 계정의 여러 PC — 실행 주체', () => {
+  const T = at(2026, 10, 8, 9, 5)
+  const me = { id: 'dev-me-0001', name: 'PC-ME' }
+
+  /** 어제 돌았고 오늘 09시 건이 밀려 있는 상태로 만든다(첫 틱에서 기준이 다시 잡히지 않게 armKey 를 맞춘다) */
+  function armedHarness(schedule: PlaybookSchedule): Harness {
+    const rows = [playbook('a', schedule)]
+    const h = harness(rows, T, me)
+    h.runs.set('a', {
+      armedAt: at(2026, 10, 1),
+      armKey: undefined,
+      lastRunAt: at(2026, 10, 7, 9, 0),
+      nextRunAt: null,
+      lastResult: 'ok',
+      lastSummary: '',
+      failStreak: 0,
+      history: []
+    })
+    h.scheduler.tick()
+    h.runs.patch('a', { armedAt: at(2026, 10, 1) })
+    h.sent.length = 0
+    return h
+  }
+
+  it('다른 PC 가 맡은 예약은 돌리지 않는다', () => {
+    const h = armedHarness({
+      ...daily('09:00'),
+      ownerDeviceId: 'dev-other-1',
+      ownerDeviceName: 'PC-OTHER'
+    })
+    h.scheduler.tick()
+    expect(h.sent).toHaveLength(0)
+    expect(h.rows[0].schedule?.ownerDeviceId).toBe('dev-other-1') // 주인을 빼앗지 않는다
+  })
+
+  it('이 PC 가 맡은 예약은 돌린다', () => {
+    const h = armedHarness({ ...daily('09:00'), ownerDeviceId: me.id, ownerDeviceName: me.name })
+    h.scheduler.tick()
+    expect(h.sent).toHaveLength(1)
+  })
+
+  it('주인이 없는 예약은 이 PC 를 주인으로 찍고 돌린다', () => {
+    const h = armedHarness(daily('09:00'))
+    h.scheduler.tick()
+    expect(h.rows[0].schedule?.ownerDeviceId).toBe(me.id)
+    expect(h.rows[0].schedule?.ownerDeviceName).toBe('PC-ME')
+    expect(h.sent).toHaveLength(1)
+  })
+
+  it('예약이 꺼진 플레이북은 주인을 찍지 않는다', () => {
+    const h = harness([playbook('a')], T, me)
+    h.scheduler.tick()
+    expect(h.rows[0].schedule?.ownerDeviceId).toBeUndefined()
   })
 })

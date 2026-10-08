@@ -1,3 +1,4 @@
+import { loadLocalDevice } from '../schedule/device'
 import { isSupabaseAnonKey, isSupabaseProjectUrl, type AuthState } from '../../shared/sync'
 import type { SyncBackend } from '../sync/backend'
 import {
@@ -263,7 +264,12 @@ export function registerIpc(
     chats.append({ chatId, role: 'assistant', content: entry.text, steps: entry.steps })
   })
   // 자동화 플레이북. 사용자 문장에 트리거가 들어 있으면 러너가 절차를 시스템 프롬프트에 덧붙인다
-  const playbooks = new PlaybookStore(settings)
+  // 이 PC 의 식별자 — 같은 계정의 여러 PC 가 같은 예약을 동시에 돌려 중복 실행하지 않게 실행 주체를 가른다
+  const scheduleDevice = loadLocalDevice(
+    join(app.getPath('userData'), 'device-id.json'),
+    os.hostname()
+  )
+  const playbooks = new PlaybookStore(settings, undefined, undefined, scheduleDevice)
   agent.setPlaybooks(() => playbooks.list())
   // AI 가 배운 절차를 플레이북에 덧붙일 수 있게 한다(저장 전 확인 카드는 도구가 띄운다)
   agent.setPlaybookEditor(playbooks)
@@ -311,6 +317,7 @@ export function registerIpc(
   const scheduler = new PlaybookScheduler({
     playbooks,
     runs: scheduleRuns,
+    device: scheduleDevice,
     isRunning: () => agent.isRunning(),
     aiConnected: () => agentBackend() !== 'none',
     // 렌더러가 이 문구를 평소 채팅과 똑같이 보낸다 — 진행 상황이 AI 패널에 그대로 보인다

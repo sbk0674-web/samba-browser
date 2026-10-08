@@ -17,7 +17,7 @@ import {
   type PlaybookDto,
   type PlaybookInput
 } from '../../shared/playbook'
-import { normalizeSchedule, type PlaybookSchedule } from '../../shared/schedule'
+import { isArmed, normalizeSchedule, type PlaybookSchedule } from '../../shared/schedule'
 
 /** 설정 저장소 중 이 저장소가 쓰는 부분만 (테스트에서 갈아 끼우기 쉽게 좁혀 둔다) */
 export interface PlaybookSettingsAccess {
@@ -59,12 +59,26 @@ export function withBuiltins(rows: readonly PlaybookDto[], now: number): Playboo
   return merged
 }
 
+/** 이 PC — 예약을 저장한 PC 가 그 예약의 실행 주체가 된다(같은 계정의 다른 PC 와 중복 실행을 막는다) */
+export interface StoreDevice {
+  id: string
+  name: string
+}
+
 export class PlaybookStore {
   constructor(
     private readonly settings: PlaybookSettingsAccess,
     private readonly now: () => number = () => Date.now(),
-    private readonly newId: () => string = randomUUID
+    private readonly newId: () => string = randomUUID,
+    private readonly device?: StoreDevice
   ) {}
+
+  /** 사용자가 저장한 예약이 켜져 있으면 이 PC 를 실행 주체로 찍는다. 꺼진 예약은 그대로 둔다 */
+  private ownedSchedule(raw: PlaybookSchedule): PlaybookSchedule {
+    const schedule = normalizeSchedule(raw)
+    if (this.device === undefined || !isArmed(schedule)) return schedule
+    return { ...schedule, ownerDeviceId: this.device.id, ownerDeviceName: this.device.name }
+  }
 
   /** 저장된 플레이북 전체(내장 포함). 내장이 빠져 있으면 채워서 저장까지 한다 */
   list(): PlaybookDto[] {
@@ -88,7 +102,7 @@ export class PlaybookStore {
         triggers,
         instructions,
         enabled: input.enabled,
-        ...(input.schedule === undefined ? {} : { schedule: normalizeSchedule(input.schedule) }),
+        ...(input.schedule === undefined ? {} : { schedule: this.ownedSchedule(input.schedule) }),
         updatedAt: now
       }
       this.save([...rows, created])
@@ -104,7 +118,7 @@ export class PlaybookStore {
       triggers,
       instructions,
       enabled: input.enabled,
-      ...(input.schedule === undefined ? {} : { schedule: normalizeSchedule(input.schedule) }),
+      ...(input.schedule === undefined ? {} : { schedule: this.ownedSchedule(input.schedule) }),
       updatedAt: now
     }
     const next = [...rows]

@@ -60,6 +60,14 @@ export interface PlaybookSchedule {
   model?: string
   /** 이 예약만 쓸 권한 모드. 비어 있으면 전역 설정을 따른다 */
   permissionMode?: SchedulePermissionMode
+  /**
+   * 이 예약을 실제로 돌리는 PC 의 기기 식별자. 같은 계정으로 여러 PC 를 쓰면 예약 설정이 모든 PC 로 동기화되는데,
+   * 실행 주체를 정하지 않으면 모든 PC 가 같은 시각에 따로 돌려 작업이 중복된다(2026-10-08).
+   * 비어 있으면 아직 주인이 없는 것 — 처음 틱을 만난 PC 가 자기 것으로 찍는다
+   */
+  ownerDeviceId?: string
+  /** 사람이 알아볼 PC 이름(화면 표시용) */
+  ownerDeviceName?: string
 }
 
 /** 'HH:MM' 형식(24시간) */
@@ -74,7 +82,9 @@ export const playbookScheduleSchema = z.object({
   paused: z.boolean(),
   pauseReason: z.enum(SCHEDULE_PAUSE_REASONS).optional(),
   model: z.string().max(120).optional(),
-  permissionMode: z.enum(SCHEDULE_PERMISSION_MODES).optional()
+  permissionMode: z.enum(SCHEDULE_PERMISSION_MODES).optional(),
+  ownerDeviceId: z.string().max(80).optional(),
+  ownerDeviceName: z.string().max(80).optional()
 })
 
 /** 예약을 걸지 않은 플레이북의 기본값(옛 플레이북에는 schedule 칸 자체가 없다) */
@@ -111,7 +121,13 @@ export function normalizeSchedule(raw: PlaybookSchedule | undefined): PlaybookSc
     paused: s.paused,
     ...(s.pauseReason === undefined ? {} : { pauseReason: s.pauseReason }),
     ...(s.model === undefined || s.model.trim() === '' ? {} : { model: s.model.trim() }),
-    ...(s.permissionMode === undefined ? {} : { permissionMode: s.permissionMode })
+    ...(s.permissionMode === undefined ? {} : { permissionMode: s.permissionMode }),
+    ...(s.ownerDeviceId === undefined || s.ownerDeviceId === ''
+      ? {}
+      : { ownerDeviceId: s.ownerDeviceId }),
+    ...(s.ownerDeviceName === undefined || s.ownerDeviceName === ''
+      ? {}
+      : { ownerDeviceName: s.ownerDeviceName })
   }
   if (s.kind === 'interval') return { ...base, everyMinutes: snapInterval(s.everyMinutes) }
   const at = typeof s.at === 'string' && HHMM_PATTERN.test(s.at) ? s.at : DEFAULT_SCHEDULE_AT
