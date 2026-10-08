@@ -106,7 +106,7 @@ def header_price(nodes: list[Node]) -> float | None:
     # 아래 줄에 결제 버튼이 둘이면(품牌官方 ¥1090 / 일반배송 ¥631, 실기 2026-10-08) 가장 싼 쪽이 일반배송이다
     prices = [
         float(m.group(1))
-        for n in nodes
+        for n in new_buy_buttons(nodes)
         if n.y >= 1300 and (m := _PRICE.match(n.text.replace(' ', '')))
     ]
     if prices:
@@ -190,7 +190,7 @@ def alipay_order_amount(nodes: list[Node]) -> float | None:
 
 # 득물 안의 중고 매장(95分) 표시 — 실기 2026-10-08 A-SN242815440: 검색 결과에서 95分 중고(SS级) 카드를 골라 결제했다.
 # 크림은 새상품만 판다 — 이 표시가 보이면 결제하지 않는다
-USED_MARKERS = ('95分', 'SS级', '闲置', '二手')
+USED_MARKERS = ('95分', 'SS级', '闲置', '二手', '全新微瑕', '微瑕')
 
 
 def used_marker(nodes: list[Node]) -> str | None:
@@ -201,6 +201,27 @@ def used_marker(nodes: list[Node]) -> str | None:
             if m in t:
                 return m
     return None
+
+
+def new_buy_buttons(nodes: list[Node]) -> list[Node]:
+    """구매창 하단(y>1380)의 가격 버튼 중 95分 중고 버튼을 뺀 것.
+
+    실기 2026-10-08(삼바 JP 44⅔): 버튼 ¥458(2~3일)·¥447(5~6일)·¥426 — ¥426 에는 95 배지와 '全新微瑕' 가 붙는다(y 1397,
+    x 711). 가장 싼 버튼을 고르면 중고를 산다. 배지·표시는 버튼 오른쪽 위(같은 줄 ±70px, 오른쪽 0~200px)에 있다
+    """
+    tags = [
+        n
+        for n in nodes
+        if n.y > 1300 and any(m in f'{n.text or ""} {n.desc or ""}' for m in USED_MARKERS)
+    ]
+    out = []
+    for n in nodes:
+        if n.y <= 1380 or not _PRICE.match((n.text or '').replace(' ', '')):
+            continue
+        if any(abs(t.y - n.y) <= 70 and 0 <= t.x - n.x <= 200 for t in tags):
+            continue
+        out.append(n)
+    return out
 
 
 def dismiss_subsidy_dialog(phone: Phone, sleep: Callable[[float], None]) -> bool:
@@ -328,11 +349,6 @@ def buy_on_dewu(
         raise DewuOrderError(f'得物 검색 결과에 {model} 상품이 없다')
     phone.tap(card.x, card.y)
     nodes = wait_for(lambda ns: find_text(ns, '立即购买') is not None, 15)
-    used = used_marker(nodes)
-    if used:
-        raise DewuOrderError(
-            f'得物 상품 화면에 중고 표시({used})가 있다 — 95分 중고 상품은 사지 않는다(결제하지 않음)'
-        )
     buy = find_text(nodes, '立即购买')
     if buy is None:
         raise DewuOrderError('상품 화면에서 立即购买 를 못 찾았다')
@@ -379,14 +395,12 @@ def buy_on_dewu(
         raise DewuOrderError(
             f'得物 가격 ¥{price:g} 가 상한 ¥{max_cny:.0f} 을 넘는다 — 결제하지 않음(마진)'
         )
-    used = used_marker(nodes)
-    if used:
-        raise DewuOrderError(
-            f'得物 구매창에 중고 표시({used})가 있다 — 95分 중고 상품은 사지 않는다(결제하지 않음)'
-        )
+    # 구매창에는 95分 중고 버튼이 새상품 버튼과 나란히 뜬다 — 새상품 버튼이 하나도 없으면 사지 않는다
+    if not new_buy_buttons(nodes):
+        raise DewuOrderError('得物 구매창에 새상품 결제 버튼이 없다(95分 중고만) — 결제하지 않음')
     # 5) 하단 결제 버튼 → 바로 알리페이가 뜨거나, 먼저 '确认订单'(주문 확인) 화면이 뜬다
     # 하단 버튼이 둘이면(品牌官方 ¥1090 / 일반배송 ¥631) 싼 일반배송을 누른다 — 왼쪽(비싼 쪽)을 눌러 ¥1090 을 결제한 사고(2026-10-08)
-    buttons = [n for n in nodes if n.y > 1380 and _PRICE.match(n.text.replace(' ', ''))]
+    buttons = new_buy_buttons(nodes)
     pay = min(
         buttons,
         key=lambda n: float(_PRICE.match(n.text.replace(' ', '')).group(1)),  # type: ignore[union-attr]

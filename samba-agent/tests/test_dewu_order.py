@@ -572,3 +572,28 @@ def test_唯品会에서_못_사면_다음_순위_得物로_넘어간다(monkeyp
     result, _, line = handle(None, SimpleNamespace(order_no='A1'))
     assert result == 'done' and 'D9' in line
     assert records[0][1]['sourcing_account_id'] == 'acct_DEWU'
+
+
+def test_구매창_하단에서_95分_중고_버튼은_빼고_새상품_버튼만_고른다():
+    """실기 2026-10-08 삼바 JP 44⅔: ¥458·¥447·¥426(95 배지·全新微瑕) — ¥426 을 골라 중고를 샀다."""
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    nodes = [
+        Node('¥458', '', '', 89, 1438),
+        Node('约2-3天到', '', '', 179, 1438),
+        Node('¥447', '', '', 345, 1438),
+        Node('约5-6天到', '', '', 436, 1438),
+        Node('¥426', '', '', 603, 1438),
+        Node('约2-4天到', '', '', 685, 1438),
+        Node('全新微瑕', '', '', 711, 1397),
+    ]
+    picked = dewu_order.new_buy_buttons(nodes)
+    assert [n.text for n in picked] == ['¥458', '¥447']
+    assert min(picked, key=lambda n: float(n.text[1:])).text == '¥447'
+    # 중고 버튼만 있으면 새상품 버튼이 없다
+    assert (
+        dewu_order.new_buy_buttons(
+            [Node('¥426', '', '', 603, 1438), Node('全新微瑕', '', '', 711, 1397)]
+        )
+        == []
+    )
