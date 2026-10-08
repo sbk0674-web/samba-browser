@@ -456,7 +456,14 @@ def buy_on_dewu(
         if phone.top_package() != ALIPAY:
             raise DewuOrderError('알리페이 결제창이 안 떴다(결제 전)')
     # 결제창이 실제로 청구하려는 금액을 비밀번호 전에 확인한다 — 구매창에서 읽은 가격과 다르거나 상한을 넘으면 멈춘다
+    # 결제창이 뜬 직후에는 금액 글자가 아직 그려지지 않는다(실기 2026-10-08 A-SW242583238: 바로 읽어 '못 읽었다'로 멈춤)
+    # — 금액이 보일 때까지 최대 10초 다시 읽는다
     charge = alipay_order_amount(phone.nodes())
+    for _ in range(6):
+        if charge is not None:
+            break
+        sleep(1.7)
+        charge = alipay_order_amount(phone.nodes())
     if charge is None:
         raise DewuOrderError('알리페이 결제창의 주문금액을 못 읽었다 — 결제하지 않음')
     if charge > max_cny:
