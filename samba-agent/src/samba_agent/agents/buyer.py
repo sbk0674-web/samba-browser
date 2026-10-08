@@ -768,6 +768,11 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
             # 경계 일치가 먼저 — "XL" 은 "Black-XL" 에만 맞고 "Black-XXL"·"Black-XLT" 에는 안 맞는다
             by_piece = [o for o in live if nt in [_norm(x) for x in re.split(r'[-\s/]+', o)]]
             by_tok = [o for o in live if nt in _norm(o)]
+            if re.fullmatch(r'\d+(?:\.\d+)?', tok.strip()):
+                # 숫자 조각은 숫자 경계로만 — 'EU 44' 의 44 가 '290(44.5/UK10)' 에 걸리면 안 된다
+                # (실기 2026-10-09 롯데온 라코스테: EU 44 주문에 44.5 를 골랐다)
+                num = re.compile(rf'(?<![\d.]){re.escape(tok.strip())}(?![\d]|\.\d)')
+                by_tok = [o for o in by_tok if num.search(o)]
             tl = size_letters(tok)
             if tl:
                 # 사이즈 글자 조각(XL)은 사이즈 글자가 같은 선택지에만(2XL·XXL 제외)

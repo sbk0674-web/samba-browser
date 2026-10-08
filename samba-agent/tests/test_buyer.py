@@ -2198,3 +2198,13 @@ def test_나이키_옛_품번은_공백으로_띄어_써도_모델코드로_읽�
     )
     assert model_code_of('나이키 덩크 로우 HF5441-100') == 'HF5441-100'
     assert model_code_of('상품 1000772401752') != '1000772401-752'
+
+
+def test_숫자_조각은_숫자_경계로만_맞춘다_EU44_는_44_5_가_아니다():
+    """실기 2026-10-09 롯데온 라코스테: 주문 'EU 화이트-407 EU 44' 에 '290(44.5/UK10)' 을 골랐다."""
+    from samba_agent.agents.buyer import matching_options
+
+    opts = ['250(39.5/UK6) 98,100', '280(43/UK9) 98,100', '290(44.5/UK10) 98,100']
+    assert matching_options(opts, 'EU 화이트-407 EU 44') == []
+    with_44 = opts + ['285(44/UK9.5) 98,100']
+    assert matching_options(with_44, 'EU 화이트-407 EU 44') == ['285(44/UK9.5) 98,100']
