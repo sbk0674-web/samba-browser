@@ -44,8 +44,9 @@ SHEET2 = [
 ]
 PAID = [n('支付成功', 300), n('580.92', 380), n('완료', 1438)]
 MY = [n('我', 1490, 630)]
-ORDERS = [n('待发货', 200, 360)]
-LIST = [n('adidas originals Bermuda 潮流', 385, 400), n('实付款', 415, 655)]
+# 我 화면의 '订单 … 全部' (실측 616,491) — 방금 산 주문은 '全部' 목록에서 실付款 금액으로 찾는다(2026-10-09)
+ORDERS = [n('待发货', 605, 224), n('全部', 491, 616)]
+LIST = [n('adidas originals Bermuda 潮流', 385, 400), n('¥ 564', 378, 653), n('实付款', 415, 655)]
 DETAIL = [n('订单编号', 900), n('全部信息', 900, 600), n('', 940), n('110213474374883854', 960)]
 
 
@@ -595,3 +596,33 @@ def test_구매창_하단에서_95分_중고_버튼은_빼고_새상품_버튼�
         )
         == []
     )
+
+
+def test_주문번호는_全部_목록에서_결제_금액이_같은_주문을_연다():
+    """실기 2026-10-09: 待发货 첫 주문(다른 주문 ¥295)의 번호를 읽었다 — 방금 산 조던(¥659)은 이미 발송돼 목록에 없었다."""
+    screens = [
+        MY,
+        [n('待发货', 605, 224), n('全部', 491, 616)],
+        [
+            n('Giannis', 381, 400),
+            n('¥ 295', 378, 653),
+            n('Jordan 1', 800, 400),
+            n('¥ 659', 794, 653),
+        ],
+        DETAIL,
+    ]
+    phone = FakePhone(screens, [DEWU])
+    taps: list = []
+    orig = phone.tap
+
+    def tap(x, y):
+        taps.append((x, y))
+        orig(x, y)
+
+    phone.tap = tap  # type: ignore[method-assign]
+    found = dewu_order._latest_order_no(phone, lambda s: None, 659.0)  # type: ignore[arg-type]
+    assert found == '110213474374883854'
+    assert (360, 794) in taps  # 조던 줄을 눌렀다(야니스 줄 378 이 아니다)
+    # 금액이 맞는 주문이 없으면 엉뚱한 번호를 쓰지 않는다
+    phone2 = FakePhone([MY, [n('全部', 491, 616)], [n('¥ 295', 378, 653)]], [DEWU])
+    assert dewu_order._latest_order_no(phone2, lambda s: None, 659.0) is None  # type: ignore[arg-type]

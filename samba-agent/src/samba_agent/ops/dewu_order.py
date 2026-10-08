@@ -529,7 +529,7 @@ def buy_on_dewu(
     if done is not None:
         phone.tap(done.x, done.y)
         sleep(3)
-    order_no = _latest_order_no(phone, sleep)
+    order_no = _latest_order_no(phone, sleep, price)
     if order_no is None:
         raise DewuOrderError(
             f'결제는 됐는데(¥{paid_cny}) 得物 주문번호를 못 읽었다 — 주문내역 확인', paid=True
@@ -537,8 +537,14 @@ def buy_on_dewu(
     return DewuResult(order_no=order_no, paid_cny=paid_cny, item_cny=price, rate=rate)
 
 
-def _latest_order_no(phone: Phone, sleep: Callable[[float], None]) -> str | None:
-    """我 → 待发货 첫 주문 → 상세의 '订单编号'. 화면 이동은 실기 순서를 따른다."""
+def _latest_order_no(
+    phone: Phone, sleep: Callable[[float], None], price: float | None = None
+) -> str | None:
+    """我 → 订单 全部 → 방금 산 주문(실付款 이 price 와 같은 첫 주문) → 상세의 '订单编号'.
+
+    실기 2026-10-09: '待发货' 첫 주문을 읽었더니, 판매자가 곧바로 발송해 방금 산 조던(¥659)은 '商家已发出' 로 빠지고
+    전에 산 야니스(¥295)의 번호가 기입됐다. '全部' 는 최신순이고, 실付款 금액으로 방금 산 주문을 고른다.
+    """
     for _ in range(6):
         nodes = phone.nodes()
         tab = find_text(nodes, '我')
@@ -553,17 +559,26 @@ def _latest_order_no(phone: Phone, sleep: Callable[[float], None]) -> str | None
         phone.key('4')
         sleep(1.5)
     nodes = phone.nodes()
-    # 건수가 붙는다('待发货 1')
-    pending = next((n for n in nodes if n.text.strip().startswith('待发货')), None)
-    if pending is None:
-        return None
-    phone.tap(pending.x, pending.y)
-    sleep(3)
+    # 我 화면의 '订单 … 全部 >' — 없으면 실측 위치(616,491)
+    whole = next((n for n in nodes if n.text.strip() == '全部' and 400 < n.y < 560), None)
+    phone.tap(*((whole.x, whole.y) if whole is not None else (616, 491)))
+    sleep(3.5)
     nodes = phone.nodes()
-    first = next((n for n in sorted(nodes, key=lambda n: n.y) if '实付款' in n.text), None)
-    if first is None:
-        return None
-    phone.tap(360, max(first.y - 40, 300))
+    target = None
+    if price:
+        # 같은 줄(±40px)의 ¥ 금액이 price 와 같은 첫 주문 — '¥ 659' 처럼 띄어 쓰여도 읽는다
+        for n in sorted(nodes, key=lambda n: n.y):
+            m = re.match(r'^[¥￥]\s*(\d+(?:\.\d+)?)$', (n.text or '').strip())
+            if m and abs(float(m.group(1)) - price) < 0.6:
+                target = n
+                break
+        if target is None:
+            return None  # 방금 산 주문을 금액으로 찾지 못했다 — 엉뚱한 번호를 쓰지 않는다
+    else:
+        target = next((n for n in sorted(nodes, key=lambda n: n.y) if '实付款' in n.text), None)
+        if target is None:
+            return None
+    phone.tap(360, max(target.y, 300))
     sleep(3)
     for _ in range(8):
         found = order_no_after_label(phone.nodes())
@@ -736,7 +751,8 @@ def make_shihuo_handler(
                     '순서: launch com.achievo.vipshop → 위 검색칸(360,95)에 품번 type_text → 搜索(642,93) → 같은 품번 상품을 연다',
                     '→ 아래쪽 사이즈 줄에서 EU 사이즈를 고른다 → 오른쪽 아래 「特卖价 抢」 → 购物车(장바구니)',
                     '→ 장바구니에 다른 상품이 있으면 그 상품들의 체크를 모두 끄고 이 상품·이 사이즈 1개만 체크한다(다른 상품을 같이 사면 안 된다)',
-                    '→ 结算 → 确认订单: 배송지 HUBNET 확인, 결제수단 支付宝 → 支付宝支付 → 알리페이 결제창이 뜨면 pay(shop="唯品会", price_cny=상품가)',
+                    '→ 结算 → 确认订单: 배송지 HUBNET·상품 1개·사이즈를 확인한다. 버튼이 「支付宝免密支付」면 화면의 실付 금액으로 pay_free(shop="唯品会", total_cny=실付, x, y) 를 부른다(버튼을 tap 으로 직접 누르지 않는다)',
+                    '  버튼이 일반 支付宝支付 면 눌러 알리페이 결제창이 뜬 뒤 pay(shop="唯品会", price_cny=상품가)',
                     '→ 결제 뒤 查看订单 의 订单编号 로 finish. 식화 앱은 쓰지 않는다(판매처가 이미 唯品会로 정해졌다)',
                 ]
             )

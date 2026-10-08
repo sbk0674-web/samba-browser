@@ -137,3 +137,17 @@ def test_승인_응답이_실패이고_화면도_확인_못_하면_불확실로_
     )
     out = tb.pay('后浪潮品奥莱折扣店', 214.2)
     assert '재결제 금지' in out and tb.state.uncertain and not tb.state.paid
+
+
+def test_免密支付는_唯品会_앱_화면에서_상한_이하일_때만_누른다():
+    """사용자 2026-10-09 "결제 전에 금액 뜨잖아" — 확인 화면 실付 금액을 점검하고 누른다."""
+    phone = FakePhone('com.achievo.vipshop', [])
+    tb = PhoneToolbox(phone, lambda krw: 'ok', max_cny=366, rate=200.0, sleep=lambda s: None)
+    assert '상한' in tb.pay_free('唯品会', 400.0, 550, 1450) and phone.taps == []
+    assert '화이트리스트' in tb.pay_free('鞋之正义', 279.0, 550, 1450) and phone.taps == []
+    other = FakePhone('com.taobao.taobao', [])
+    tb2 = PhoneToolbox(other, lambda krw: 'ok', max_cny=366, rate=200.0, sleep=lambda s: None)
+    assert '唯品会 앱' in tb2.pay_free('唯品会', 279.0, 550, 1450) and other.taps == []
+    assert '눌렀다' in tb.pay_free('唯品会', 279.0, 550, 1450)
+    assert phone.taps == [(550, 1450)] and tb.state.paid and tb.state.paid_cny == 279.0
+    assert '이미 결제' in tb.pay_free('唯品会', 279.0, 550, 1450)

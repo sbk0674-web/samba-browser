@@ -250,6 +250,27 @@ class PhoneToolbox:
         self.state.paid_cny = charge
         return f'결제 승인 완료(¥{charge:g}). 이제 淘宝/앱 주문내역에서 주문번호를 읽어 finish 를 불러라.'
 
+    def pay_free(self, shop: str, total_cny: float, x: int, y: int) -> str:
+        """비밀번호 없는 결제(支付宝免密支付) 버튼을 누른다 — 唯品会 确认订单 화면 전용(사용자 2026-10-09 "결제 전에 금액 뜨잖아").
+
+        결제창이 따로 뜨지 않으므로 코드는 화면의 실付 금액을 AI 가 읽은 값으로 점검한다: 가게 화이트리스트, 상한 이하,
+        唯品会 앱이 앞에 있을 것. 누른 뒤에는 결제된 것으로 본다(되돌릴 수 없다) — 주문번호를 finish 로 남긴다.
+        """
+        if self.state.paid:
+            return '이미 결제했다 — finish 로 주문번호를 남겨라.'
+        if not any(allowed in (shop or '') for allowed in ALLOWED_SHOPS):
+            return f'가게 "{shop}" 는 화이트리스트가 아니다 — 결제하지 않는다.'
+        if self.phone.top_package() != 'com.achievo.vipshop':
+            return '唯品会 앱의 确认订单 화면이 앞에 없다 — 결제하지 않는다.'
+        if total_cny <= 0 or total_cny > self.max_cny:
+            return f'실付 ¥{total_cny:g} 이 상한 ¥{self.max_cny:.0f} 을 넘거나 0 이다 — 결제하지 않는다(마진). give_up 하라.'
+        self.phone.tap(int(x), int(y))
+        self.sleep(6)
+        self.state.paid = True
+        self.state.item_cny = float(total_cny)
+        self.state.paid_cny = float(total_cny)
+        return f'免密支付 를 눌렀다(실付 ¥{total_cny:g}) — 결제된 것으로 본다. 订单 화면에서 订单编号 를 읽어 finish 를 불러라.'
+
     def finish(self, order_no: str) -> str:
         if not self.state.paid:
             return '결제하지 않았다 — finish 는 결제 뒤에만.'
@@ -290,7 +311,7 @@ def _log_actions(tb: PhoneToolbox) -> None:
     if getattr(tb, '_logged', False):
         return
     tb._logged = True  # type: ignore[attr-defined]
-    for name in ('tap', 'swipe', 'key', 'text', 'launch', 'pay', 'finish', 'give_up'):
+    for name in ('tap', 'swipe', 'key', 'text', 'launch', 'pay', 'pay_free', 'finish', 'give_up'):
         original = getattr(tb, name)
 
         def wrapped(*args: Any, _orig: Any = original, _name: str = name) -> Any:
@@ -427,6 +448,23 @@ class PhoneBuyer:
                 )
             )
 
+        @tool(
+            'pay_free',
+            '唯品会 确认订单 버튼이 支付宝免密支付(비밀번호 없는 결제)일 때만 쓴다. shop=가게(唯品会), total_cny=화면의 실付 금액, '
+            'x,y=그 결제 버튼 좌표. 코드가 상한을 점검하고 누른다 — 버튼을 tap 으로 직접 누르지 마라.',
+            {'shop': str, 'total_cny': float, 'x': int, 'y': int},
+        )
+        async def pay_free(inp: dict[str, Any]) -> dict[str, Any]:
+            return text(
+                await asyncio.to_thread(
+                    tb.pay_free,
+                    str(inp.get('shop', '')),
+                    float(inp.get('total_cny', 0) or 0),
+                    int(inp.get('x', 0)),
+                    int(inp.get('y', 0)),
+                )
+            )
+
         @tool('finish', '결제 뒤 주문 상세의 订单编号(숫자)를 남기고 끝낸다.', {'order_no': str})
         async def finish(inp: dict[str, Any]) -> dict[str, Any]:
             return text(await asyncio.to_thread(tb.finish, str(inp.get('order_no', ''))))
@@ -437,7 +475,7 @@ class PhoneBuyer:
         async def give_up(inp: dict[str, Any]) -> dict[str, Any]:
             return text(await asyncio.to_thread(tb.give_up, str(inp.get('reason', ''))))
 
-        tools = [screen, tap, swipe, key, type_text, launch, pay, finish, give_up]
+        tools = [screen, tap, swipe, key, type_text, launch, pay, pay_free, finish, give_up]
         server = create_sdk_mcp_server(name='phonebuyer', version='1.0.0', tools=tools)
         options = ClaudeAgentOptions(
             tools=[],
