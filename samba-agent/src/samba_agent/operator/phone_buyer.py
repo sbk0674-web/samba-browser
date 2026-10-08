@@ -127,7 +127,12 @@ class PhoneToolbox:
 
     def reset(self) -> None:
         """시작 전 초기화 — 淘宝·식화 앱을 끄고 홈으로. 지난 시도가 남긴 결제창에 갇히지 않게 한다(미결제 주문은 그대로 남는다)."""
-        for package in ('com.taobao.taobao', 'com.hupu.shihuo'):
+        for package in (
+            'com.taobao.taobao',
+            'com.hupu.shihuo',
+            'com.achievo.vipshop',
+            'com.eg.android.AlipayGphone',
+        ):
             self.phone._run('shell', 'am', 'force-stop', package)
         self.phone.key('3')
         self.sleep(1.5)
