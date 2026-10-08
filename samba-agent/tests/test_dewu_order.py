@@ -626,3 +626,17 @@ def test_주문번호는_全部_목록에서_결제_금액이_같은_주문을_�
     # 금액이 맞는 주문이 없으면 엉뚱한 번호를 쓰지 않는다
     phone2 = FakePhone([MY, [n('全部', 491, 616)], [n('¥ 295', 378, 653)]], [DEWU])
     assert dewu_order._latest_order_no(phone2, lambda s: None, 659.0) is None  # type: ignore[arg-type]
+
+
+def test_포장_하자_표시_버튼도_중고로_보고_뺀다():
+    """실기 2026-10-09 A-SW242585599: ¥278 버튼 옆 '仅包装瑕疵' — 실제 주문은 95分 SS级 중고였다."""
+    from samba_agent.ops.dewu_order import new_buy_buttons
+    from samba_agent.ops.ssg_gift_accept import Node
+
+    nodes = [
+        Node('仅包装瑕疵', '', 'id/tvChannelTip', 703, 1397),
+        Node('¥288', '', '', 97, 1438),
+        Node('¥287', '', '', 346, 1438),
+        Node('¥278', '', '', 603, 1438),
+    ]
+    assert [n.text for n in new_buy_buttons(nodes)] == ['¥288', '¥287']
