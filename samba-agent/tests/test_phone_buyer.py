@@ -112,3 +112,28 @@ def test_淘宝_앱_안_결제창의_설명_글자에서도_주문금액을_읽�
     tb = _box(phone, approved, max_cny=680)
     out = tb.pay('后浪潮品奥莱折扣店', 549.0)
     assert '완료' in out and approved == [round(549.0 * 1.03 * 200.0)]
+
+
+def test_승인_응답이_실패여도_화면에_支付成功이_뜨면_결제된_것으로_본다():
+    """실기 2026-10-08: phone_approve_payment 가 verify-failed 를 돌려줬지만 실제로는 결제됐다."""
+    nodes = _alipay('¥214.20')
+    phone = FakePhone(ALIPAY_PKG, nodes)
+    approved: list[int] = []
+
+    def approve(krw: int) -> str:
+        approved.append(krw)
+        phone._nodes = [Node('', '支付成功', '', 360, 200)]
+        return 'refused: verify-failed'
+
+    tb = PhoneToolbox(phone, approve, max_cny=700, rate=200.0, sleep=lambda s: None)
+    assert '완료' in tb.pay('后浪潮品奥莱折扣店', 214.2)
+    assert tb.state.paid and not tb.state.uncertain
+
+
+def test_승인_응답이_실패이고_화면도_확인_못_하면_불확실로_표시한다():
+    phone = FakePhone(ALIPAY_PKG, _alipay('¥214.20'))
+    tb = PhoneToolbox(
+        phone, lambda krw: 'refused: verify-failed', max_cny=700, rate=200.0, sleep=lambda s: None
+    )
+    out = tb.pay('后浪潮品奥莱折扣店', 214.2)
+    assert '재결제 금지' in out and tb.state.uncertain and not tb.state.paid

@@ -68,6 +68,7 @@ def alipay_window_front(phone: Phone) -> bool:
 @dataclass
 class BuyState:
     paid: bool = False
+    uncertain: bool = False
     paid_cny: float = 0.0
     item_cny: float = 0.0
     order_no: str | None = None
@@ -213,7 +214,17 @@ class PhoneToolbox:
             return f'결제창 금액 ¥{charge:g} 이 네가 본 가격 ¥{price_cny:g} 과 다르다 — 결제하지 않는다. 화면을 다시 확인하라.'
         out = self.approve(round(charge * 1.03 * self.rate)).strip()
         if not out.startswith('ok'):
-            return f'결제 승인 실패: {out[:80]} — 결제됐는지 알 수 없다. give_up 하라.'
+            # 앱의 승인 응답이 실패여도 결제됐을 수 있다 — 화면에 支付成功 이 뜨는지 본다(최대 ~10초)
+            succeeded = False
+            for _ in range(5):
+                shown = ' '.join((n.text or n.desc or '') for n in self.phone.nodes())
+                if '支付成功' in shown:
+                    succeeded = True
+                    break
+                self.sleep(2)
+            if not succeeded:
+                self.state.uncertain = True
+                return f'결제 승인 응답: {out[:80]} — 결제됐는지 알 수 없다. 화면과 주문내역을 확인하라(재결제 금지).'
         self.state.paid = True
         self.state.item_cny = float(price_cny)
         self.state.paid_cny = charge
@@ -256,6 +267,9 @@ screen 으로 화면을 읽고(글자 목록 + 이미지) 누른다. 좌표는 7
 
 def _log_actions(tb: PhoneToolbox) -> None:
     """AI 가 부른 폰 도구를 로그에 남긴다(감시용) — 입력값은 좌표·품번·가게 이름뿐이라 비밀이 없다."""
+    if getattr(tb, '_logged', False):
+        return
+    tb._logged = True  # type: ignore[attr-defined]
     for name in ('tap', 'swipe', 'key', 'text', 'launch', 'pay', 'finish', 'give_up'):
         original = getattr(tb, name)
 
@@ -314,6 +328,11 @@ class PhoneBuyer:
             state.notes.append('시간 초과')
         except Exception as e:  # noqa: BLE001 — SDK·CLI 오류 형식이 정해져 있지 않다
             state.notes.append(f'폰 구매 AI 오류: {type(e).__name__}: {str(e)[:120]}')
+        if state.uncertain and not state.paid:
+            raise DewuOrderError(
+                f'결제 승인 응답이 실패였고 화면으로도 확인 못 했다 — 淘宝 주문내역 확인(재결제 금지): {state.gave_up or ""}'.strip(),
+                paid=True,
+            )
         if state.paid:
             if state.order_no is None:
                 raise DewuOrderError(
