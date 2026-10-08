@@ -106,6 +106,15 @@ def _norm_address(text: str) -> str:
     return _ADDR_DROP.sub('', text).lower()
 
 
+# 소싱처와 상관없이 항상 까대기(사무실 수령)로 사는 브랜드 — 사용자 2026-10-08 "스케쳐스는 까대기로 고정"
+KKADAEGI_BRANDS = re.compile(r'스케[쳐처]스|skechers', re.IGNORECASE)
+
+
+def is_fixed_kkadaegi(order: OrderRef) -> bool:
+    """이 주문의 상품이 까대기로 고정된 브랜드인가(상품명에서 본다)."""
+    return bool(KKADAEGI_BRANDS.search(str(order.sku or '')))
+
+
 def road_key(address: object) -> str:
     """주소에서 도로명+건물번호(또는 지번 동·리+번지)만 공백 없이 — 결제 직전 주문서에 받는 분 주소가 맞게 들어갔는지
     대조하는 열쇠. 전체 주소는 handoff 에 싣지 않는다(실기 2026-10-02 롯데온 선물: 주소 검색이 다른 도시를 골라 경주로 감)."""
@@ -4177,6 +4186,9 @@ class BuyerAgent(AgentBase):
         """
         source = source_of(self.spec.name)
         forced = source.order_type
+        if not forced and is_fixed_kkadaegi(order):
+            # 스케쳐스는 어느 소싱처에서 사든 사무실로 받는다(선물하기·직배로 가지 않는다)
+            forced = 'kkadaegi'
         if source.gift_unless_poison and not forced:
             # 롯데온·SSG: 포이즌·라자다 배대지는 사무실 수령(까대기), 그 밖은 전부 선물하기 — 정가 비교 없이 정해진다
             # (사용자 2026-09-27 롯데온, 2026-09-29 SSG "까대기 제외하고 선물하기")

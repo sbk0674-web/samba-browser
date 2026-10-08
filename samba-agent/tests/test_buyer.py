@@ -2167,3 +2167,23 @@ def test_기존_배송지를_골라_통과해도_결제_직전_주소_대조_열
     a._ship_key = '지난주문의열쇠99'  # 앞 주문 것이 남아 있어도
     a._set_shipping(assignment(reg), {}, 'acct')
     assert a._ship_key == road_key(shipping['address']) and a._ship_key != '지난주문의열쇠99'
+
+
+def test_스케쳐스는_소싱처와_상관없이_까대기로_고정된다(reg):
+    from samba_agent.agents.buyer import is_fixed_kkadaegi
+
+    skx = OrderRef(
+        order_no='S1',
+        source='LOTTEON',
+        seller='쿠팡',
+        sku='매장정품 스케쳐스USA 여성 브리드 이지 슬립인스 SC0WFCFX011 BBK / 240',
+        qty=1,
+    )
+    other = OrderRef(
+        order_no='S2', source='LOTTEON', seller='쿠팡', sku='매장정품 나이키 덩크', qty=1
+    )
+    assert is_fixed_kkadaegi(skx) and not is_fixed_kkadaegi(other)
+    assert is_fixed_kkadaegi(skx.model_copy(update={'sku': 'SKECHERS Go Walk'}))
+    # 일반 소싱처(무신사)에서도 스케쳐스는 정가 비교 없이 까대기
+    a = agent(reg, lambda p, m: m(choice='260', reason='일치'))
+    assert a.order_type_of(skx, {'normal_price': 0}) == 'kkadaegi'
