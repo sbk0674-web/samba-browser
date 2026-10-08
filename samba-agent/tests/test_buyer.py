@@ -6,7 +6,13 @@ import pytest
 import respx
 
 from samba_agent.agents.base import AgentFailure
-from samba_agent.agents.buyer import BuyerAgent, shipping_matches, snapshot_args
+from samba_agent.agents.buyer import (
+    OFFICE_SHIPPING,
+    BuyerAgent,
+    road_key,
+    shipping_matches,
+    snapshot_args,
+)
 from samba_agent.agents.contracts import Assignment, OrderRef
 from samba_agent.agents.registry import Registry
 from samba_agent.bridge.client import BridgeClient
@@ -788,6 +794,8 @@ def test_ABC마트는_항상_까대기로_기본_배송지를_유지한다(reg):
     assert applied == {}  # 배송지 스크립트를 부르지 않았다
     assert not wave.called and not fill.called
     assert any(e.detail == '사무실 수령(기본 배송지 유지)' for e in out.evidence)
+    # 까대기는 사무실 도로명이 결제 직전 대조 열쇠다(기본 배송지 유지 경로도 열쇠를 만든다)
+    assert out.payload.get('ship_key') == road_key(OFFICE_SHIPPING['address'])
 
 
 @respx.mock
@@ -1458,6 +1466,7 @@ def test_까대기_사무실_배송지가_목록에_있으면_골라서_쓴다(r
     mock_accounts()
     out = abc(_abc_assignment(reg, spec))
     assert out.status == 'ok', out.reason
+    assert out.payload.get('ship_key') == road_key(OFFICE_SHIPPING['address'])
     assert 'abc_order_prep' in calls
     assert 'abc_select_shipping' in calls and 'abc_set_shipping' not in calls
     assert any('목록의 기존 배송지' in e.detail for e in out.evidence)
@@ -2142,3 +2151,19 @@ def test_롯데온_배송_불가_지역은_학습해_다음에_건너뛴다(tmp_
     assert b.learn_undeliverable(addr) == '문경시 동로면'
     assert b.lotteon_undeliverable('경북 문경시 동로면 노은2길 4(동로면, 동로초등학교)')
     assert not b.lotteon_undeliverable('경기 성남시 수정구 성남대로 1254')
+
+
+def test_기존_배송지를_골라_통과해도_결제_직전_주소_대조_열쇠가_만들어진다(reg, monkeypatch):
+    """오배송 구멍(2026-10-08): 기존 항목 선택 경로가 열쇠를 안 만들어 엉뚱한 줄이 골라져도 대조 없이 결제됐다."""
+    a = agent(reg, lambda p, m: m(choice='260', reason='일치'))
+    shipping = {
+        'name': '홍길동',
+        'address': '인천광역시 서구 연희로28번길 9-12',
+        'address_detail': '303호',
+    }
+    monkeypatch.setattr(a, 'order_type_of', lambda order, snap=None: 'gift')
+    monkeypatch.setattr(a, '_fetch_shipping', lambda asg, snap: shipping)
+    monkeypatch.setattr(a, '_select_existing_shipping', lambda ship, account: True)
+    a._ship_key = '지난주문의열쇠99'  # 앞 주문 것이 남아 있어도
+    a._set_shipping(assignment(reg), {}, 'acct')
+    assert a._ship_key == road_key(shipping['address']) and a._ship_key != '지난주문의열쇠99'

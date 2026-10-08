@@ -38,14 +38,14 @@ def _assignment() -> Assignment:
 def _run(monkeypatch, agent: BuyerAgent, danawa: int, adpick: int) -> tuple[dict[str, object], list[str]]:
     routes: list[str] = []
 
-    def once(self, a, account, extra=None, probe=False):  # noqa: ANN001
+    def once(self, a, account, extra=None, probe=False):
         route = str((extra or {}).get('route'))
         routes.append(route)
         paid = adpick if route == 'adpick' else danawa
         return {'cost': paid, 'pay_amount': paid, 'product_url': PRODUCT}
 
     monkeypatch.setattr(BuyerAgent, '_snapshot_once', once)
-    return agent._snapshot(_assignment(), 'buyer01'), routes
+    return agent._snapshot(_assignment(), 'edelvise06'), routes
 
 
 def test_결제액이_같으면_애드픽으로_사고_적립은_원가에_넣지_않는다(hmall, monkeypatch):

@@ -23,9 +23,6 @@ from samba_agent.wave.flags import auto_cancel_evidence
 THREAD_PREFIX = 'job:'
 # 카카오페이 비밀번호를 사람이 끝내 안 넣어 멈춘 결제(payer 문구) — 다른 수단으로 사지 않고 메모만 남긴다
 KAKAO_FALLBACK_MARK = '카카오페이 폰 비밀번호를 기다렸지만'
-# 배송지를 저장했는데 목록에 바로 안 보여 멈춘 결제 전 실패(구매 문구) — 한 번 다시 돌린다
-SHIP_RETRY_MARK = '저장 뒤 목록에 없음'
-SHIP_RETRY_KEY = '_ship_retry'
 
 _log = logging.getLogger(__name__)
 
@@ -416,21 +413,8 @@ class Worker:
                 line = f'뒤처리 실패: {mask_text(str(exc))[:120]}'
             if line:
                 self.d.report(job, f'{job.order_no} {line}')
-        if outcome == 'needs_human' and not self.d.dry_run and not job.options.get(SHIP_RETRY_KEY):
-            reason = _failed_reason(out)
-            if SHIP_RETRY_MARK in reason:
-                # 롯데온 선물: 새 배송지를 저장했는데 목록에 바로 안 보여 멈춘 경우 — 다시 돌리면 저장된 배송지를
-                # 기존 항목으로 골라 통과한다(실기 2026-09-30~10-01, 3건 모두 두 번째에 이행). 한 번만 다시 산다
-                self.d.queue.finish(job.id, 'failed', error=str(fail) if fail else None)
-                self.d.queue.enqueue(
-                    job.order_no,
-                    job.requester,
-                    {**job.options, SHIP_RETRY_KEY: 1},
-                    job.thread_ts,
-                    wave_id=job.wave_id,
-                )
-                self.d.report(job, f'{job.order_no} 배송지 저장 뒤 목록 미반영 — 한 번 다시 산다')
-                return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
+        # 새 배송지 저장이 목록에 안 보여 멈춘 건('저장 뒤 목록에 없음')은 자동으로 다시 사지 않고 사람에게 넘긴다.
+        # 예전엔 한 번 다시 돌려 기존 항목 선택으로 통과시켰는데, 그 재시도가 엉뚱한 배송지를 골라 5건이 오배송됐다(2026-10-08)
         tries = int(job.options.get(ACCOUNT_RETRY_KEY) or 0)
         if outcome == 'needs_human' and not self.d.dry_run and tries < ACCOUNT_RETRY_MAX:
             reason = _failed_reason(out)

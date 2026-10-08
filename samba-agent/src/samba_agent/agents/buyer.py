@@ -3784,6 +3784,8 @@ class BuyerAgent(AgentBase):
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
         self._current_order_no = a.order.order_no
+        # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
+        self._ship_key = ''
         source0 = source_of(self.spec.name)
         if source0.gift_unless_poison and self._shipping_fn is not None:
             try:
@@ -4311,6 +4313,9 @@ class BuyerAgent(AgentBase):
         # 실기 2026-09-30 무신사) — 스냅샷이 만든 주문서 탭을 배송지 스크립트에 넘긴다
         self._ship_tab = str(snap.get('order_tab') or '')
         if self.order_type_of(a.order, snap) == 'kkadaegi':
+            # 까대기는 사무실이 받는 곳이다 — 결제 직전 주문서에 사무실 도로명이 보여야 한다(고객 주소와 대조하지 않는다).
+            # 기본 배송지 유지·기존 사무실 선택 경로가 열쇠를 안 만들어 대조 없이 결제되던 구멍(2026-10-08)
+            self._ship_key = road_key(OFFICE_SHIPPING.get('address'))
             if self._keep_default_shipping(snap):
                 return
             # 기본 배송지가 사무실이 아니다(또는 없다) — 목록에 사무실 배송지가 있으면 그것을 고르고,
@@ -4329,6 +4334,9 @@ class BuyerAgent(AgentBase):
         # 직배·선물도 같은 배송지가 이미 목록에 있으면 고른다 — 재시도마다 같은 주소가 새로 저장되던 것을 막는다
         # (실기 2026-09-27: 29CM·무신사 주소록에 같은 고객 주소가 4개 쌓임)
         if self._select_existing_shipping(dict(shipping), account):
+            # 기존 배송지를 골라 통과한 경로도 결제 직전 주문서 대조 열쇠를 만든다 — 새 배송지 입력 경로에서만 만들어져
+            # 재시도(기존 항목 선택)로 엉뚱한 줄이 골라져도 대조 없이 결제되던 오배송 구멍(2026-10-08, 5건)
+            self._ship_key = road_key(shipping.get('address'))
             return
         self._apply_shipping(a, shipping, account)
 
