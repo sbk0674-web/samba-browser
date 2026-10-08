@@ -968,3 +968,19 @@ def test_주문_조회가_행이_여럿이라_실패하면_사람에게_넘긴�
     assert job.state == 'needs_human'
     assert 'ord_A' in job.error and 'ord_B' in job.error
     assert any('행 id 로 접수' in s for s in sent)
+
+
+def test_결제_전_일시_오류는_하네스가_다시_하고_결제_가능성이_있으면_하지_않는다():
+    from samba_agent.queue.worker import is_transient_prepay
+
+    assert is_transient_prepay('得物 검색 버튼(搜索)을 못 찾았다')
+    assert is_transient_prepay('SSG 선물 진입 실패: 선물 정보 화면이 안 뜸')
+    assert is_transient_prepay('알리페이 결제창이 안 떴다(결제 전)')
+    # 결제가 됐을 수 있는 사유는 자동으로 다시 사지 않는다(중복 결제)
+    assert not is_transient_prepay('알리페이 결제 승인 실패: refused: verify-failed')
+    assert not is_transient_prepay(
+        '결제됐는지 화면에서 확인되지 않는다 — 사람이 봐야 한다(재결제 금지)'
+    )
+    assert not is_transient_prepay('결제 비밀번호 키패드가 뜨지 않았다(10회 확인)')
+    assert not is_transient_prepay('주문서가 이 주문과 다르다 — 결제하지 않음')
+    assert not is_transient_prepay('')
