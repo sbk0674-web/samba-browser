@@ -253,3 +253,27 @@ def test_주문_확인_화면의_품번이_다르면_결제하지_않는다():
     assert '품번' in tb.pay_free('唯品会', 279.0, 550, 1450, '深咖色/黑色 MW880BD7-D；40')
     assert phone.taps == [] and not tb.state.paid
     assert '눌렀다' in tb.pay_free('唯品会', 279.0, 550, 1450, '黑色 U509E1；40')
+
+
+def test_결제창까지_가면_표시해_다른_판매처로_넘어가지_않게_한다():
+    """실기 2026-10-09 A-SN241632003: 唯品会 결제창에서 멈춘 뒤 사람이 결제했는데 得物 에서 또 샀다."""
+    from samba_agent.operator.phone_buyer import PhoneBuyer
+    from samba_agent.ops.dewu_order import DewuOrderError
+
+    phone = FakePhone(ALIPAY_PKG, _alipay('¥319.00'))
+    tb = _box(phone, [])
+    tb.tap(100, 100)
+    assert tb.state.reached_pay and not tb.state.paid
+
+    class NoLoop(PhoneBuyer):
+        async def _loop(self, tb, ctx):  # type: ignore[override]
+            tb.tap(100, 100)
+
+    tb2 = _box(FakePhone(ALIPAY_PKG, _alipay('¥319.00')), [])
+    tb2.reset = lambda: None  # type: ignore[method-assign]
+    try:
+        NoLoop()._buy_once(tb2, '')
+    except DewuOrderError as e:
+        assert e.paid and '넘어가지 않는다' in str(e)
+    else:
+        raise AssertionError('결제창까지 간 건은 paid 로 멈춰야 한다')

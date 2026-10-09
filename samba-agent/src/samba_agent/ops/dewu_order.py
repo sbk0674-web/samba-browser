@@ -525,9 +525,15 @@ def buy_on_dewu(
     # 6) 支付成功 + 청구 위안 → 완료
     nodes = wait_for(lambda ns: has_text(ns, '支付成功'), 20)
     if not has_text(nodes, '支付成功'):
-        raise DewuOrderError(
-            '알리페이 완료 화면(支付成功)이 안 보인다 — 得物 주문내역 확인(재결제 금지)', paid=True
-        )
+        # 완료 화면을 놓쳐도 결제는 됐을 수 있다 — 주문 목록에서 같은 금액 주문을 찾아 바로 기입한다
+        # (실기 2026-10-09 A-SW242585599: 결제됐는데 여기서 멈춰 9시간 기입 안 됨. 사용자: 구매하면 즉시 입력이 최우선)
+        found = _latest_order_no(phone, sleep, price)
+        if found is None:
+            raise DewuOrderError(
+                '알리페이 완료 화면(支付成功)이 안 보이고 주문 목록에서도 못 찾았다 — 得物 주문내역 확인(재결제 금지)',
+                paid=True,
+            )
+        return DewuResult(order_no=found, paid_cny=round(price * 1.03, 2), item_cny=price, rate=rate)
     amounts = [float(n.text) for n in nodes if re.fullmatch(r'\d+\.\d{2}', n.text)]
     paid_cny = amounts[0] if amounts else round(price * 1.03, 2)
     done = find_text(nodes, '완료') or find_text(nodes, '完成')

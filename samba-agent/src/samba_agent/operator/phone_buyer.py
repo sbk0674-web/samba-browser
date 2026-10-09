@@ -82,6 +82,9 @@ class BuyState:
     order_no: str | None = None
     # 웨이신페이로 결제(국제카드 수수료 면제 — 원가에 ×1.03 을 붙이지 않는다)
     fee_free: bool = False
+    # 결제창(알리페이·웨이신)까지 갔다 — 사람이 이어서 결제했을 수 있어 다른 판매처로 넘어가면 안 된다
+    # (실기 2026-10-09 A-SN241632003: 唯品会 결제창에서 멈춘 뒤 사용자가 결제했는데 하네스가 得物 에서 또 샀다)
+    reached_pay: bool = False
     gave_up: str | None = None
     actions: int = 0
     notes: list[str] = field(default_factory=list)
@@ -161,8 +164,10 @@ class PhoneToolbox:
         if self.state.paid:
             return '이미 결제했다 — finish 로 주문번호를 남겨라.'
         if alipay_window_front(self.phone):
+            self.state.reached_pay = True
             return '알리페이 결제창이 앞에 있다 — 누르기·입력은 막혀 있다. 금액·가게를 확인했으면 pay 를 불러라.'
         if self.phone.top_package() == WECHAT:
+            self.state.reached_pay = True
             return '웨이신페이 결제창이 앞에 있다 — 누르기·입력은 막혀 있다. 금액을 확인했으면 pay_wechat 를 불러라.'
         return None
 
@@ -251,6 +256,7 @@ class PhoneToolbox:
         problem = self._model_problem(model_seen)
         if problem:
             return problem
+        self.state.reached_pay = True
         charge = alipay_order_amount(self.phone.nodes())
         if charge is None:
             return '결제창의 주문금액을 못 읽었다 — 결제하지 않는다. 화면을 다시 읽어라.'
@@ -521,6 +527,11 @@ class PhoneBuyer:
             state.notes.append('시간 초과')
         except Exception as e:  # noqa: BLE001 — SDK·CLI 오류 형식이 정해져 있지 않다
             state.notes.append(f'폰 구매 AI 오류: {type(e).__name__}: {str(e)[:120]}')
+        if state.reached_pay and not state.paid and not state.uncertain:
+            raise DewuOrderError(
+                f'결제창까지 갔는데 결제 완료를 확인하지 못했다 — 사람이 결제했을 수 있어 다른 판매처로 넘어가지 않는다(주문내역 확인): {state.gave_up or ""}'.strip(),
+                paid=True,
+            )
         if state.uncertain and not state.paid:
             raise DewuOrderError(
                 f'결제 승인 응답이 실패였고 화면으로도 확인 못 했다 — 淘宝 주문내역 확인(재결제 금지): {state.gave_up or ""}'.strip(),
