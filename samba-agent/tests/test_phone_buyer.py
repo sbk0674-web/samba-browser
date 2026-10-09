@@ -197,3 +197,48 @@ def test_淘宝_결제_뒤에는_唯品会_주문_상세를_누르지_않는다(
     tb = _box(phone, [])
     assert '淘宝/앱 주문내역' in tb.pay('后浪潮品奥莱折扣店', 214.2)
     assert phone.taps == []
+
+
+WECHAT_PKG = 'com.tencent.mm'
+
+
+def test_알리페이가_V3_인증에_막히면_결제_전으로_보고_웨이신페이로_안내한다():
+    """사용자 2026-10-09: 唯品会 알리페이가 현대카드 V3 인증으로 멈추면 웨이신페이로 결제한다."""
+    phone = FakePhone(ALIPAY_PKG, _alipay('¥239.00'))
+
+    def approve(krw: int) -> str:
+        phone._nodes = [Node('Cruise API - Step Up', '', '', 100, 70), Node('백신 설치', '', '', 300, 140)]
+        return 'refused: blocked-by-app'
+
+    tb = PhoneToolbox(phone, approve, max_cny=300, rate=200.0, sleep=lambda s: None)
+    out = tb.pay('唯品会', 239.0)
+    assert '微信支付' in out and 'pay_wechat' in out
+    assert not tb.state.paid and not tb.state.uncertain
+
+
+def test_웨이신페이는_사람이_비밀번호를_넣고_완료를_보면_수수료_없이_결제로_본다():
+    phone = FakePhone(WECHAT_PKG, [Node('¥239.00', '', '', 360, 300)])
+    told: list[str] = []
+    polls = {'n': 0}
+
+    def sleep(_s: float) -> None:
+        polls['n'] += 1
+        if polls['n'] == 2:  # 두 번째 확인 때 사람이 비밀번호를 넣어 완료됐다
+            phone._nodes = [Node('Payment successful', '', '', 360, 80), Node('Back to vendor', '', '', 360, 1293)]
+
+    tb = PhoneToolbox(
+        phone, lambda krw: 'ok', max_cny=300, rate=200.0, sleep=sleep,
+        notify=lambda title, body: told.append(title),
+    )
+    assert '막혀' in tb.tap(100, 100)  # 웨이신 결제창이 앞이면 AI 누르기는 막힌다
+    out = tb.pay_wechat('唯品会', 239.0)
+    assert '완료' in out and tb.state.paid and tb.state.fee_free and tb.state.paid_cny == 239.0
+    assert told and (360, 1293) in phone.taps
+
+
+def test_웨이신페이_완료가_안_보이면_불확실로_두고_결제로_보지_않는다():
+    phone = FakePhone(WECHAT_PKG, [Node('¥239.00', '', '', 360, 300)])
+    tb = PhoneToolbox(phone, lambda krw: 'ok', max_cny=300, rate=200.0, sleep=lambda s: None)
+    assert '상한' in tb.pay_wechat('唯品会', 400.0)
+    out = tb.pay_wechat('唯品会', 239.0)
+    assert '재결제 금지' in out and tb.state.uncertain and not tb.state.paid

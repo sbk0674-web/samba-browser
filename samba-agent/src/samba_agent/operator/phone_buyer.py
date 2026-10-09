@@ -32,6 +32,13 @@ log = logging.getLogger(__name__)
 # 唯品会 는 플랫폼 단위 화이트리스트(식화 _SUP_ALLOW_STORES) — 唯品会 앱 구매에서 shop='唯品会' 로 결제한다
 ALLOWED_SHOPS = ('后浪潮品奥莱折扣店', '品牌官方店', '唯品会')
 MAX_ACTIONS = 160
+WECHAT = 'com.tencent.mm'
+# 웨이신페이 결제창에서 사람이 비밀번호를 넣을 때까지 기다리는 시간(사용자 2026-10-09 "결제비밀번호 입력은 내가 할게")
+WECHAT_WAIT_S = 300.0
+WECHAT_POLL_S = 5.0
+WECHAT_DONE_MARKS = ('Payment successful', '支付成功')
+# 알리페이 현대카드 3D 인증(Cruise API Step Up — V3 백신 설치 화면) — 결제가 막힌 것이지 결제된 것이 아니다
+STEP_UP_MARKS = ('Step Up', '백신', 'V3')
 NETWORK_RETRIES = 3
 NETWORK_MARKS = ('网络异常', '网络', '네트워크')
 DEFAULT_MAX_TURNS = 120
@@ -73,6 +80,8 @@ class BuyState:
     paid_cny: float = 0.0
     item_cny: float = 0.0
     order_no: str | None = None
+    # 웨이신페이로 결제(국제카드 수수료 면제 — 원가에 ×1.03 을 붙이지 않는다)
+    fee_free: bool = False
     gave_up: str | None = None
     actions: int = 0
     notes: list[str] = field(default_factory=list)
@@ -89,12 +98,15 @@ class PhoneToolbox:
         max_cny: float,
         rate: float,
         sleep: Callable[[float], None] = time.sleep,
+        notify: Callable[[str, str], object] | None = None,
     ) -> None:
         self.phone = phone
         self.approve = approve
         self.max_cny = max_cny
         self.rate = rate
         self.sleep = sleep
+        # 사람에게 알림(PC 알림창) — 웨이신페이 비밀번호를 사람이 넣어야 할 때 부른다
+        self.notify = notify
         self.state = BuyState()
 
     # --- 읽기 ---
@@ -146,6 +158,8 @@ class PhoneToolbox:
             return '이미 결제했다 — finish 로 주문번호를 남겨라.'
         if alipay_window_front(self.phone):
             return '알리페이 결제창이 앞에 있다 — 누르기·입력은 막혀 있다. 금액·가게를 확인했으면 pay 를 불러라.'
+        if self.phone.top_package() == WECHAT:
+            return '웨이신페이 결제창이 앞에 있다 — 누르기·입력은 막혀 있다. 금액을 확인했으면 pay_wechat 를 불러라.'
         return None
 
     def tap(self, x: int, y: int) -> str:
@@ -247,6 +261,14 @@ class PhoneToolbox:
                     succeeded = True
                     break
                 self.sleep(2)
+            if not succeeded and self._step_up_shown():
+                # 현대카드 3D 인증(V3 백신) 화면에서 멈췄다 — 결제 전이다(실기 2026-10-08·09 반복).
+                # 사용자 2026-10-09: 그럴 때는 웨이신페이로 결제한다
+                return (
+                    '알리페이 현대카드 3D 인증(V3 백신 설치)에 막혔다 — 결제되지 않았다. key back 으로 알리페이 화면을 닫고 '
+                    '唯品会 결제 화면(收银台/待付款 주문의 去支付)에서 결제수단을 微信支付 로 바꿔 결제 버튼을 누른 뒤, '
+                    '웨이신 결제창이 뜨면 pay_wechat(shop, total_cny) 를 불러라.'
+                )
             if not succeeded:
                 self.state.uncertain = True
                 return f'결제 승인 응답: {out[:80]} — 결제됐는지 알 수 없다. 화면과 주문내역을 확인하라(재결제 금지).'
@@ -256,6 +278,73 @@ class PhoneToolbox:
         if self._open_vip_order_detail():
             return f'결제 승인 완료(¥{charge:g}). 코드가 唯品会 주문 상세를 열었다 — screen 으로 订单编号 를 읽어 finish 를 불러라.'
         return f'결제 승인 완료(¥{charge:g}). 이제 淘宝/앱 주문내역에서 주문번호를 읽어 finish 를 불러라.'
+
+    def _step_up_shown(self) -> bool:
+        """알리페이 안의 현대카드 3D 인증(Cruise API Step Up · V3 백신 설치) 화면이 떠 있나."""
+        if 'verifyidentity' in self._focused_activity():
+            return True
+        shown = ' '.join((n.text or n.desc or '') for n in self.phone.nodes())
+        return any(m in shown for m in STEP_UP_MARKS)
+
+    def pay_wechat(self, shop: str, total_cny: float) -> str:
+        """웨이신페이(微信支付) 결제창이 떠 있을 때 — 사람이 비밀번호를 넣고, 코드는 결제 완료 화면을 기다린다.
+
+        사용자 2026-10-09: 唯品会 알리페이가 현대카드 V3 인증으로 멈추면 웨이신페이로 결제한다, 비밀번호는 내가 넣는다.
+        코드는 가게 화이트리스트·상한을 점검한 뒤 PC 알림을 띄우고 최대 5분 'Payment successful/支付成功' 을 기다린다.
+        시간이 지나도 완료가 안 보이면 결제됐는지 모르는 것으로 표시한다(재결제 금지).
+        """
+        if self.state.paid:
+            return '이미 결제했다 — finish 로 주문번호를 남겨라.'
+        if not any(allowed in (shop or '') for allowed in ALLOWED_SHOPS):
+            return f'가게 "{shop}" 는 화이트리스트가 아니다 — 결제하지 않는다.'
+        if self.phone.top_package() != WECHAT:
+            return '웨이신 결제창이 앞에 없다 — 唯品会 결제수단을 微信支付 로 바꿔 결제 버튼을 먼저 눌러라.'
+        if total_cny <= 0 or total_cny > self.max_cny:
+            return f'실付 ¥{total_cny:g} 이 상한 ¥{self.max_cny:.0f} 을 넘거나 0 이다 — 결제하지 않는다(마진). give_up 하라.'
+        if self.notify is not None:
+            try:
+                self.notify(
+                    '웨이신페이 결제 비밀번호 입력',
+                    f'임성희폰 {shop} ¥{total_cny:g} — 웨이신페이 결제창에 비밀번호를 넣어 주세요(5분 기다림).',
+                )
+            except Exception:  # noqa: BLE001 — 알림 실패는 기다림을 막지 않는다
+                log.warning('웨이신페이 알림 실패')
+        log.info('웨이신페이 결제 대기 — %s ¥%g, 사람이 비밀번호 입력', shop, total_cny)
+        waited = 0.0
+        done = False
+        while waited < WECHAT_WAIT_S:
+            self.sleep(WECHAT_POLL_S)
+            waited += WECHAT_POLL_S
+            if 'PaymentSuccess' in self._focused_activity():
+                done = True
+                break
+            shown = ' '.join((n.text or n.desc or '') for n in self.phone.nodes())
+            if any(m in shown for m in WECHAT_DONE_MARKS):
+                done = True
+                break
+        if not done:
+            self.state.uncertain = True
+            return '5분 안에 웨이신페이 완료 화면을 못 봤다 — 결제됐는지 알 수 없다(재결제 금지). give_up 하라.'
+        self.state.paid = True
+        self.state.fee_free = True
+        self.state.item_cny = float(total_cny)
+        self.state.paid_cny = float(total_cny)
+        # 웨이신 완료 화면이면 'Back to vendor/返回商家' 로 唯品会 로 돌아간다
+        if self.phone.top_package() == WECHAT:
+            back = next(
+                (
+                    n
+                    for n in self.phone.nodes()
+                    if (n.text or n.desc or '').strip() in ('Back to vendor', '返回商家', '完成', 'Done')
+                ),
+                None,
+            )
+            if back is not None:
+                self.phone.tap(back.x, back.y)
+                self.sleep(5)
+        if self._open_vip_order_detail():
+            return f'웨이신페이 결제 완료(¥{total_cny:g}). 코드가 唯品会 주문 상세를 열었다 — screen 으로 订单编号 를 읽어 finish 를 불러라.'
+        return f'웨이신페이 결제 완료(¥{total_cny:g}). 唯品会 주문 상세에서 订单编号 를 읽어 finish 를 불러라.'
 
     def _focused_activity(self) -> str:
         win = self.phone._run('shell', 'dumpsys', 'window')
@@ -348,7 +437,7 @@ def _log_actions(tb: PhoneToolbox) -> None:
     if getattr(tb, '_logged', False):
         return
     tb._logged = True  # type: ignore[attr-defined]
-    for name in ('tap', 'swipe', 'key', 'text', 'launch', 'pay', 'pay_free', 'finish', 'give_up'):
+    for name in ('tap', 'swipe', 'key', 'text', 'launch', 'pay', 'pay_free', 'pay_wechat', 'finish', 'give_up'):
         original = getattr(tb, name)
 
         def wrapped(*args: Any, _orig: Any = original, _name: str = name) -> Any:
@@ -422,6 +511,7 @@ class PhoneBuyer:
                 paid_cny=state.paid_cny,
                 item_cny=state.item_cny,
                 rate=toolbox.rate,
+                fee_free=state.fee_free,
             )
         raise DewuOrderError(
             f'폰 구매 AI 가 못 샀다(결제 전): {state.gave_up or "; ".join(state.notes) or "판단을 남기지 못함"}'
@@ -502,6 +592,19 @@ class PhoneBuyer:
                 )
             )
 
+        @tool(
+            'pay_wechat',
+            '알리페이가 현대카드 3D 인증(V3 백신)에 막혀 唯品会 결제수단을 微信支付 로 바꾼 뒤, 웨이신 결제창이 앞에 있을 때만 쓴다. '
+            'shop=가게(唯品会), total_cny=실付 금액. 비밀번호는 사람이 넣고 코드가 완료를 기다린다.',
+            {'shop': str, 'total_cny': float},
+        )
+        async def pay_wechat(inp: dict[str, Any]) -> dict[str, Any]:
+            return text(
+                await asyncio.to_thread(
+                    tb.pay_wechat, str(inp.get('shop', '')), float(inp.get('total_cny', 0) or 0)
+                )
+            )
+
         @tool('finish', '결제 뒤 주문 상세의 订单编号(숫자)를 남기고 끝낸다.', {'order_no': str})
         async def finish(inp: dict[str, Any]) -> dict[str, Any]:
             return text(await asyncio.to_thread(tb.finish, str(inp.get('order_no', ''))))
@@ -512,7 +615,7 @@ class PhoneBuyer:
         async def give_up(inp: dict[str, Any]) -> dict[str, Any]:
             return text(await asyncio.to_thread(tb.give_up, str(inp.get('reason', ''))))
 
-        tools = [screen, tap, swipe, key, type_text, launch, pay, pay_free, finish, give_up]
+        tools = [screen, tap, swipe, key, type_text, launch, pay, pay_free, pay_wechat, finish, give_up]
         server = create_sdk_mcp_server(name='phonebuyer', version='1.0.0', tools=tools)
         options = ClaudeAgentOptions(
             tools=[],
@@ -527,6 +630,8 @@ class PhoneBuyer:
                     'type_text',
                     'launch',
                     'pay',
+                    'pay_free',
+                    'pay_wechat',
                     'finish',
                     'give_up',
                 )

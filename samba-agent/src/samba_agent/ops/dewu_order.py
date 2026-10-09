@@ -51,6 +51,8 @@ class DewuResult:
     paid_cny: float
     item_cny: float
     rate: float
+    # 웨이신페이로 결제됨(국제카드 수수료 면제 — 원가에 ×1.03 을 붙이지 않는다, 2026-10-09)
+    fee_free: bool = False
 
     @property
     def cost_krw(self) -> int:
@@ -648,6 +650,17 @@ def _buy_taobao_pc(
     )
 
 
+def _pc_toast(title: str, body: str) -> object:
+    """PC 알림창 — 웨이신페이 비밀번호처럼 사람이 폰에서 해야 할 일을 알린다. 못 띄우면 False."""
+    try:
+        from samba_agent.export.desktop import toast
+
+        return toast.show(title, body)
+    except Exception:  # noqa: BLE001 — 알림은 부가 기능이다
+        log.warning('PC 알림 실패: %s', title)
+        return False
+
+
 def make_shihuo_handler(
     wave: object,
     approve: Callable[[int], str],
@@ -766,12 +779,20 @@ def make_shihuo_handler(
                     '→ 장바구니에 다른 상품이 있으면 그 상품들의 체크를 모두 끄고 이 상품·이 사이즈 1개만 체크한다(다른 상품을 같이 사면 안 된다)',
                     '→ 结算 → 确认订单: 배송지 HUBNET·상품 1개·사이즈를 확인한다. 버튼이 「支付宝免密支付」면 화면의 실付 금액으로 pay_free(shop="唯品会", total_cny=실付, x, y) 를 부른다(버튼을 tap 으로 직접 누르지 않는다)',
                     '  버튼이 일반 支付宝支付 면 눌러 알리페이 결제창이 뜬 뒤 pay(shop="唯品会", price_cny=상품가)',
+                    '→ 알리페이가 현대카드 3D 인증(Cruise API Step Up · V3 백신 설치)에 막히면(pay 가 그렇게 알려 준다) 알리페이를 닫고 '
+                    '결제수단을 微信支付 로 바꿔 결제 버튼을 누르고, 웨이신 결제창이 뜨면 pay_wechat(shop="唯品会", total_cny=실付) — 비밀번호는 사람이 넣는다(사용자 2026-10-09)',
                     '→ 결제 뒤 查看订单 의 订单编号 로 finish. 식화 앱은 쓰지 않는다(판매처가 이미 唯品会로 정해졌다)',
                 ]
             )
             try:
                 with PHONE_BUSY:
-                    tb = PhoneToolbox(Phone(adb_path, serial), approve, max_cny=max_cny, rate=rate)
+                    tb = PhoneToolbox(
+                        Phone(adb_path, serial),
+                        approve,
+                        max_cny=max_cny,
+                        rate=rate,
+                        notify=_pc_toast,
+                    )
                     vip = (buyer_factory() if buyer_factory else PhoneBuyer()).buy(tb, vip_ctx)
             except DewuOrderError as e:
                 if e.paid:
@@ -779,8 +800,14 @@ def make_shihuo_handler(
                 log.info('唯品会 구매 실패 — 다음 순위 得物: %s', e)
                 seller_name = '得物'
             else:
-                # 폰 AI 의 paid_cny 는 결제창 주문금액(수수료 전)이다 — 알리페이 국제카드 수수료 3% 를 더해 원가를 낸다
-                vip_paid = round(vip.paid_cny * 1.03, 2)
+                # 폰 AI 의 paid_cny 는 결제창 주문금액(수수료 전)이다 — 알리페이 국제카드 수수료 3% 를 더해 원가를 낸다.
+                # 웨이신페이는 수수료 면제(Fee Waived, 실기 2026-10-09 A-SW242586471)
+                vip_paid = vip.paid_cny if vip.fee_free else round(vip.paid_cny * 1.03, 2)
+                pay_note = (
+                    f'웨이신페이 결제 ¥{vip_paid:g}(국제카드 수수료 면제)'
+                    if vip.fee_free
+                    else f'결제 ¥{vip_paid:g}(상품 ¥{vip.paid_cny:g}+알리페이 카드수수료 3%)'
+                )
                 cost = round(vip_paid * rate * HYUNDAI_BILLING_FACTOR)
                 wave.record_sourcing(  # type: ignore[attr-defined]
                     wave_key,
@@ -789,7 +816,7 @@ def make_shihuo_handler(
                     shipping_fee=CN_SHIPPING_FEE,
                     sourcing_account_id=wave.only_sourcing_account_id('VIPSHOP'),  # type: ignore[attr-defined]
                     notes=(
-                        f'唯品会 앱(임성희폰, 폰 AI) 결제 ¥{vip_paid:g}(상품 ¥{vip.paid_cny:g}+알리페이 카드수수료 3%) × {rate:g}'
+                        f'唯品会 앱(임성희폰, 폰 AI) {pay_note} × {rate:g}'
                         f' × 현대카드 청구할인 {HYUNDAI_BILLING_FACTOR} · 중국 배송비 {CN_SHIPPING_FEE:,} 고정'
                     ),
                 )
