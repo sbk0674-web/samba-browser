@@ -1076,6 +1076,8 @@
     "deleteConfirmLabel": "확인을 위해 {{word}} 를 입력하세요",
     "deleteAccount": "계정 삭제",
     "deleteAccountUnavailable": "계정 삭제는 아직 준비 중이에요",
+    "offlineHint": "서버에 닿지 못해도 이 PC 에 저장된 계정이면 같은 비밀번호로 서버 없이 들어갈 수 있어요(동기화는 서버가 풀린 뒤 다시 로그인하면 이어져요)",
+    "signInOffline": "서버 없이 이 PC 에서 계속",
     "errors": {
       "invalidCredentials": "이메일 또는 비밀번호가 맞지 않아요",
       "emailNotConfirmed": "이메일 확인이 아직 안 됐어요. 받은 메일의 링크를 눌러 주세요",
@@ -1083,6 +1085,9 @@
       "weakPassword": "비밀번호가 너무 짧거나 단순해요(8자 이상)",
       "rateLimited": "시도가 너무 많아요. 잠시 후 다시 해 주세요",
       "network": "서버에 연결할 수 없어요. 인터넷 연결을 확인해 주세요",
+      "serviceRestricted": "동기화 서버(Supabase)가 사용량 한도 초과로 정지돼 있어요. 비밀번호 문제가 아니에요 — 플랜을 올리거나 한도가 초기화되면 로그인돼요",
+      "offlineWrongPassword": "비밀번호가 이 PC 키마스터와 맞지 않아요",
+      "offlineUnavailable": "이 PC 에서는 서버 없이 들어갈 수 없어요(처음 로그인하는 PC 이거나 계정이 여럿이에요)",
       "generic": "로그인에 실패했어요. 잠시 후 다시 시도해 주세요"
     },
     "supabase": {

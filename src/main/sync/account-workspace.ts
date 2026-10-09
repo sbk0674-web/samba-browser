@@ -55,6 +55,12 @@ export class AccountWorkspaceStore {
     this.save()
   }
 
+  /** 이 PC 에 계정 공간이 하나뿐이면 그 계정 id, 아니면 null(여럿이면 누구인지 모호하다) */
+  onlyUserId(): string | null {
+    const ids = Object.keys(this.map)
+    return ids.length === 1 ? ids[0] : null
+  }
+
   /** 어떤 계정이든 이 작업공간을 쓰고 있는가 */
   isAccountWorkspace(workspaceId: number): boolean {
     return Object.values(this.map).includes(workspaceId)

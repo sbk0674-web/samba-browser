@@ -41,6 +41,16 @@ export interface AccountDeps {
    * 맞추고, 서버 키 재료와 어긋나면(다른 PC 가 먼저 만든 금고) 자동으로 다시 잠근다. 없으면 아무것도 하지 않는다
    */
   vault?: { adoptAccountPassword: (password: string) => Promise<string> }
+  /**
+   * 서버가 정지·불통일 때의 로컬 로그인(사용자 2026-10-09: Supabase 한도 초과로 로그인이 막혀 앱을 못 썼다).
+   * userId: 이 PC 에 계정 공간이 하나뿐일 때 그 계정 id(여럿이면 null — 모호해서 열지 않는다).
+   * verifyPassword: 이 PC 키마스터로 비밀번호를 확인한다(서버를 거치지 않는다, 금고가 열려 있어야 한다)
+   */
+  offline?: {
+    userId: () => string | null
+    email: () => string | undefined
+    verifyPassword: (password: string) => Promise<boolean>
+  }
 }
 
 /** 디렉터리 쪽 상태. AuthState.account 로 렌더러에 나간다 — 토큰·비밀번호 없음 */
@@ -54,6 +64,26 @@ export interface AccountState {
   needsSupabase: boolean
   /** 서버 함수(directory_user_count)가 관리자에게만 돌려주는 가입 사용자 수 */
   userCount?: number
+  /** 서버 없이 이 PC 에서만 들어온 상태 — 동기화는 꺼져 있다(서버가 풀리면 다시 로그인한다) */
+  offline?: boolean
+}
+
+/** 서버가 정지·불통이라 로그인 자체가 안 되는 오류 문구 — 비밀번호 문제가 아니다 */
+const SERVER_DOWN_PATTERNS = [
+  'service for this project is restricted',
+  'exceed_egress_quota',
+  'fetch failed',
+  'failed to fetch',
+  'network',
+  'econnrefused',
+  'enotfound',
+  'etimedout',
+  'timeout'
+]
+
+export function isServerDownError(message: string): boolean {
+  const m = message.toLowerCase()
+  return SERVER_DOWN_PATTERNS.some((p) => m.includes(p))
 }
 
 /** 디렉터리 서버의 관리자 전용 함수 이름(supabase/directory.sql). 없거나 권한 없으면 null */
@@ -70,6 +100,8 @@ export class AccountService {
   private currentUrl = ''
   /** 로그인에 쓴 계정 비밀번호 — 키마스터를 맞출 때만 쓴다. 메모리에만 있고 로그아웃 때 지운다 */
   private accountPassword: string | null = null
+  /** 마지막 로그인 시도가 서버 정지·불통으로 실패했는가 — 로컬 로그인을 열어도 되는 유일한 조건 */
+  private lastEnterServerDown = false
 
   constructor(deps: AccountDeps) {
     this.deps = deps
@@ -114,11 +146,53 @@ export class AccountService {
   }
 
   async signIn(email: string, password: string): Promise<AuthState> {
-    return this.enter(email, password, 'signIn')
+    return this.enterTracked(email, password, 'signIn')
+  }
+
+  /** 로그인 시도의 실패 사유를 기억한다 — 서버가 정지·불통일 때만 로컬 로그인이 열린다 */
+  private async enterTracked(
+    email: string,
+    password: string,
+    mode: 'signIn' | 'signUp'
+  ): Promise<AuthState> {
+    try {
+      const state = await this.enter(email, password, mode)
+      this.lastEnterServerDown = false
+      return state
+    } catch (e: unknown) {
+      this.lastEnterServerDown = isServerDownError(e instanceof Error ? e.message : String(e))
+      throw e
+    }
+  }
+
+  /**
+   * 서버(Supabase)가 정지·불통이라 로그인이 안 될 때, 이 PC 키마스터로 비밀번호를 확인하고 이 PC 의 계정 공간으로 들어간다.
+   * 조건: 직전 로그인이 서버 정지·불통으로 실패했고, 이 PC 에 계정 공간이 하나뿐이고, 비밀번호가 키마스터와 맞을 것.
+   * 동기화는 켜지지 않는다(데이터 쪽 로그인은 여전히 로그아웃) — 서버가 풀린 뒤 다시 로그인하면 이어진다
+   */
+  async offlineSignIn(password: string): Promise<AuthState> {
+    const offline = this.deps.offline
+    if (!offline || !this.state.configured) throw new Error('offline-unavailable')
+    if (!this.lastEnterServerDown) throw new Error('offline-not-allowed')
+    const userId = offline.userId()
+    if (!userId) throw new Error('offline-no-account')
+    if (password.length === 0 || !(await offline.verifyPassword(password))) {
+      throw new Error('offline-wrong-password')
+    }
+    this.accountPassword = password
+    this.next({
+      configured: true,
+      signedIn: true,
+      userId,
+      ...(offline.email() ? { email: offline.email() } : {}),
+      needsSupabase: false,
+      offline: true
+    })
+    return this.deps.auth.state()
   }
 
   async signUp(email: string, password: string): Promise<AuthState> {
-    return this.enter(email, password, 'signUp')
+    return this.enterTracked(email, password, 'signUp')
   }
 
   /**

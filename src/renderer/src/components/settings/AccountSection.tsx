@@ -29,8 +29,18 @@ function authErrorKey(message: string): string {
   if (m.includes('password should be') || m.includes('weak password'))
     return 'account.errors.weakPassword'
   if (m.includes('rate limit') || m.includes('too many')) return 'account.errors.rateLimited'
+  // Supabase 무료 한도 초과로 프로젝트가 정지된 상태(2026-10-09 egress) — 비밀번호 문제가 아니다
+  if (m.includes('exceed_egress_quota') || m.includes('service for this project is restricted'))
+    return 'account.errors.serviceRestricted'
   if (m.includes('fetch') || m.includes('network')) return 'account.errors.network'
+  if (m.includes('offline-wrong-password')) return 'account.errors.offlineWrongPassword'
+  if (m.includes('offline-')) return 'account.errors.offlineUnavailable'
   return 'account.errors.generic'
+}
+
+// 서버 정지·불통이라 로그인 자체가 안 되는 오류인가 — 이때만 로컬 로그인 버튼을 보인다
+function isServerDownKey(key: string): boolean {
+  return key === 'account.errors.serviceRestricted' || key === 'account.errors.network'
 }
 
 export function AccountSection(): React.JSX.Element {
@@ -330,6 +340,17 @@ export function SignInCard(): React.JSX.Element {
         />
       </SettingsRow>
       {auth.error && <p className="text-[12px] text-[#b91c1c]">{t(authErrorKey(auth.error))}</p>}
+      {mode === 'signIn' && auth.error && isServerDownKey(authErrorKey(auth.error)) && (
+        <div className="rounded-lg border border-[var(--line)] p-2.5 text-[12px] text-[var(--text2)]">
+          <p className="mb-2">{t('account.offlineHint')}</p>
+          <SecondaryButton
+            disabled={busy || password.length === 0}
+            onClick={() => void auth.signInOffline(password)}
+          >
+            {t('account.signInOffline')}
+          </SecondaryButton>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <PrimaryButton disabled={!canSubmit} onClick={submit}>
           {mode === 'signIn' ? t('account.signIn') : t('account.signUp')}

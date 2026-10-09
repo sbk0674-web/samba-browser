@@ -134,6 +134,7 @@ export const IPC = {
   authState: 'auth:state',
   authSignUp: 'auth:signUp',
   authSignIn: 'auth:signIn',
+  authSignInOffline: 'auth:signInOffline', // 서버가 정지·불통일 때 이 PC 키마스터로 비밀번호를 확인해 들어간다
   authSignInGoogle: 'auth:signInGoogle', // 브라우저를 열고 루프백 콜백까지 기다린다
   authSignOut: 'auth:signOut',
   authSaveSupabase: 'auth:saveSupabase', // 로그인한 계정에 데이터 Supabase 주소 저장 + 즉시 연결

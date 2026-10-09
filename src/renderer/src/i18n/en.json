@@ -1076,6 +1076,8 @@
     "deleteConfirmLabel": "Type {{word}} to confirm",
     "deleteAccount": "Delete account",
     "deleteAccountUnavailable": "Account deletion is not ready yet",
+    "offlineHint": "Even if the server is unreachable, an account saved on this PC can continue with the same password (sync resumes after you sign in again once the server is back)",
+    "signInOffline": "Continue on this PC without the server",
     "errors": {
       "invalidCredentials": "Email or password is incorrect",
       "emailNotConfirmed": "Email not confirmed yet. Click the link in the email we sent",
@@ -1083,6 +1085,9 @@
       "weakPassword": "Password is too short or too simple (8+ characters)",
       "rateLimited": "Too many attempts. Please try again shortly",
       "network": "Cannot reach the server. Check your internet connection",
+      "serviceRestricted": "The sync server (Supabase) is suspended because its usage quota was exceeded. This is not a password problem — sign-in works again after the plan is upgraded or the quota resets.",
+      "offlineWrongPassword": "That password does not match this PC's keymaster",
+      "offlineUnavailable": "This PC cannot continue without the server (first sign-in here, or several accounts)",
       "generic": "Sign-in failed. Please try again shortly"
     },
     "supabase": {

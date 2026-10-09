@@ -29,6 +29,11 @@ function setup(
     seedConfig?: boolean
     data?: SyncBackend
     vault?: { adoptAccountPassword: (password: string) => Promise<string> }
+    offline?: {
+      userId: () => string | null
+      email: () => string | undefined
+      verifyPassword: (password: string) => Promise<boolean>
+    }
   } = {}
 ): {
   account: AccountService
@@ -78,7 +83,8 @@ function setup(
     },
     applyEnv,
     now: () => 5000,
-    ...(opts.vault ? { vault: opts.vault } : {})
+    ...(opts.vault ? { vault: opts.vault } : {}),
+    ...(opts.offline ? { offline: opts.offline } : {})
   })
   return { account, directory, data, auth, settings, onDataBackend, applyEnv }
 }
@@ -440,5 +446,63 @@ describe('AccountService — 계정 비밀번호가 키마스터 열쇠', () => 
     })
     await h.account.signIn('me@example.com', 'pw-1')
     expect(h.auth.state().signedIn).toBe(true)
+  })
+})
+
+
+describe('서버 정지·불통일 때의 로컬 로그인', () => {
+  const STOPPED =
+    'Service for this project is restricted due to the following violations: exceed_egress_quota.'
+
+  function stopped(): ReturnType<typeof setup> & { verify: ReturnType<typeof vi.fn> } {
+    const verify = vi.fn(async (pw: string) => pw === 'good-password')
+    const made = setup({
+      offline: { userId: () => 'user-1', email: () => undefined, verifyPassword: verify }
+    })
+    made.directory!.failWith(new Error(STOPPED))
+    return { ...made, verify }
+  }
+
+  it('서버 정지로 로그인이 실패한 직후, 키마스터와 맞는 비밀번호면 이 PC 계정 공간으로 들어간다', async () => {
+    const { account } = stopped()
+    await expect(account.signIn('me@example.com', 'good-password')).rejects.toThrow()
+    await account.offlineSignIn('good-password')
+    const state = account.accountState()
+    expect(state.signedIn).toBe(true)
+    expect(state.offline).toBe(true)
+    expect(state.userId).toBe('user-1')
+  })
+
+  it('비밀번호가 키마스터와 다르면 들어가지 못한다', async () => {
+    const { account } = stopped()
+    await expect(account.signIn('me@example.com', 'x')).rejects.toThrow()
+    await expect(account.offlineSignIn('wrong')).rejects.toThrow('offline-wrong-password')
+    expect(account.accountState().signedIn).toBe(false)
+  })
+
+  it('서버 오류가 아니라 비밀번호 오류로 실패했으면 로컬 로그인을 열지 않는다', async () => {
+    const { account, directory, verify } = stopped()
+    directory!.failWith(new Error('Invalid login credentials'))
+    await expect(account.signIn('me@example.com', 'x')).rejects.toThrow()
+    await expect(account.offlineSignIn('good-password')).rejects.toThrow('offline-not-allowed')
+    expect(verify).not.toHaveBeenCalled()
+  })
+
+  it('로그인을 시도한 적이 없으면(서버 상태를 모르면) 열지 않는다', async () => {
+    const { account } = stopped()
+    await expect(account.offlineSignIn('good-password')).rejects.toThrow('offline-not-allowed')
+  })
+
+  it('이 PC 에 계정 공간이 하나가 아니면 열지 않는다', async () => {
+    const made = setup({
+      offline: {
+        userId: () => null,
+        email: () => undefined,
+        verifyPassword: async () => true
+      }
+    })
+    made.directory!.failWith(new Error(STOPPED))
+    await expect(made.account.signIn('a@b.com', 'x')).rejects.toThrow()
+    await expect(made.account.offlineSignIn('x')).rejects.toThrow('offline-no-account')
   })
 })

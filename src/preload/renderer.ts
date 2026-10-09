@@ -413,6 +413,9 @@ const api = {
       invoke(IPC.authSignUp, email, password),
     signIn: (email: string, password: string): Promise<IpcResult<AuthState>> =>
       invoke(IPC.authSignIn, email, password),
+    // 서버(Supabase)가 정지·불통일 때만 — 이 PC 키마스터로 비밀번호를 확인해 이 PC 의 계정 공간으로 들어간다
+    signInOffline: (password: string): Promise<IpcResult<AuthState>> =>
+      invoke(IPC.authSignInOffline, password),
     // 기본 브라우저가 열리고, 사용자가 구글 로그인을 마쳐야 응답이 온다(최대 5분)
     signInGoogle: (): Promise<IpcResult<AuthState>> => invoke(IPC.authSignInGoogle),
     signOut: (): Promise<IpcResult<AuthState>> => invoke(IPC.authSignOut),

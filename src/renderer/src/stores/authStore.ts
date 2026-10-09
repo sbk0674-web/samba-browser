@@ -17,6 +17,8 @@ interface AuthStoreState {
   subscribe: () => () => void
   signUp: (email: string, password: string) => Promise<boolean>
   signIn: (email: string, password: string) => Promise<boolean>
+  /** 서버 정지·불통일 때 — 이 PC 키마스터로 비밀번호를 확인해 이 PC 의 계정 공간으로 들어간다 */
+  signInOffline: (password: string) => Promise<boolean>
   signInGoogle: () => Promise<boolean>
   cancelGoogle: () => void
   signOut: () => Promise<boolean>
@@ -67,6 +69,8 @@ export const useAuthStore = create<AuthStoreState>((set, get) => {
 
     signUp: (email, password) => run('signUp', () => window.samba.auth.signUp(email, password)),
     signIn: (email, password) => run('signIn', () => window.samba.auth.signIn(email, password)),
+    signInOffline: (password) =>
+      run('signIn', () => window.samba.auth.signInOffline(password)),
     // 기본 브라우저가 열리고 사용자가 구글 로그인을 마쳐야 응답이 온다(최대 5분)
     signInGoogle: () => run('google', () => window.samba.auth.signInGoogle()),
     // IPC 취소 채널이 없으므로 화면에서 기다리기를 그만두는 것까지만 한다
