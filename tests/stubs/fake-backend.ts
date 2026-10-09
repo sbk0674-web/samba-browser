@@ -22,7 +22,7 @@ export interface FakeBackend extends SyncBackend {
   /** 다음 호출부터 이 에러로 실패시킨다(오프라인 재현). null 을 주면 정상으로 되돌린다 */
   failWith(error: Error | null): void
   /** subscribe 로 등록한 콜백을 수동으로 발화한다 */
-  fire(table: string): void
+  fire(table: string, bytes?: number): void
   /** subscribe 의 onStatus 를 수동으로 부른다(Realtime 연결/끊김 재현) */
   realtime(table: string, live: boolean): void
   /** 다음 호출부터 인증 만료로 실패시킨다(기기 원격 로그아웃 재현) */
@@ -57,7 +57,7 @@ function byUpdatedAtThenId(
 export function createFakeBackend(): FakeBackend {
   const tables = new Map<string, Map<string, RemoteRow>>()
   const keyedTables = new Map<string, Map<string, RemoteKeyedRow>>()
-  const listeners = new Map<string, Set<() => void>>()
+  const listeners = new Map<string, Set<(bytes?: number) => void>>()
   const statusListeners = new Map<string, Set<(live: boolean) => void>>()
   const calls = { select: 0, upsert: 0, remove: 0 }
   let signedIn: { userId: string; email: string } | null = null
@@ -237,8 +237,8 @@ export function createFakeBackend(): FakeBackend {
     failWith(error) {
       failure = error
     },
-    fire(name) {
-      for (const fn of listeners.get(name) ?? []) fn()
+    fire(name, bytes) {
+      for (const fn of listeners.get(name) ?? []) fn(bytes)
     },
     expireAuth() {
       authExpired = true

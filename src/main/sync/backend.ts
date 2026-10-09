@@ -118,7 +118,8 @@ export interface SyncBackend {
    */
   subscribe(
     table: string,
-    onChange: () => void,
+    // bytes: 알림 본문 크기(전송량 계산용, 모르면 없음)
+    onChange: (bytes?: number) => void,
     onStatus?: (live: boolean) => void
   ): Promise<() => void>
   /**

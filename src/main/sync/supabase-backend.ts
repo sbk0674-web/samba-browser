@@ -226,7 +226,13 @@ export function createSupabaseBackend(
           .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
             // 다른 PC 의 변경이 왔다 — 바로 한 번 동기화한다(60초 폴링을 기다리지 않는다)
             console.info(`[sync] Realtime ${table} ${String(payload.eventType)}`)
-            onChange()
+            let bytes = 0
+            try {
+              bytes = JSON.stringify(payload).length
+            } catch {
+              bytes = 0
+            }
+            onChange(bytes)
           })
           .subscribe((status, err) => {
             // 구독 상태를 남긴다 — SUBSCRIBED 가 아니면 Realtime 이 안 붙은 것(표가 publication 에 없거나 권한)
