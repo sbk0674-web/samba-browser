@@ -13,7 +13,11 @@ import { pushAll, type PushDeps } from './push'
 
 // 폴링은 Realtime 이 못 받은 변경을 줍는 보험이다 — 1분 폴링이 PC 여러 대에서 돌며 Supabase 무료 한도(Egress·Log)를
 // 넘겼다(2026-10-06, 10/8 제한 예고). Realtime(publication 등록) 뒤로는 5분이면 충분하다
-export const SYNC_POLL_INTERVAL_MS = 60_000
+// 5분 — 60초 폴링(PC 여러 대 × 표 7개)에 Realtime 알림마다 전체 당기기가 겹쳐 Supabase 무료 전송량(5GB)을
+// 세 배 가까이 넘겨 서비스가 정지됐다(2026-10-09 egress 14.8GB). 놓친 알림을 메우는 안전망이라 5분이면 충분하다
+export const SYNC_POLL_INTERVAL_MS = 300_000
+// Realtime 알림이 몰려 오면(채팅 메시지 연속 저장) 모아서 한 번만 당긴다
+export const REALTIME_DEBOUNCE_MS = 3_000
 
 export interface EngineDeps extends PushDeps {
   /**
@@ -58,7 +62,7 @@ export class SyncEngine {
     this.local = new SyncLocal(deps.db)
   }
 
-  /** 즉시 1회 동기화하고, 60초 주기 폴링과 Realtime 구독을 건다 */
+  /** 즉시 1회 동기화하고, 5분 주기 폴링과 Realtime 구독을 건다 */
   start(): void {
     if (this.started) return
     this.started = true
@@ -152,7 +156,7 @@ export class SyncEngine {
         const unsubscribe = await this.deps.backend.subscribe(
           remoteTableOf(table),
           () => {
-            void this.syncNow()
+            this.scheduleRealtimeSync()
           },
           (live) => {
             const wasLive = this.realtimeLive()
@@ -172,6 +176,18 @@ export class SyncEngine {
         )
       }
     }
+  }
+
+  private realtimeTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Realtime 알림은 바로 당기지 않고 잠깐 모은다 — 알림 하나마다 표 7개를 다시 조회하던 것이 전송량을 키웠다 */
+  private scheduleRealtimeSync(): void {
+    if (this.realtimeTimer) return
+    this.realtimeTimer = setTimeout(() => {
+      this.realtimeTimer = null
+      if (this.started) void this.syncNow()
+    }, REALTIME_DEBOUNCE_MS)
+    this.realtimeTimer.unref?.()
   }
 
   private emit(status: SyncStatus = this.status()): void {

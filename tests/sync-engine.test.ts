@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { openDatabase, type Db } from '../src/main/db/client'
 import { VaultService } from '../src/main/vault/service'
 import { SyncOutbox, createOutboxRecorder } from '../src/main/sync/outbox'
-import { SyncEngine, SyncEngineHolder, SYNC_POLL_INTERVAL_MS } from '../src/main/sync/engine'
+import { SyncEngine, SyncEngineHolder, SYNC_POLL_INTERVAL_MS, REALTIME_DEBOUNCE_MS } from '../src/main/sync/engine'
 import type { SettingsAccess } from '../src/main/sync/push'
 import { createFakeBackend, FAKE_USER_ID, type FakeBackend } from './stubs/fake-backend'
 import { SYNC_TABLES, type SyncStatus } from '../src/shared/sync'
@@ -168,15 +168,24 @@ describe('SyncEngine', () => {
     warn.mockRestore()
   })
 
-  it('Realtime 알림이 오면 즉시 한 번 동기화한다', async () => {
+  it('Realtime 알림은 잠깐 모았다가 한 번만 동기화한다(전송량 절약)', async () => {
     engine.start()
     await vi.advanceTimersByTimeAsync(0)
     const before = backend.calls.select
 
     backend.fire('accounts_sync')
+    backend.fire('accounts_sync')
+    backend.fire('accounts_sync')
     await vi.advanceTimersByTimeAsync(0)
+    expect(backend.calls.select).toBe(before)
 
-    expect(backend.calls.select).toBeGreaterThan(before)
+    await vi.advanceTimersByTimeAsync(REALTIME_DEBOUNCE_MS)
+    const once = backend.calls.select
+    expect(once).toBeGreaterThan(before)
+
+    // 세 번 알림이 와도 한 주기만 돈다
+    await vi.advanceTimersByTimeAsync(REALTIME_DEBOUNCE_MS)
+    expect(backend.calls.select).toBe(once)
   })
 
   it('상태가 바뀌면 구독자에게 알린다(비밀값 없음)', async () => {
