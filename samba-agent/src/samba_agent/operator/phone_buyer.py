@@ -99,6 +99,7 @@ class PhoneToolbox:
         rate: float,
         sleep: Callable[[float], None] = time.sleep,
         notify: Callable[[str, str], object] | None = None,
+        expected_model: str | None = None,
     ) -> None:
         self.phone = phone
         self.approve = approve
@@ -107,6 +108,9 @@ class PhoneToolbox:
         self.sleep = sleep
         # 사람에게 알림(PC 알림창) — 웨이신페이 비밀번호를 사람이 넣어야 할 때 부른다
         self.notify = notify
+        # 주문 품번 — 唯品会 주문 확인 화면에서 AI 가 읽은 품번이 이것을 담고 있어야 결제한다
+        # (실기 2026-10-09 A-SN241632003: U509E1 을 검색해 MW880BD7-D 를 담아 결제 대기 주문을 만들었다)
+        self.expected_model = expected_model
         self.state = BuyState()
 
     # --- 읽기 ---
@@ -235,7 +239,7 @@ class PhoneToolbox:
         return f'{package} 실행'
 
     # --- 돈이 나가는 유일한 길 ---
-    def pay(self, shop: str, price_cny: float) -> str:
+    def pay(self, shop: str, price_cny: float, model_seen: str = '') -> str:
         if self.state.paid:
             return '이미 결제했다 — finish 로 주문번호를 남겨라.'
         if not any(allowed in (shop or '') for allowed in ALLOWED_SHOPS):
@@ -244,6 +248,9 @@ class PhoneToolbox:
             return (
                 '알리페이 결제창이 앞에 없다 — 주문 확인 화면에서 立即支付 로 결제창을 먼저 띄워라.'
             )
+        problem = self._model_problem(model_seen)
+        if problem:
+            return problem
         charge = alipay_order_amount(self.phone.nodes())
         if charge is None:
             return '결제창의 주문금액을 못 읽었다 — 결제하지 않는다. 화면을 다시 읽어라.'
@@ -279,6 +286,19 @@ class PhoneToolbox:
             return f'결제 승인 완료(¥{charge:g}). 코드가 唯品会 주문 상세를 열었다 — screen 으로 订单编号 를 읽어 finish 를 불러라.'
         return f'결제 승인 완료(¥{charge:g}). 이제 淘宝/앱 주문내역에서 주문번호를 읽어 finish 를 불러라.'
 
+    def _model_problem(self, model_seen: str) -> str | None:
+        """AI 가 주문 확인 화면에서 읽은 품번이 주문 품번과 다르면 그 사유, 같으면(또는 점검 대상 아님) None."""
+        if not self.expected_model:
+            return None
+        want = re.sub(r'[^A-Z0-9]', '', self.expected_model.upper())
+        seen = re.sub(r'[^A-Z0-9]', '', (model_seen or '').upper())
+        if want and want in seen:
+            return None
+        return (
+            f'주문 확인 화면의 품번 "{model_seen}" 이 주문 품번 {self.expected_model} 과 다르다 — 결제하지 않는다. '
+            '같은 품번 상품이 없으면 give_up 하라(비슷한 다른 상품을 사면 안 된다).'
+        )
+
     def _step_up_shown(self) -> bool:
         """알리페이 안의 현대카드 3D 인증(Cruise API Step Up · V3 백신 설치) 화면이 떠 있나."""
         if 'verifyidentity' in self._focused_activity():
@@ -286,7 +306,7 @@ class PhoneToolbox:
         shown = ' '.join((n.text or n.desc or '') for n in self.phone.nodes())
         return any(m in shown for m in STEP_UP_MARKS)
 
-    def pay_wechat(self, shop: str, total_cny: float) -> str:
+    def pay_wechat(self, shop: str, total_cny: float, model_seen: str = '') -> str:
         """웨이신페이(微信支付) 결제창이 떠 있을 때 — 사람이 비밀번호를 넣고, 코드는 결제 완료 화면을 기다린다.
 
         사용자 2026-10-09: 唯品会 알리페이가 현대카드 V3 인증으로 멈추면 웨이신페이로 결제한다, 비밀번호는 내가 넣는다.
@@ -299,6 +319,9 @@ class PhoneToolbox:
             return f'가게 "{shop}" 는 화이트리스트가 아니다 — 결제하지 않는다.'
         if self.phone.top_package() != WECHAT:
             return '웨이신 결제창이 앞에 없다 — 唯品会 결제수단을 微信支付 로 바꿔 결제 버튼을 먼저 눌러라.'
+        problem = self._model_problem(model_seen)
+        if problem:
+            return problem
         if total_cny <= 0 or total_cny > self.max_cny:
             return f'실付 ¥{total_cny:g} 이 상한 ¥{self.max_cny:.0f} 을 넘거나 0 이다 — 결제하지 않는다(마진). give_up 하라.'
         if self.notify is not None:
@@ -370,7 +393,7 @@ class PhoneToolbox:
                 return True
         return False
 
-    def pay_free(self, shop: str, total_cny: float, x: int, y: int) -> str:
+    def pay_free(self, shop: str, total_cny: float, x: int, y: int, model_seen: str = '') -> str:
         """비밀번호 없는 결제(支付宝免密支付) 버튼을 누른다 — 唯品会 确认订单 화면 전용(사용자 2026-10-09 "결제 전에 금액 뜨잖아").
 
         결제창이 따로 뜨지 않으므로 코드는 화면의 실付 금액을 AI 가 읽은 값으로 점검한다: 가게 화이트리스트, 상한 이하,
@@ -382,6 +405,9 @@ class PhoneToolbox:
             return f'가게 "{shop}" 는 화이트리스트가 아니다 — 결제하지 않는다.'
         if self.phone.top_package() != 'com.achievo.vipshop':
             return '唯品会 앱의 确认订单 화면이 앞에 없다 — 결제하지 않는다.'
+        problem = self._model_problem(model_seen)
+        if problem:
+            return problem
         if total_cny <= 0 or total_cny > self.max_cny:
             return f'실付 ¥{total_cny:g} 이 상한 ¥{self.max_cny:.0f} 을 넘거나 0 이다 — 결제하지 않는다(마진). give_up 하라.'
         self.phone.tap(int(x), int(y))
@@ -565,21 +591,25 @@ class PhoneBuyer:
 
         @tool(
             'pay',
-            '알리페이 결제창이 앞에 있을 때 결제한다. shop=화면에서 읽은 가게 이름, price_cny=상품 가격(위안). 코드가 점검한다.',
-            {'shop': str, 'price_cny': float},
+            '알리페이 결제창이 앞에 있을 때 결제한다. shop=화면에서 읽은 가게 이름, price_cny=상품 가격(위안), '
+            'model_seen=주문 확인 화면에서 읽은 상품 품번·규격 글자(예 "U509E1；40"). 코드가 점검한다.',
+            {'shop': str, 'price_cny': float, 'model_seen': str},
         )
         async def pay(inp: dict[str, Any]) -> dict[str, Any]:
             return text(
                 await asyncio.to_thread(
-                    tb.pay, str(inp.get('shop', '')), float(inp.get('price_cny', 0) or 0)
+                    tb.pay,
+                    str(inp.get('shop', '')),
+                    float(inp.get('price_cny', 0) or 0),
+                    str(inp.get('model_seen', '')),
                 )
             )
 
         @tool(
             'pay_free',
             '唯品会 确认订单 버튼이 支付宝免密支付(비밀번호 없는 결제)일 때만 쓴다. shop=가게(唯品会), total_cny=화면의 실付 금액, '
-            'x,y=그 결제 버튼 좌표. 코드가 상한을 점검하고 누른다 — 버튼을 tap 으로 직접 누르지 마라.',
-            {'shop': str, 'total_cny': float, 'x': int, 'y': int},
+            'x,y=그 결제 버튼 좌표, model_seen=확인 화면의 상품 품번·규격 글자. 코드가 상한·품번을 점검하고 누른다 — 버튼을 tap 으로 직접 누르지 마라.',
+            {'shop': str, 'total_cny': float, 'x': int, 'y': int, 'model_seen': str},
         )
         async def pay_free(inp: dict[str, Any]) -> dict[str, Any]:
             return text(
@@ -589,19 +619,23 @@ class PhoneBuyer:
                     float(inp.get('total_cny', 0) or 0),
                     int(inp.get('x', 0)),
                     int(inp.get('y', 0)),
+                    str(inp.get('model_seen', '')),
                 )
             )
 
         @tool(
             'pay_wechat',
             '알리페이가 현대카드 3D 인증(V3 백신)에 막혀 唯品会 결제수단을 微信支付 로 바꾼 뒤, 웨이신 결제창이 앞에 있을 때만 쓴다. '
-            'shop=가게(唯品会), total_cny=실付 금액. 비밀번호는 사람이 넣고 코드가 완료를 기다린다.',
-            {'shop': str, 'total_cny': float},
+            'shop=가게(唯品会), total_cny=실付 금액, model_seen=확인 화면에서 읽은 상품 품번·규격 글자. 비밀번호는 사람이 넣고 코드가 완료를 기다린다.',
+            {'shop': str, 'total_cny': float, 'model_seen': str},
         )
         async def pay_wechat(inp: dict[str, Any]) -> dict[str, Any]:
             return text(
                 await asyncio.to_thread(
-                    tb.pay_wechat, str(inp.get('shop', '')), float(inp.get('total_cny', 0) or 0)
+                    tb.pay_wechat,
+                    str(inp.get('shop', '')),
+                    float(inp.get('total_cny', 0) or 0),
+                    str(inp.get('model_seen', '')),
                 )
             )
 

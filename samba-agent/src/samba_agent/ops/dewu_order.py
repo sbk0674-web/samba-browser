@@ -775,9 +775,11 @@ def make_shihuo_handler(
                     f'품번 {model} · EU 사이즈 {eu} · 상품 {getattr(detail, "product_name", "")}',
                     f'결제 상한(마진 > 0): 상품가 ¥{max_cny:.0f} 이하',
                     '순서: launch com.achievo.vipshop → 위 검색칸(360,95)에 품번 type_text → 搜索(642,93) → 같은 품번 상품을 연다',
+                    f'→ 검색 결과·상품 화면에서 품번 {model} 이 정확히 같은 상품만 연다. 같은 품번이 없으면 give_up — 비슷한 다른 품번(예 MW880·U509BC)을 사면 안 된다',
                     '→ 아래쪽 사이즈 줄에서 EU 사이즈를 고른다 → 오른쪽 아래 「特卖价 抢」 → 购物车(장바구니)',
                     '→ 장바구니에 다른 상품이 있으면 그 상품들의 체크를 모두 끄고 이 상품·이 사이즈 1개만 체크한다(다른 상품을 같이 사면 안 된다)',
-                    '→ 结算 → 确认订单: 배송지 HUBNET·상품 1개·사이즈를 확인한다. 버튼이 「支付宝免密支付」면 화면의 실付 금액으로 pay_free(shop="唯品会", total_cny=실付, x, y) 를 부른다(버튼을 tap 으로 직접 누르지 않는다)',
+                    f'→ 结算 → 确认订单: 배송지 HUBNET·상품 1개·사이즈와 상품 규격 글자의 품번({model})을 확인한다. 결제 도구에는 model_seen=확인 화면에서 읽은 규격 글자를 넣는다.'
+                    ' 버튼이 「支付宝免密支付」면 화면의 실付 금액으로 pay_free(shop="唯品会", total_cny=실付, x, y) 를 부른다(버튼을 tap 으로 직접 누르지 않는다)',
                     '  버튼이 일반 支付宝支付 면 눌러 알리페이 결제창이 뜬 뒤 pay(shop="唯品会", price_cny=상품가)',
                     '→ 알리페이가 현대카드 3D 인증(Cruise API Step Up · V3 백신 설치)에 막히면(pay 가 그렇게 알려 준다) 알리페이를 닫고 '
                     '결제수단을 微信支付 로 바꿔 결제 버튼을 누르고, 웨이신 결제창이 뜨면 pay_wechat(shop="唯品会", total_cny=실付) — 비밀번호는 사람이 넣는다(사용자 2026-10-09)',
@@ -792,6 +794,7 @@ def make_shihuo_handler(
                         max_cny=max_cny,
                         rate=rate,
                         notify=_pc_toast,
+                        expected_model=model,
                     )
                     vip = (buyer_factory() if buyer_factory else PhoneBuyer()).buy(tb, vip_ctx)
             except DewuOrderError as e:

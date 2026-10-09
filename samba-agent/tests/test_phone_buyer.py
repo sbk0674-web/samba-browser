@@ -242,3 +242,14 @@ def test_웨이신페이_완료가_안_보이면_불확실로_두고_결제로_�
     assert '상한' in tb.pay_wechat('唯品会', 400.0)
     out = tb.pay_wechat('唯品会', 239.0)
     assert '재결제 금지' in out and tb.state.uncertain and not tb.state.paid
+
+
+def test_주문_확인_화면의_품번이_다르면_결제하지_않는다():
+    """실기 2026-10-09 A-SN241632003: U509E1 주문에 MW880BD7-D 를 담아 결제 대기 주문을 만들었다."""
+    phone = FakePhone('com.achievo.vipshop', [])
+    tb = PhoneToolbox(
+        phone, lambda krw: 'ok', max_cny=366, rate=200.0, sleep=lambda s: None, expected_model='U509E1'
+    )
+    assert '품번' in tb.pay_free('唯品会', 279.0, 550, 1450, '深咖色/黑色 MW880BD7-D；40')
+    assert phone.taps == [] and not tb.state.paid
+    assert '눌렀다' in tb.pay_free('唯品会', 279.0, 550, 1450, '黑色 U509E1；40')
