@@ -846,6 +846,7 @@
       "payco": "PAYCO",
       "alipay": "Alipay",
       "lottecard": "Lotte Card app card (LOCA Pay)",
+      "wechat": "WeChat Pay (Vipshop)",
       "samsung": "Samsung Pay",
       "apple": "Apple Pay",
       "other": "Other"

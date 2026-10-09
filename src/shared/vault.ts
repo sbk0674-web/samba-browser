@@ -47,6 +47,7 @@ export type PaymentProvider =
   | 'payco'
   | 'alipay'
   | 'lottecard'
+  | 'wechat'
   | 'samsung'
   | 'apple'
   | 'other'
@@ -64,6 +65,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProvider[] = [
   'alipay',
   // 롯데카드 앱카드(로카페이) — PC 결제창의 7자리 숫자코드를 폰 디지로카 앱에 넣고 결제 비밀번호 6자리로 승인(2026-10-06)
   'lottecard',
+  // 웨이신페이(微信支付) — 唯品会 알리페이가 현대카드 V3 인증에 막힐 때 쓰는 결제(사용자 2026-10-09)
+  'wechat',
   'samsung',
   'apple',
   'other'
