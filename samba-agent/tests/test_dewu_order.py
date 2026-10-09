@@ -606,8 +606,10 @@ def test_주문번호는_全部_목록에서_결제_금액이_같은_주문을_�
         [
             n('Giannis', 381, 400),
             n('¥ 295', 378, 653),
+            n('实付款', 378, 700),
             n('Jordan 1', 800, 400),
             n('¥ 659', 794, 653),
+            n('实付款', 794, 700),
         ],
         DETAIL,
     ]
@@ -622,9 +624,11 @@ def test_주문번호는_全部_목록에서_결제_금액이_같은_주문을_�
     phone.tap = tap  # type: ignore[method-assign]
     found = dewu_order._latest_order_no(phone, lambda s: None, 659.0)  # type: ignore[arg-type]
     assert found == '110213474374883854'
-    assert (360, 794) in taps  # 조던 줄을 눌렀다(야니스 줄 378 이 아니다)
+    assert (450, 734) in taps  # 조던 카드(금액 줄 794 의 위쪽)를 눌렀다(야니스 줄 378 이 아니다)
     # 금액이 맞는 주문이 없으면 엉뚱한 번호를 쓰지 않는다
-    phone2 = FakePhone([MY, [n('全部', 491, 616)], [n('¥ 295', 378, 653)]], [DEWU])
+    phone2 = FakePhone(
+        [MY, [n('全部', 491, 616)], [n('¥ 295', 378, 653), n('实付款', 378, 700)]], [DEWU]
+    )
     assert dewu_order._latest_order_no(phone2, lambda s: None, 659.0) is None  # type: ignore[arg-type]
 
 
@@ -654,3 +658,11 @@ def test_가볍게_사용_표시_버튼도_중고로_보고_뺀다():
         Node('¥200', '', '', 472, 1438),
     ]
     assert [n.text for n in new_buy_buttons(nodes)] == ['¥488']
+
+
+def test_금액_글자가_띄어_쓰여도_읽는다():
+    """실기: '¥ 4 8 8' 처럼 글자 사이가 띄어진 금액을 못 읽어 주문번호를 못 찾았다."""
+    assert dewu_order._price_of('¥488') == 488.0
+    assert dewu_order._price_of('¥ 4 8 8') == 488.0
+    assert dewu_order._price_of('￥ 659.00') == 659.0
+    assert dewu_order._price_of('实付款') is None

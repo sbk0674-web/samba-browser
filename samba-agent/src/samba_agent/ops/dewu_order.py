@@ -555,7 +555,36 @@ def _latest_order_no(
 
     실기 2026-10-09: '待发货' 첫 주문을 읽었더니, 판매자가 곧바로 발송해 방금 산 조던(¥659)은 '商家已发出' 로 빠지고
     전에 산 야니스(¥295)의 번호가 기입됐다. '全部' 는 최신순이고, 실付款 금액으로 방금 산 주문을 고른다.
+    같은 날 A-SW242585599·A-SN242628053 은 번호를 못 읽어 사람이 기입했다 — 앱을 껐다 켜서 홈부터 시작하고,
+    '¥ 4 8 8' 처럼 띄어 쓴 금액도 읽고, 못 찾으면 한 번 더 처음부터 한다.
     """
+    for attempt in range(2):
+        found = _read_order_no_once(phone, sleep, price, fresh=attempt > 0)
+        if found:
+            return found
+    return None
+
+
+def _price_of(text: str | None) -> float | None:
+    """'¥488'·'¥ 4 8 8'·'￥ 659.00' → 숫자. 금액 글자가 아니면 None."""
+    m = re.match(r'^[¥￥]\s*([\d\s]+(?:\.\d+)?)$', (text or '').strip())
+    if not m:
+        return None
+    try:
+        return float(re.sub(r'\s+', '', m.group(1)))
+    except ValueError:
+        return None
+
+
+def _read_order_no_once(
+    phone: Phone, sleep: Callable[[float], None], price: float | None, *, fresh: bool
+) -> str | None:
+    if fresh:
+        # 지난 시도가 남긴 화면에 갇혔다 — 앱을 껐다 켜서 홈부터 다시 한다
+        phone._run('shell', 'am', 'force-stop', DEWU)
+        sleep(1)
+        phone.launch(DEWU)
+        sleep(7)
     for _ in range(6):
         nodes = phone.nodes()
         tab = find_text(nodes, '我')
@@ -573,14 +602,17 @@ def _latest_order_no(
     # 我 화면의 '订单 … 全部 >' — 없으면 실측 위치(616,491)
     whole = next((n for n in nodes if n.text.strip() == '全部' and 400 < n.y < 560), None)
     phone.tap(*((whole.x, whole.y) if whole is not None else (616, 491)))
-    sleep(3.5)
+    sleep(4)
     nodes = phone.nodes()
+    # 주문 목록이 아니면(홈·상품 화면으로 빠짐) 이번 시도는 접는다 — 호출부가 처음부터 다시 한다
+    if not any('实付款' in (n.text or '') for n in nodes):
+        return None
     target = None
     if price:
-        # 같은 줄(±40px)의 ¥ 금액이 price 와 같은 첫 주문 — '¥ 659' 처럼 띄어 쓰여도 읽는다
+        # 같은 줄의 ¥ 금액이 price 와 같은 첫 주문 — 목록은 최신순이라 위에서 첫 번째가 방금 산 것이다
         for n in sorted(nodes, key=lambda n: n.y):
-            m = re.match(r'^[¥￥]\s*(\d+(?:\.\d+)?)$', (n.text or '').strip())
-            if m and abs(float(m.group(1)) - price) < 0.6:
+            got = _price_of(n.text)
+            if got is not None and abs(got - price) < 0.6:
                 target = n
                 break
         if target is None:
@@ -589,8 +621,9 @@ def _latest_order_no(
         target = next((n for n in sorted(nodes, key=lambda n: n.y) if '实付款' in n.text), None)
         if target is None:
             return None
-    phone.tap(360, max(target.y, 300))
-    sleep(3)
+    # 금액 줄의 카드(실付款 글자 바로 위)를 누른다 — 카드 한가운데 x 로
+    phone.tap(450, max(target.y - 60, 300))
+    sleep(3.5)
     for _ in range(8):
         found = order_no_after_label(phone.nodes())
         if found:
@@ -599,7 +632,6 @@ def _latest_order_no(
         phone._run('shell', 'input', 'swipe', '360', '1200', '360', '800', '300')
         sleep(1)
     return None
-
 
 def _buy_taobao_pc(
     pc_call: Callable[[str, dict[str, object]], str],
