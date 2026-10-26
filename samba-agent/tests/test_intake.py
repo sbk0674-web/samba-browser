@@ -6,7 +6,7 @@ import pytest
 from samba_agent.agents.registry import Registry
 from samba_agent.failures import FailReason
 from samba_agent.queue.db import JobQueue
-from samba_agent.queue.intake import Intake, intake_line
+from samba_agent.queue.intake import Intake, intake_line, twin_order_no
 from samba_agent.settings import DEFAULT_ROOT
 from samba_agent.wave.client import WaveError, WaveOrder
 
@@ -107,7 +107,7 @@ def test_같은_주문이_두_번_실려_와도_한_번만_접수한다(setup):
     assert len(slack.tops) == 1
 
 
-@pytest.mark.parametrize('state', ['needs_human', 'failed', 'cancelled', 'done'])
+@pytest.mark.parametrize('state', ['needs_ai', 'failed', 'cancelled', 'done'])
 def test_큐에_한_번_들어온_주문은_어떤_상태든_다시_접수하지_않는다(setup, state):
     # 사람 확인 대기 건이 매 주기 되살아나 무한 반복되면 안 된다 — 다시 돌리는 건 슬랙 `이어서`
     q, slack, make = setup
@@ -135,10 +135,10 @@ def test_한_바퀴에_새로_접수하는_건수는_상한이_있다(setup):
 def test_미지원_소싱처는_접수_뒤_바로_사람에게_넘긴다(setup):
     q, slack, make = setup
     # KREAM 은 sources.yaml 에서 hold — 등록부에 구매 에이전트가 없다
-    intake, _w = make([wave_order('K1', source='KREAM'), wave_order('S1', source='SNKRDUNK')])
+    intake, _w = make([wave_order('K1', source='KREAM'), wave_order('S1', source='UNKNOWN_SOURCE')])
     report = intake.run_once()
     assert (report.enqueued, report.unsupported) == (0, 2)
-    assert q.get('K1').state == 'needs_human'
+    assert q.get('K1').state == 'needs_ai'
     assert q.get('K1').error == 'unsupported: KREAM'
     assert len(slack.lines) == 2  # 스레드마다 한 줄씩만
     assert slack.lines[0][0] == 'ts1'
@@ -315,10 +315,23 @@ def test_무신사에서_사라진_상품은_재고X_로_마감한다(tmp_path):
     report = intake.run_once()
     assert report.enqueued == 0
     job = q.get('G2')
-    assert job.state == 'needs_human'
+    assert job.state == 'needs_ai'
     assert job.error == 'out_of_stock'
     assert marked == [('G2', 'out_of_stock')]
     assert any('재고X' in t for _, t in slack.lines)
+
+
+def test_inferred_missing_product_finishes_only_after_cancel_readback(tmp_path):
+    for confirmed in (True, False):
+        q = JobQueue(tmp_path / f'jobs-{confirmed}.sqlite')
+        slack = _Slack()
+        order = wave_order('cancel-check', source='', product_name='남자데님팬츠 05415547 와이드 쿨 데님 415547 3colo')
+        intake = Intake(_LinkWave([order], link_status=404), q, Registry.load(DEFAULT_ROOT),
+                        slack.post_new, slack.post_line, days=7,
+                        on_unfulfillable=lambda *args: 'done',
+                        cancel_confirmed=lambda *args: confirmed)
+        intake.run_once()
+        assert q.get('cancel-check').state == ('cancelled' if confirmed else 'needs_ai')
 
 
 def test_상품명이_잘린_롯데온_주문은_접두어로_연결만_시도한다(tmp_path):
@@ -401,7 +414,7 @@ def test_옛_행이_사람_대기면_같은_주문번호의_행은_접수하지_
     q, _slack, make = setup
     legacy, _ = q.enqueue('X', 'U1', {}, 'ts0')
     q.claim()
-    q.finish(legacy.id, 'needs_human', error='margin')
+    q.finish(legacy.id, 'needs_ai', error='margin')
     intake, _w = make([wave_order('X', id='ord_B', product_option='210')])
     report = intake.run_once()
     assert (report.enqueued, report.skipped_live) == (0, 1)
@@ -436,18 +449,18 @@ def test_bridge_down_으로_멈춘_작업은_5분_뒤_한_번_다시_넣는다(t
     intake = Intake(wave, q, reg, slack.post_new, slack.post_line, days=7)
     intake.run_once()
     job = q.get('T1')
-    q.finish(job.id, 'needs_human', error='bridge_down')
+    q.finish(job.id, 'needs_ai', error='bridge_down')
     intake.run_once()  # 방금 멈췄다 — 5분 안에는 두지 않는다
-    assert q.get('T1').state == 'needs_human'
+    assert q.get('T1').state == 'needs_ai'
     old = (datetime.now(UTC) - timedelta(minutes=6)).isoformat(timespec='seconds')
     q._db.execute('UPDATE jobs SET updated_at=? WHERE id=?', (old, job.id))
     intake.run_once()
     again = q.get('T1')
     assert again.state == 'queued' and again.attempts == 1
-    q.finish(job.id, 'needs_human', error='bridge_down')
+    q.finish(job.id, 'needs_ai', error='bridge_down')
     q._db.execute('UPDATE jobs SET updated_at=? WHERE id=?', (old, job.id))
     intake.run_once()  # 두 번째는 자동으로 하지 않는다
-    assert q.get('T1').state == 'needs_human'
+    assert q.get('T1').state == 'needs_ai'
 
 
 class _CancelWave(_FakeWave):
@@ -519,3 +532,22 @@ def test_소싱처_매칭에_끝내_실패한_주문은_한참_뒤_근거를_남
         wave2, JobQueue(tmp_path / 'j2.sqlite'), reg, slack.post_new, slack.post_line, days=7
     ).run_once()
     assert wave2.set_calls == []
+
+
+def test_같은_마켓_주문의_다른_표기_행은_이미_이행했으면_접수하지_않는다(setup):
+    # KT알파 직수집 '…:001' 을 이미 샀는데 플레이오토가 '…-001' 로 한 번 더 실어 온 경우(2026-10-26 이중 구매)
+    q, slack, make = setup
+    job, _ = q.enqueue('20261025100544087:003', 'U_colon', {}, 'ts0')
+    q.finish(job.id, 'done')
+    intake, _w = make([wave_order('20261025100544087-003', wave_id='U_dash')])
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (0, 1)
+    assert q.get('U_dash') is None
+    assert slack.tops == []
+
+
+def test_twin_order_no_는_구분자만_바꾼다():
+    assert twin_order_no('20261025100544087-003') == '20261025100544087:003'
+    assert twin_order_no('20261025100544087:003') == '20261025100544087-003'
+    assert twin_order_no('746941046456350') is None
+    assert twin_order_no('A-SN241012963') is None

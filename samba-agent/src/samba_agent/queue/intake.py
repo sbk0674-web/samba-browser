@@ -6,7 +6,7 @@
 3. 남은 주문은 슬랙에 최상위 메시지를 하나 올리고, 그 ts 를 스레드로 삼아 큐에 넣는다.
 
 맡을 구매 에이전트가 없는 소싱처(KREAM 보류·수기·스니커덩크 등)도 일단 큐에 넣되 바로
-`needs_human` 으로 닫고 스레드에 한 줄 남긴다 — 사람이 보게 하되 하네스는 손대지 않는다.
+`needs_ai` 으로 닫고 스레드에 한 줄 남긴다 — 사람이 보게 하되 하네스는 손대지 않는다.
 슬랙에 나가는 문구에는 개인정보(이름·전화·주소)를 넣지 않는다(계획 Global Constraints).
 """
 
@@ -14,6 +14,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+import re
 from datetime import UTC, datetime, timedelta
 
 from samba_agent.agents.contracts import OrderRef
@@ -30,6 +31,20 @@ UNLINKED_CANCEL_AFTER = timedelta(minutes=60)
 SKU_LIMIT = 40
 # run_forever 가 멈춤 신호를 확인하는 간격(초). 주기가 길어도 종료는 빠르게 한다
 TICK_S = 0.5
+REQUEUE_NEEDS_HUMAN_ERRORS = frozenset({'unknown', 'permission_denied', 'bridge_down'})
+REQUEUE_AFTER = timedelta(minutes=2)
+
+# KT알파쇼핑 주문번호는 직수집이 '17자리:3자리', 플레이오토 경유가 '17자리-3자리' 로 들어온다 — 같은 주문의 두 표기
+_TWIN_ORDER_NO = re.compile(r'^(\d{17})([-:])(\d{3})$')
+
+
+def twin_order_no(order_no: str) -> str | None:
+    """같은 마켓 주문의 다른 표기(구분자 ':' ↔ '-'). 그런 꼴이 아니면 None."""
+    m = _TWIN_ORDER_NO.match(order_no or '')
+    if not m:
+        return None
+    sep = ':' if m.group(2) == '-' else '-'
+    return f'{m.group(1)}{sep}{m.group(3)}'
 
 
 @dataclass(frozen=True)
@@ -86,6 +101,7 @@ class Intake:
         poison_only: bool = False,
         all_sellers_sources: frozenset[str] = frozenset(),
         on_unfulfillable: Callable[[str, str], str | None] | None = None,
+        cancel_confirmed: Callable[[str, str], bool] | None = None,
         on_unlinked: Callable[[str, str | None], str | None] | None = None,
     ) -> None:
         self._wave = wave
@@ -104,6 +120,7 @@ class Intake:
         self._all_sellers = frozenset(x.upper() for x in all_sellers_sources)
         # 이행 불가 주문 처리(가격X·재고X 표시 + 취소요청) — (주문 키(행 id), 실패 사유)
         self._on_unfulfillable = on_unfulfillable
+        self._cancel_confirmed = cancel_confirmed
         # 범위 밖 소싱처 미등록 주문 중 이미 연결을 시도한 주문(주기마다 되풀이하지 않는다)
         self._linked_only: set[str] = set()
         # 소싱처를 추정도 못 한 주문 — 샵마인·EMP 의 판매자상품코드를 읽어 달라고 넘긴다(주문번호, 판매처)
@@ -169,7 +186,9 @@ class Intake:
             handled.add(order.wave_key)
             ts = self._post_new(intake_line(order))
             job, _created = self._queue.enqueue(
-                order.order_no, self._requester, {}, thread_ts=ts, wave_id=order.wave_id
+                order.order_no, self._requester,
+                {'_order_received_at': wave_order.paid_at.isoformat()} if wave_order.paid_at else {},
+                thread_ts=ts, wave_id=order.wave_id
             )
             if self._supported(order):
                 if wave_order.source_inferred and not self._link_inferred(wave_order, job.id, ts):
@@ -178,8 +197,8 @@ class Intake:
                 continue
             # 맡을 구매 에이전트가 없다 — 큐에 흔적만 남기고 바로 사람에게 넘긴다
             unsupported += 1
-            self._queue.finish(job.id, 'needs_human', error=f'unsupported: {order.source}')
-            self._post_line(ts, f'미지원 소싱처: {order.source} — 사람이 처리해야 합니다')
+            self._queue.finish(job.id, 'needs_ai', error=f'unsupported: {order.source}')
+            self._post_line(ts, f'미지원 소싱처: {order.source} — AI 직접 확인·수리 필요')
         return IntakeReport(
             seen=seen, enqueued=enqueued, skipped_live=skipped_live, unsupported=unsupported
         )
@@ -272,12 +291,18 @@ class Intake:
             log.info('소싱처 미등록 주문 연결 실패 %s %s: %s', wave_order.order_number, label, e)
             if e.status == 404:
                 if job_id is not None:
-                    self._queue.finish(job_id, 'needs_human', error=str(FailReason.OUT_OF_STOCK))
+                    self._queue.finish(job_id, 'needs_ai', error=str(FailReason.OUT_OF_STOCK))
                 done = (
                     self._on_unfulfillable(key, str(FailReason.OUT_OF_STOCK))
                     if self._on_unfulfillable
                     else None
                 )
+                if job_id is not None and done and self._cancel_confirmed:
+                    try:
+                        if self._cancel_confirmed(key, str(FailReason.OUT_OF_STOCK)):
+                            self._queue.finish(job_id, 'cancelled', error=str(FailReason.OUT_OF_STOCK))
+                    except Exception:
+                        log.exception('접수 단계 취소 확인 실패 — needs_ai 유지: %s', wave_order.order_number)
                 self._post_line(
                     ts,
                     f'소싱처 상품 없음({label}) — 재고X' + (f' · {done}' if done else ''),
@@ -317,12 +342,52 @@ class Intake:
     def _already_queued(self, order: OrderRef) -> bool:
         """큐에 어떤 상태로든 이미 있는 삼바웨이브 행인가.
 
-        살아 있는 건은 물론이고 needs_human·failed·cancelled 로 끝난 건도 건너뛴다 — 삼바웨이브에서는
+        살아 있는 건은 물론이고 needs_ai·failed·cancelled 로 끝난 건도 건너뛴다 — 삼바웨이브에서는
         여전히 미이행이라 매 주기 되살아나 사람이 정리하기 전까지 무한 반복된다. 다시 돌리는 건
         슬랙 `이어서`(retry) 나 사람의 결정이다. 행 id 로 찾고, 행 id 가 없는 옛 행은 같은 상품주문번호면
         막되 done 이면 막지 않는다(이미 기입한 다른 행 — 실기 20261005DFA7D9 230 done 뒤 210 이 안 들어갔다).
         """
-        return self._queue.find(order.order_no, order.wave_id) is not None
+        job = self._queue.find(order.order_no, order.wave_id)
+        if job is None:
+            # 같은 마켓 주문이 다른 수집 경로로 한 번 더 들어온 행(KT알파 '…:001' ↔ 플레이오토 '…-001')이면
+            # 이미 산 것을 또 사지 않는다(실기 2026-10-26: 202610261605060003 뒤 202610261703190004 이중 구매).
+            # 삼바웨이브 쪽 수집기도 거르지만, 여기서도 막아야 수집기 회귀 때 결제까지 가지 않는다
+            twin = twin_order_no(order.order_no)
+            if twin:
+                done = self._queue.find(twin, None)
+                if done is not None and done.state == 'done':
+                    log.warning(
+                        '중복 수집 행 건너뜀: %s 는 %s(이미 이행) 과 같은 마켓 주문이다 — 삼바웨이브 수집기 점검 필요',
+                        order.order_no,
+                        twin,
+                    )
+                    return True
+            return False
+        if self._requeue_safe_needs_ai(job):
+            return True
+        return True
+
+    def _requeue_safe_needs_ai(self, job) -> bool:
+        """자동수리 실패(needs_ai) 중 결제 전 오류만 다시 큐에 넣는다.
+
+        품절·마진·검증불일치·결제중단은 결론이거나 결제 위험이 있어 여기서 재시도하지 않는다.
+        """
+        if job.state != 'needs_ai' or (job.error or '') not in REQUEUE_NEEDS_HUMAN_ERRORS:
+            return False
+        if job.attempts >= 1:
+            return False
+        try:
+            idle = datetime.now(UTC) - datetime.fromisoformat(job.updated_at)
+        except ValueError:
+            return False
+        if idle < REQUEUE_AFTER:
+            return False
+        try:
+            self._queue.retry(job.id)
+        except ValueError:
+            return False
+        log.info('자동수리 실패 작업을 다시 큐에 넣었다: %s (%s)', job.order_no, job.error)
+        return True
 
     def _settle_market_cancelled(self) -> None:
         """마켓이 이미 취소로 돌린 미이행 주문을 취소중으로 넘겨 정리한다(삼바웨이브가 마켓 취소완료와 맞춰 마감한다).
@@ -362,7 +427,7 @@ class Intake:
     def _retry_bridge_down(self, order: OrderRef) -> None:
         """bridge_down 으로 사람에게 넘어간 작업을 5분 뒤 한 번 다시 넣는다(결제 단계 진입 전 끊김만 — 결제 중 끊김은 pay_interrupted)."""
         job = self._queue.find(order.order_no, order.wave_id)
-        if job is None or job.state != 'needs_human' or (job.error or '') != 'bridge_down':
+        if job is None or job.state != 'needs_ai' or (job.error or '') != 'bridge_down':
             return
         if job.attempts >= 1:
             return
