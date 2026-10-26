@@ -153,9 +153,14 @@ class Intake:
         self._settle_market_cancelled()
         seen = enqueued = skipped_live = unsupported = 0
         handled: set[str] = set()
+        # 이번 목록에 실려 온 주문번호 — 같은 마켓 주문의 두 표기(KT알파 ':001' ↔ 플레이오토 '-001')가 함께 오면 대시 쪽을 거른다
+        listed_numbers = {o.order_number for o in orders}
         for wave_order in sorted(orders, key=_paid_key):
             seen += 1
             order = wave_order.to_order_ref()
+            if self._dash_twin_listed(order.order_no, listed_numbers):
+                skipped_live += 1
+                continue
             self._ask_lookup(wave_order)
             if self._cancel_unlinked(wave_order):
                 continue
@@ -362,17 +367,36 @@ class Intake:
             # 삼바웨이브 쪽 수집기도 거르지만, 여기서도 막아야 수집기 회귀 때 결제까지 가지 않는다
             twin = twin_order_no(order.order_no)
             if twin:
-                done = self._queue.find(twin, None)
-                if done is not None and done.state == 'done':
+                twin_job = self._queue.find(twin, None)
+                # 쌍둥이가 큐에 어떤 상태로든 있으면 이 행은 중복 수집이다 — 예전엔 done 일 때만 막아서
+                # 쌍둥이가 needs_ai(주문 조회 실패)로 멈춰 있는 사이 대시 행이 들어와 사러 갔다
+                # (실기 2026-10-27 08:31 지프 후드 3297 — 결제 직전 사람이 멈춤)
+                if twin_job is not None:
                     log.warning(
-                        '중복 수집 행 건너뜀: %s 는 %s(이미 이행) 과 같은 마켓 주문이다 — 삼바웨이브 수집기 점검 필요',
+                        '중복 수집 행 건너뜀: %s 는 %s(큐 상태 %s) 와 같은 마켓 주문이다 — 삼바웨이브 수집기 점검 필요',
                         order.order_no,
                         twin,
+                        twin_job.state,
                     )
                     return True
             return False
         if self._requeue_safe_needs_ai(job):
             return True
+        return True
+
+    def _dash_twin_listed(self, order_no: str, listed: set[str]) -> bool:
+        """플레이오토 표기('-001') 행인데 직수집 표기(':001')가 같은 미이행 목록에 있으면 중복 수집 행이다.
+
+        두 행은 같은 마켓 주문 하나다. 콜론 행만 이행하고 대시 행은 접수하지 않는다(삼바웨이브 수집기가
+        지운 대시 행을 다시 만들어도 여기서 막힌다 — 2026-10-27 지프 후드가 하룻밤 5번 다시 들어왔다).
+        """
+        m = _TWIN_ORDER_NO.match(order_no or '')
+        if not m or m.group(2) != '-':
+            return False
+        colon = f'{m.group(1)}:{m.group(3)}'
+        if colon not in listed:
+            return False
+        log.warning('중복 수집 행 건너뜀: %s 는 %s(같은 목록) 과 같은 마켓 주문이다 — 대시 행은 접수하지 않는다', order_no, colon)
         return True
 
     def _requeue_safe_needs_ai(self, job) -> bool:

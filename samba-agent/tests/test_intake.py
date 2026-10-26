@@ -556,6 +556,32 @@ def test_같은_마켓_주문의_다른_표기_행은_이미_이행했으면_접
     assert slack.tops == []
 
 
+def test_같은_마켓_주문의_다른_표기_행은_쌍둥이가_큐에_어떤_상태로든_있으면_접수하지_않는다(setup):
+    # 2026-10-27: 콜론 행이 needs_ai(주문 조회 실패)로 멈춘 사이 대시 행이 들어와 결제 직전까지 갔다
+    q, slack, make = setup
+    job, _ = q.enqueue('20261025100543273:001', 'U_colon', {}, 'ts0')
+    q.finish(job.id, 'needs_ai', error='order lookup incomplete')
+    intake, _w = make([wave_order('20261025100543273-001', wave_id='U_dash')])
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (0, 1)
+    assert q.find('20261025100543273-001', 'U_dash') is None
+
+
+def test_같은_목록에_콜론_행과_대시_행이_함께_오면_콜론_행만_접수한다(setup):
+    # 삼바웨이브가 같은 주문을 두 행으로 실어 보내면(수집기 중복) 대시 행은 큐에 넣지 않는다
+    q, slack, make = setup
+    intake, _w = make(
+        [
+            wave_order('20261025100544087-001', wave_id='U_dash'),
+            wave_order('20261025100544087:001', wave_id='U_colon'),
+        ]
+    )
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (1, 1)
+    assert q.find('20261025100544087:001', 'U_colon') is not None
+    assert q.find('20261025100544087-001', 'U_dash') is None
+
+
 def test_twin_order_no_는_구분자만_바꾼다():
     assert twin_order_no('20261025100544087-003') == '20261025100544087:003'
     assert twin_order_no('20261025100544087:003') == '20261025100544087-003'
