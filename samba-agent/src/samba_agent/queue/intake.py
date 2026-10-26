@@ -11,10 +11,10 @@
 """
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-import re
 from datetime import UTC, datetime, timedelta
 
 from samba_agent.agents.contracts import OrderRef
@@ -186,9 +186,13 @@ class Intake:
             handled.add(order.wave_key)
             ts = self._post_new(intake_line(order))
             job, _created = self._queue.enqueue(
-                order.order_no, self._requester,
-                {'_order_received_at': wave_order.paid_at.isoformat()} if wave_order.paid_at else {},
-                thread_ts=ts, wave_id=order.wave_id
+                order.order_no,
+                self._requester,
+                {'_order_received_at': wave_order.paid_at.isoformat()}
+                if wave_order.paid_at
+                else {},
+                thread_ts=ts,
+                wave_id=order.wave_id,
             )
             if self._supported(order):
                 if wave_order.source_inferred and not self._link_inferred(wave_order, job.id, ts):
@@ -300,9 +304,13 @@ class Intake:
                 if job_id is not None and done and self._cancel_confirmed:
                     try:
                         if self._cancel_confirmed(key, str(FailReason.OUT_OF_STOCK)):
-                            self._queue.finish(job_id, 'cancelled', error=str(FailReason.OUT_OF_STOCK))
+                            self._queue.finish(
+                                job_id, 'cancelled', error=str(FailReason.OUT_OF_STOCK)
+                            )
                     except Exception:
-                        log.exception('접수 단계 취소 확인 실패 — needs_ai 유지: %s', wave_order.order_number)
+                        log.exception(
+                            '접수 단계 취소 확인 실패 — needs_ai 유지: %s', wave_order.order_number
+                        )
                 self._post_line(
                     ts,
                     f'소싱처 상품 없음({label}) — 재고X' + (f' · {done}' if done else ''),

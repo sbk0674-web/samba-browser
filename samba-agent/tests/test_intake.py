@@ -325,11 +325,21 @@ def test_inferred_missing_product_finishes_only_after_cancel_readback(tmp_path):
     for confirmed in (True, False):
         q = JobQueue(tmp_path / f'jobs-{confirmed}.sqlite')
         slack = _Slack()
-        order = wave_order('cancel-check', source='', product_name='남자데님팬츠 05415547 와이드 쿨 데님 415547 3colo')
-        intake = Intake(_LinkWave([order], link_status=404), q, Registry.load(DEFAULT_ROOT),
-                        slack.post_new, slack.post_line, days=7,
-                        on_unfulfillable=lambda *args: 'done',
-                        cancel_confirmed=lambda *args: confirmed)
+        order = wave_order(
+            'cancel-check',
+            source='',
+            product_name='남자데님팬츠 05415547 와이드 쿨 데님 415547 3colo',
+        )
+        intake = Intake(
+            _LinkWave([order], link_status=404),
+            q,
+            Registry.load(DEFAULT_ROOT),
+            slack.post_new,
+            slack.post_line,
+            days=7,
+            on_unfulfillable=lambda *args: 'done',
+            cancel_confirmed=lambda *args: confirmed,
+        )
         intake.run_once()
         assert q.get('cancel-check').state == ('cancelled' if confirmed else 'needs_ai')
 
