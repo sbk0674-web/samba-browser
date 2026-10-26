@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     dry_run_digits: int = Field(default=0, ge=0, le=3, alias='SAMBA_DRY_RUN_DIGITS')
     # 작업이 끝나도 브라우저 탭을 남긴다(다음 작업 시작 때 정리) — 사람이 과정을 눈으로 확인하려고
     keep_tabs: bool = Field(default=False, alias='SAMBA_KEEP_TABS')
+    # 한 작업의 시간 상한(분). 넘기면 결제 전 단계에서 needs_ai(timeout). 0 이면 없음
+    job_max_minutes: float = Field(default=20.0, ge=0, alias='SAMBA_JOB_MAX_MINUTES')
     # 저장 스크립트가 실패하면 AI 가 화면을 보고 고쳐 이어 간다(검증 통과한 코드만 저장, 이전 판은 이력 폴더)
     # 기본 꺼짐 — 2026-09-24 수리 시험 중 '결제하기' 클릭으로 실결제 발생. 앱 쪽 결제 버튼 클릭 차단 전까지 켜지 않는다
     repair_enabled: bool = Field(default=False, alias='SAMBA_REPAIR_ENABLED')

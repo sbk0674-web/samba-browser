@@ -5,9 +5,9 @@
 """
 
 import functools
-import os
 import json
 import logging
+import os
 import signal
 import sqlite3
 import threading
@@ -179,7 +179,7 @@ def make_cancel_export(
         queue,
         routing,
         lambda order_no: wave.get_order(order_no).seller,
-        wait_s=settings.export_wait_s,
+        wait_s=0.0,
         deferred=EXPORT_DEFERRED,
     )
 
@@ -285,7 +285,10 @@ def main() -> None:
         order = _parse_order(job.order_no, job.options, job.wave_id)
         return order.source, order.sku
 
-    agents = build_agents(reg, bridge, decide, wave, settings.compare_accounts_max)
+    has_lanes = bridge.supports_lanes()
+    # 앱의 자식 탭 추적 수정 적용 전에는 기존 본 작업 통로를 유지한다.
+    agent_bridge = bridge
+    agents = build_agents(reg, agent_bridge, decide, wave, settings.compare_accounts_max)
     repair_on = settings.repair_enabled
     if repair_on and not app_supports_pay_guard(bridge.scoped(['run_js'])):
         # 앱이 run_js safety:no_pay(결제 버튼 클릭 차단)를 모르면 AI 수리를 켜지 않는다 — 예전 앱은 이 값을
@@ -315,7 +318,7 @@ def main() -> None:
         for agent in agents.values():
             if isinstance(agent, BuyerAgent):
                 agent.known_sourcing_numbers = _known_sourcing
-    if bridge.supports_lanes():
+    if has_lanes:
         # 앱이 레인을 알면 계정 비교를 동시에 돌린다(모르면 예전처럼 순서대로 — 한 탭을 서로 건드린다)
         for agent in agents.values():
             if isinstance(agent, BuyerAgent):
@@ -410,6 +413,7 @@ def main() -> None:
             call=_operator_call,
             queue=queue,
             flag_order=flagger.mark if flagger is not None else None,
+            cancel_confirmed=flagger.confirmed if flagger is not None else None,
             report=_report,
             describe=_describe,
             events_path=settings.root / 'events.sqlite',
@@ -435,6 +439,7 @@ def main() -> None:
             dry_run=settings.dry_run,
             dry_run_digits=settings.dry_run_digits,
             keep_tabs=settings.keep_tabs,
+            job_max_s=settings.job_max_minutes * 60,
             auto_approve=settings.auto_approve,
             manual_approve_methods=tuple(
                 x.strip() for x in settings.manual_approve_methods.split(',') if x.strip()
@@ -445,10 +450,13 @@ def main() -> None:
             prompt_commit=settings.prompt_commit,
             prune=events.prune,
             # 작업이 연 탭은 끝날 때 닫는다 — 옛 주문서 탭을 다음 작업이 읽던 문제(실기)
-            tabs=TabJanitor(bridge.scoped(list(TAB_TOOLS))),
+            tabs=TabJanitor(
+                bridge.scoped(list(TAB_TOOLS)), owned_lanes=frozenset({'taobao', 'harness'})
+            ),
             # 앱 채팅이 도는 동안(409 busy)·앱이 꺼진 동안은 큐를 집지 않는다
             ready=lambda: _bridge_ready(bridge),
             flag_order=flagger.mark if flagger is not None else None,
+            cancel_confirmed=flagger.confirmed if flagger is not None else None,
             add_memo=wave.add_memo if wave is not None else None,
             # SSG 선물 주문은 결제 뒤 폰 카카오톡에서 선물을 받아야 발송된다(사용자 2026-10-01 하네스 이식)
             after_done=make_after_done(_source_sku_of),
@@ -460,6 +468,7 @@ def main() -> None:
                     'SHIHUO': make_shihuo_handler(
                         wave,
                         _alipay_approve(bridge.scoped(['phone_approve_payment'])),
+                        phone_repair_enabled=settings.repair_enabled,
                         approve_other=_alipay_approve(
                             bridge.scoped(['phone_approve_payment']), merchant='淘宝'
                         ),
@@ -484,13 +493,12 @@ def main() -> None:
         slack_app = App(token=settings.slack_bot_token.get_secret_value())
 
     if wave is not None:
-        # 중국 크림 得物 주문 송장 — 30분마다 큐가 비었을 때 폰 得物 앱에서 읽어 해외송장에 넣는다(사용자 2026-10-01)
-        # 사람 대기(needs_human)는 폰을 쓰지 않으니 빼고, 대기·실행 중인 작업이 없을 때만 돈다
+        # 중국 크림 得物 주문 송장 — 3시간마다 큐가 비었을 때만 모은다
+        # 사람 대기(needs_ai)는 폰을 쓰지 않으니 빼고, 대기·실행 중인 작업이 없을 때만 돈다
         start_dewu_tracking_loop(
             wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live())
         )
-        # 롯데ON 선물 주문 송장 — 카카오톡 알림톡으로만 온다. 20분마다 폰에서 읽어 삼바에 넣고 마켓으로 보낸다(사용자 2026-10-02)
-        # 롯데ON 선물 송장(폰 카카오톡 읽기)은 기본 꺼짐 — 폰을 다른 자동화(당근 등록)와 같이 쓰면
+        # 롯데ON 선물 주문 송장(폰 카카오톡 읽기) — 기본 꺼짐. 폰을 다른 자동화(당근 등록)와 같이 쓰면
         # 카톡이 앞으로 튀어나와 충돌해 2026-10-20 사용자 지시로 끔. 필요하면 SAMBA_LOTTEON_GIFT_TRACKING=1
         if os.environ.get('SAMBA_LOTTEON_GIFT_TRACKING') == '1':
             start_lotteon_gift_tracking_loop(
@@ -518,6 +526,7 @@ def main() -> None:
             ),
             # 이행 불가(소싱처 상품 삭제) — 재고X 표시 + 취소요청
             on_unfulfillable=flagger.mark if flagger is not None else None,
+            cancel_confirmed=flagger.confirmed if flagger is not None else None,
             # 소싱처를 추정도 못 한 주문 — 샵마인·EMP 에서 판매자상품코드를 읽어 온다
             on_unlinked=make_lookup(settings),
         )

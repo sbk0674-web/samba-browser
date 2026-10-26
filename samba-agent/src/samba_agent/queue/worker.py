@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from samba_agent.agents.base import JOB_DEADLINE
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.failures import FailReason
 from samba_agent.ops.events import EventLog
@@ -88,6 +89,9 @@ class WorkerDeps:
     # True 면 작업이 끝나도 탭을 바로 닫지 않고 **다음 작업이 시작할 때** 닫는다 — 사용자가 결과 화면(주문서·
     # 실패 화면)을 눈으로 확인할 수 있어야 한다(사용자 지시 2026-09-24). 옛 주문서 오독은 다음 작업 시작 전 정리로 막는다
     keep_tabs: bool = False
+    # 한 작업의 시간 상한(초). 넘기면 결제 전 단계의 다음 도구 호출에서 needs_ai(timeout) 으로 끝난다.
+    # 0 이면 상한 없음. 실기 2026-10-26: 한 작업이 75분을 먹어 큐 6건이 멈췄다
+    job_max_s: float = 20 * 60
     # True 면 결제 승인 요청을 즉시 승인한다(SAMBA_AUTO_APPROVE — 사용자가 자동 이행을 켠 경우)
     auto_approve: bool = False
     # 브릿지가 지금 일을 받을 수 있는가(앱 채팅이 도는 동안은 409 busy). 거짓이면 큐를 집지 않고
@@ -188,11 +192,19 @@ class Worker:
         self.d.queue.finish(job.id, outcome, error=fail)
         if self.d.events is not None:
             self.d.events.write(
-                job_id=job.id, version=self.d.version(), env=self.d.env,
-                agent=f'phone.{order.source.lower()}', kind='agent',
-                payload={'step': '폰 구매', 'ok': outcome == 'done', 'status': outcome,
-                         'fail_reason': fail, 'order_no': job.order_no,
-                         'reason': mask_text(line)[:600]},
+                job_id=job.id,
+                version=self.d.version(),
+                env=self.d.env,
+                agent=f'phone.{order.source.lower()}',
+                kind='agent',
+                payload={
+                    'step': '폰 구매',
+                    'ok': outcome == 'done',
+                    'status': outcome,
+                    'fail_reason': fail,
+                    'order_no': job.order_no,
+                    'reason': mask_text(line)[:600],
+                },
             )
         # 슬랙 보고와 별개로 로그에도 남긴다 — 폰 구매는 그래프 이벤트가 없어 실패 사유를 로그에서 못 찾았다(실기 10/3)
         _log.info('[폰 구매] %s', mask_text(f'{job.order_no} {outcome} — {line}')[:300])
@@ -235,7 +247,9 @@ class Worker:
         buy = _buy_payload(out) or {}
         results = out.get('results') or {}
         payer = results.get('payer')
-        payload = payer.get('payload', {}) if isinstance(payer, dict) else getattr(payer, 'payload', {})
+        payload = (
+            payer.get('payload', {}) if isinstance(payer, dict) else getattr(payer, 'payload', {})
+        )
         original = str(getattr(out.get('order'), 'source', '')).upper()
         if (
             out.get('outcome') != 'needs_ai'
@@ -253,8 +267,11 @@ class Worker:
             return None
         self.d.queue.finish(job.id, 'failed', error='unknown')
         self.d.queue.enqueue(
-            job.order_no, job.requester, {**job.options, 'no_cross': True},
-            job.thread_ts, wave_id=job.wave_id,
+            job.order_no,
+            job.requester,
+            {**job.options, 'no_cross': True},
+            job.thread_ts,
+            wave_id=job.wave_id,
         )
         self._pay_started.discard(job.id)
         self._pay_cards.pop(job.id, None)
@@ -442,10 +459,15 @@ class Worker:
 
     def _invoke(self, job: Job, arg: object) -> Job:
         """그래프를 부르고, 예외가 나면 사람에게 넘긴다(스펙 리뷰 지적 — Important 1)."""
+        token = JOB_DEADLINE.set(
+            time.monotonic() + self.d.job_max_s if self.d.job_max_s > 0 else None
+        )
         try:
             out = self._runner(job, arg)(arg, self._config(job.id))
         except Exception as exc:  # noqa: BLE001 — 그래프 내부 예외는 감독자가 아니라 여기서 받는다
             return self._on_exception(job, exc)
+        finally:
+            JOB_DEADLINE.reset(token)
         return self._apply(job, out)
 
     def _on_exception(self, job: Job, exc: Exception) -> Job:
@@ -459,8 +481,11 @@ class Worker:
         card = self._pay_cards.get(job.id, '')
         if pay_started and ('카카오' in card or 'kakao' in card.lower()) and self.d.add_memo:
             try:
-                self.d.add_memo(job.key, f'카카오페이 결제 중 오류 — {masked[:200]}. '
-                                '결제 완료 여부 미확인. 소싱처 주문내역 확인 전 재결제 금지')
+                self.d.add_memo(
+                    job.key,
+                    f'카카오페이 결제 중 오류 — {masked[:200]}. '
+                    '결제 완료 여부 미확인. 소싱처 주문내역 확인 전 재결제 금지',
+                )
             except Exception:
                 _log.exception('카카오페이 결제 오류 메모 추가 실패 — %s', job.order_no)
         self.d.report(job, f'{job.order_no} 처리 중 오류로 사람에게 넘긴다 — {masked}')
@@ -516,7 +541,10 @@ class Worker:
                             f'[선물 수락 보류] {mask_text(line)[:200]} · 결제 완료 주문이므로 재결제 금지',
                         )
                     except Exception as exc:
-                        self.d.report(job, f'{job.order_no} 선물 수락 보류 메모 실패: {mask_text(str(exc))[:100]}')
+                        self.d.report(
+                            job,
+                            f'{job.order_no} 선물 수락 보류 메모 실패: {mask_text(str(exc))[:100]}',
+                        )
                 elif 'SSG' in line and '완료' in line and self.d.add_memo:
                     # 수락에 성공해도 로그 한 줄뿐이라 주문 기록에서 수락했는지 알 수 없었다(사용자 2026-10-16 지적)
                     try:
@@ -525,7 +553,10 @@ class Worker:
                             f'[선물 수락 완료] {mask_text(line)[:200]}',
                         )
                     except Exception as exc:
-                        self.d.report(job, f'{job.order_no} 선물 수락 완료 메모 실패: {mask_text(str(exc))[:100]}')
+                        self.d.report(
+                            job,
+                            f'{job.order_no} 선물 수락 완료 메모 실패: {mask_text(str(exc))[:100]}',
+                        )
         # 새 배송지 저장이 목록에 안 보여 멈춘 건('저장 뒤 목록에 없음')은 자동으로 다시 사지 않고 사람에게 넘긴다.
         # 예전엔 한 번 다시 돌려 기존 항목 선택으로 통과시켰는데, 그 재시도가 엉뚱한 배송지를 골라 5건이 오배송됐다(2026-10-08)
         if outcome == 'needs_ai' and not self.d.dry_run and str(fail or 'unknown') == 'unknown':
@@ -565,14 +596,21 @@ class Worker:
             reason = _failed_reason(out)
             buy = _buy_payload(out) or {}
             payer = (out.get('results') or {}).get('payer')
-            payer_status = payer.get('status') if isinstance(payer, dict) else getattr(payer, 'status', None)
-            kakao = '카카오페이' in str(buy.get('card') or '') or 'kakao' in str(buy.get('provider') or '').lower()
+            payer_status = (
+                payer.get('status') if isinstance(payer, dict) else getattr(payer, 'status', None)
+            )
+            kakao = (
+                '카카오페이' in str(buy.get('card') or '')
+                or 'kakao' in str(buy.get('provider') or '').lower()
+            )
             if KAKAO_FALLBACK_MARK in reason or (kakao and payer_status in ('fail', 'needs_ai')):
                 # 카카오페이가 최저가라 결제를 시도하고 PC 알림을 줬지만 폰 비밀번호를 끝내 못 받았다 — 다른 수단으로
                 # 사지 않고 삼바 메모만 남긴다. 사람이 카카오페이로 산다(사용자 2026-10-01 "네이버페이 사지 말고 메모만")
                 paid = re.search(r'\[카카오페이 ([^\]]+)\]', reason)
-                memo = (f'카카오페이 결제 미완료 — {mask_text(reason)[:200]}. '
-                        '결제 완료 여부 미확인. 소싱처 주문내역 확인 전 재결제 금지')
+                memo = (
+                    f'카카오페이 결제 미완료 — {mask_text(reason)[:200]}. '
+                    '결제 완료 여부 미확인. 소싱처 주문내역 확인 전 재결제 금지'
+                )
                 if paid:
                     memo += f' · 결제예정 {paid.group(1)}'
                 note = '메모 도구 없음'
@@ -582,9 +620,7 @@ class Worker:
                         note = '메모 남김' if changed else '메모 추가 없음(기존 메모 확인 필요)'
                     except Exception as exc:  # noqa: BLE001 — 메모 실패가 작업 결과를 바꾸지 않는다
                         note = f'메모 실패: {mask_text(str(exc))[:80]}'
-                self.d.report(
-                    job, f'{job.order_no} 카카오페이 결제 미완료 — {note}'
-                )
+                self.d.report(job, f'{job.order_no} 카카오페이 결제 미완료 — {note}')
                 return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         export_alert = _export_alert(out)
         if export_alert is not None:

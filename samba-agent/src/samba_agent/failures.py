@@ -16,4 +16,6 @@ class FailReason(StrEnum):
     VERIFY_MISMATCH = 'verify_mismatch'  # 대조 불일치
     # 결제 진행 중 재시작·재진입 — 재결제를 막고 사람이 결제 여부를 확인해야 한다
     PAY_INTERRUPTED = 'pay_interrupted'
+    # 한 작업이 시간 상한(SAMBA_JOB_MAX_MINUTES)을 넘겼다 — 결제 전 단계에서만 쓴다. 자동 재접수 대상이 아니다
+    TIMEOUT = 'timeout'
     UNKNOWN = 'unknown'

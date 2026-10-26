@@ -4,22 +4,24 @@
 run_agent 가 그것을 결과로 바꾼다 — 감독자는 예외를 보지 않는다.
 """
 
+import contextvars
 import json
 import logging
 import re
 import threading
+import time
 from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from samba_agent.ops.evidence import host_of, is_secret_stage, save_browser_shots, save_text_shot
-from samba_agent.ops.evidence import tag as evidence_tag
 from samba_agent.agents.contracts import AgentResult, Evidence
 from samba_agent.agents.refusal import classify_refusal
 from samba_agent.agents.registry import AgentSpec
 from samba_agent.bridge.client import BridgeClient, BridgeError
 from samba_agent.failures import FailReason
+from samba_agent.ops.evidence import host_of, is_secret_stage, save_browser_shots, save_text_shot
+from samba_agent.ops.evidence import tag as evidence_tag
 from samba_agent.ops.masking import mask_text
 
 # 앱 도구가 캡차·2단계 인증에서 돌려주는 표시(docs/bridge.md)
@@ -35,6 +37,24 @@ log = logging.getLogger(__name__)
 # 스크립트 결과 JSON → 문제 문장(None 이면 통과)
 ScriptCheck = Callable[[dict[str, object]], str | None]
 # 스크립트마다 수리 잠금 — 계정 레인이 동시에 돌 때 같은 스크립트를 서로 덮어쓰며 고치지 않게
+# 지금 도는 작업의 마감 시각(time.monotonic 기준). 워커가 작업마다 걸고 끝나면 푼다.
+# 실기 2026-10-26: 한 작업이 AI 스크립트 수리를 4계정×여러 스크립트로 75분 돌며 단일 워커를 막았다
+JOB_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    'JOB_DEADLINE', default=None
+)
+
+
+def job_time_left() -> float | None:
+    """작업 마감까지 남은 초. 마감이 없으면 None."""
+    deadline = JOB_DEADLINE.get()
+    return None if deadline is None else deadline - time.monotonic()
+
+
+def job_timed_out() -> bool:
+    left = job_time_left()
+    return left is not None and left <= 0
+
+
 _REPAIR_LOCKS: dict[str, threading.Lock] = {}
 _REPAIR_LOCKS_GUARD = threading.Lock()
 
@@ -125,13 +145,22 @@ class AgentBase:
                 text = self.tool('get_page')
             except Exception:  # noqa: BLE001 — 근거 수집 실패는 판정을 막지 않는다
                 return []
-            saved = save_text_shot(order_no, self.spec.name, f'{order_no} {reason[:60]}', text[:20000])
+            saved = save_text_shot(
+                order_no, self.spec.name, f'{order_no} {reason[:60]}', text[:20000]
+            )
             return [saved] if saved else []
 
         return shot
 
     def tool(self, name: str, /, **args: object) -> str:
         """도구 1건. 캡차 표시는 사람에게, 브릿지 오류는 사유 그대로 실패로 바꾼다."""
+        # 작업 시간 상한 — 결제자(payer)는 결제 중일 수 있어 끊지 않는다(끊으면 결제 여부가 불명해진다)
+        if job_timed_out() and not self.spec.name.startswith('payer'):
+            raise AgentFailure(
+                'needs_ai',
+                f'작업 시간 상한 초과 — {name} 전에 멈춤(수리·견적이 길어짐)',
+                FailReason.TIMEOUT,
+            )
         try:
             out = self.bridge.call(name, **args)
         except BridgeError as e:
@@ -256,6 +285,9 @@ class AgentBase:
     ) -> dict[str, object] | None:
         """AI 수리 1회. 검증 통과 결과를 돌려주거나 None(못 고침·진짜 불가·꺼짐)."""
         if self.repairer is None:
+            return None
+        if job_timed_out():
+            self.note('스크립트 수리', f'{name}: 작업 시간 상한 — 수리하지 않는다')
             return None
         with _repair_lock(name):
             return self._repair_locked(

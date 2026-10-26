@@ -9,7 +9,7 @@ import json
 import logging
 import os
 
-from samba_agent.bridge.client import BridgeClient, BridgeError
+from samba_agent.bridge.client import BridgeClient, BridgeError, harness_lanes
 
 log = logging.getLogger(__name__)
 
@@ -37,8 +37,16 @@ def _env(key: str) -> str:
 class TabJanitor:
     """작업 시작 시 탭 목록을 찍어 두고, 끝나면 그 뒤에 생긴 탭만 닫는다."""
 
-    def __init__(self, bridge: BridgeClient) -> None:
+    def __init__(self, bridge: BridgeClient, owned_lanes: frozenset[str] = frozenset()) -> None:
         self._bridge = bridge
+        self._owned_lanes = owned_lanes
+
+    def _owns(self, lane: object) -> bool:
+        """이 하네스가 연 레인인가 — 고정 목록이거나, 이 프로세스가 with_lane 으로 만든 레인이면 그렇다.
+        레인 없는 탭(옛 앱·기본 레인)은 예전처럼 하네스 탭으로 본다"""
+        if not lane:
+            return True
+        return lane in self._owned_lanes or lane in harness_lanes()
 
     def _tabs(self) -> list[dict[str, object]]:
         try:
@@ -61,7 +69,7 @@ class TabJanitor:
                 continue
             # 다른 레인(사람의 수동 작업·계정 비교)이 연 탭은 그 레인이 닫는다 — 하네스가 닫으면 남의 주문서가
             # 사라진다(실기 2026-09-27 패션플러스·SMARKET 수동 진행 중 탭이 닫힘)
-            if t.get('lane'):
+            if not self._owns(t.get('lane')):
                 continue
             try:
                 self._bridge.call('close_tab', id=tab_id)
@@ -88,7 +96,7 @@ class TabJanitor:
                 continue
             # 다른 레인(사람·다른 세션의 수동 작업)이 연 탭은 건드리지 않는다 — close_new 와 같은 규칙
             # (실기 2026-09-30: 새 작업 시작 때 수동 재현 중이던 주문서 탭이 닫혀 결과를 못 봤다)
-            if t.get('lane'):
+            if not self._owns(t.get('lane')):
                 continue
             try:
                 self._bridge.call('close_tab', id=tab_id)

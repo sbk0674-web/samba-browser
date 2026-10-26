@@ -42,7 +42,7 @@ def test_캡차_문구가_오면_사람에게_넘긴다():
     with pytest.raises(AgentFailure) as e:
         base().tool('get_page')
     assert e.value.fail_reason is FailReason.CAPTCHA
-    assert e.value.status == 'needs_human'
+    assert e.value.status == 'needs_ai'
 
 
 @respx.mock
@@ -73,7 +73,7 @@ def test_두_번_실패하면_사람에게_넘긴다():
 
     with pytest.raises(AgentFailure) as e:
         base(decide=always_bad).decide_once('옵션을 고르라', Decision)
-    assert e.value.status == 'needs_human'
+    assert e.value.status == 'needs_ai'
     assert e.value.fail_reason is FailReason.UNKNOWN
 
 
@@ -109,15 +109,15 @@ def test_run_agent_는_실패를_결과로_바꾼다():
         ('refused: no saved script named "checkout_enter"', 'fail', FailReason.PERMISSION_DENIED),
         ('refused: insecure page (https required)', 'fail', FailReason.PERMISSION_DENIED),
         # 금고 잠김 — 재시도해도 같다(permission_denied), 사람이 풀어야 한다
-        ('refused: vault-locked', 'needs_human', FailReason.PERMISSION_DENIED),
+        ('refused: vault-locked', 'needs_ai', FailReason.PERMISSION_DENIED),
         # 비밀 화면은 사람이 봐야 한다
-        ('refused: secret screen', 'needs_human', FailReason.CAPTCHA),
+        ('refused: secret screen', 'needs_ai', FailReason.CAPTCHA),
         # PayFailReason 값(src/main/phone/pay.ts)
         ('refused: card-not-found', 'fail', FailReason.CARD_MISSING),
         ('refused: card-required - call again with card set', 'fail', FailReason.CARD_MISSING),
-        ('refused: pay-account-ambiguous (a, b)', 'needs_human', FailReason.UNKNOWN),
-        ('refused: no-phone', 'needs_human', FailReason.UNKNOWN),
-        ('refused: stuck', 'needs_human', FailReason.UNKNOWN),
+        ('refused: pay-account-ambiguous (a, b)', 'needs_ai', FailReason.PAY_INTERRUPTED),
+        ('refused: no-phone', 'needs_ai', FailReason.PAY_INTERRUPTED),
+        ('refused: stuck', 'needs_ai', FailReason.PAY_INTERRUPTED),
     ],
 )
 @respx.mock
@@ -200,3 +200,22 @@ def test_결과_앞의_페이지_대화상자_줄은_떼고_JSON_을_읽는다()
     # 알림 문구는 결과 객체에도 실린다 — 호출부가 사유(구매 한도 등)를 가를 수 있게
     assert out == {'options': [], 'cost': None, '_page_dialogs': ['옵션을 선택해주세요.']}
     assert [e.label for e in b.evidence] == ['페이지 알림']
+
+
+def test_작업_시간_상한을_넘기면_결제자_아닌_에이전트의_도구_호출은_timeout_으로_끝난다():
+    # 실기 2026-10-26: 한 작업이 AI 수리를 75분 돌며 단일 워커를 막아 큐 6건이 멈췄다
+    import time
+
+    from samba_agent.agents.base import JOB_DEADLINE, job_time_left
+
+    agent = base()
+    token = JOB_DEADLINE.set(time.monotonic() - 1)
+    try:
+        assert job_time_left() is not None and job_time_left() < 0
+        with pytest.raises(AgentFailure) as ei:
+            agent.tool('get_page')
+        assert ei.value.status == 'needs_ai'
+        assert ei.value.fail_reason == FailReason.TIMEOUT
+    finally:
+        JOB_DEADLINE.reset(token)
+    assert job_time_left() is None

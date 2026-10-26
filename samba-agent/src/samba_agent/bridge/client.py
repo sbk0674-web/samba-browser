@@ -52,6 +52,16 @@ class BridgeResult:
     steps: tuple[tuple[str, bool], ...]
 
 
+# 이 프로세스가 with_lane 으로 만든 레인 이름 — 탭 정리(queue/tabs.TabJanitor)가 "하네스 탭" 을 가리는 기준.
+# 실기 2026-10-26: buyer 레인(musinsa-edelvise06·-q-·-cross)·operator 탭이 소유 목록에 없어 한 번도 안 닫혀 44개까지 쌓였다
+_HARNESS_LANES: set[str] = set()
+
+
+def harness_lanes() -> frozenset[str]:
+    """이 프로세스가 지금까지 만든 레인 이름들."""
+    return frozenset(_HARNESS_LANES)
+
+
 class BridgeClient:
     """도구 1건을 부르는 클라이언트. 에이전트마다 scoped() 로 좁혀서 쓴다."""
 
@@ -91,7 +101,9 @@ class BridgeClient:
         )
 
     def with_lane(self, lane: str | None) -> 'BridgeClient':
-        """같은 허용 목록으로 레인만 바꾼 사본."""
+        """같은 허용 목록으로 레인만 바꾼 사본. 만든 레인 이름은 등록부에 남긴다(탭 정리가 소유 레인으로 본다)."""
+        if lane:
+            _HARNESS_LANES.add(lane)
         return BridgeClient(
             self._url,
             self._token,
