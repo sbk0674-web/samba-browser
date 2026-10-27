@@ -1315,6 +1315,7 @@
     "pairCodePlaceholder": "6-digit code",
     "pairButton": "Pair",
     "pairDone": "Paired. The phone will connect automatically in a moment",
+    "pairNoConnect": "Paired, but the phone is not announcing its connect address. Turn wireless debugging off and on, then enter its \"IP address & port\" in the Wi-Fi address box above and press Connect",
     "pairFailed": "Could not pair: {{message}}",
     "remove": "Remove",
     "removeConfirm": "Click again to remove",

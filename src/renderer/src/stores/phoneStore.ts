@@ -27,7 +27,7 @@ interface PhoneStoreState {
   subscribe: () => () => void
   connectWifi: (address: string) => Promise<string | null>
   /** 무선 디버깅 페어링. 성공 여부와 adb 가 돌려준 문구 */
-  pairWifi: (address: string, code: string) => Promise<{ ok: boolean; message: string } | null>
+  pairWifi: (address: string, code: string) => Promise<{ ok: boolean; message: string; connected?: boolean } | null>
   disconnect: (serial: string) => Promise<void>
   /** 목록에서 폰을 지운다(연결을 끊고 다시 찾지 않는다) */
   remove: (id: number) => Promise<void>

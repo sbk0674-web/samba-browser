@@ -23,6 +23,9 @@ import { tr } from '../i18n'
 const WIFI_DEFAULT_PORT = 5555
 /** 무선 디버깅 페어링 코드 자리수 */
 const PAIR_CODE_LENGTH = 6
+/** 페어링 뒤 접속점이 뜰 때까지 기다리는 횟수·간격(약 20초) */
+const PAIR_CONNECT_WAIT_TRIES = 10
+const PAIR_CONNECT_WAIT_MS = 2_000
 /** 발견된 와이파이 접속점에 다시 connect 를 시도하기까지 쉬는 시간 */
 const WIFI_CONNECT_COOLDOWN_MS = 30_000
 
@@ -80,6 +83,8 @@ export interface DeviceManagerDeps {
   // 테스트에서 가짜 타이머를 넣는다
   setInterval?: (fn: () => void, ms: number) => unknown
   clearInterval?: (handle: unknown) => void
+  /** 페어링 뒤 접속점을 기다리는 쉬는 시간(테스트는 바로 지나가게 넣는다) */
+  sleep?: (ms: number) => Promise<void>
 }
 
 /** 실제 시리얼이 붙은 장치 한 대 */
@@ -447,7 +452,7 @@ export class DeviceManager {
    * 이 PC 의 키를 폰에 등록한다 — USB 를 한 번도 꽂지 않은 폰은 이 길뿐이다.
    * 코드는 폰이 그때그때 만드는 1회용이라 저장하지 않고 로그에도 남기지 않는다
    */
-  async pairWifi(address: string, code: string): Promise<{ ok: boolean; message: string }> {
+  async pairWifi(address: string, code: string): Promise<{ ok: boolean; message: string; connected?: boolean }> {
     const target = address.trim()
     const digits = code.replace(/\D/g, '')
     if (!isWifiSerial(target)) return { ok: false, message: tr('phone.pairBadAddress') }
@@ -458,6 +463,16 @@ export class DeviceManager {
       // 페어링이 끝나면 접속점(_adb-tls-connect)이 곧 발견된다 — 쉬는 시간을 지우고 바로 찾는다
       this.wifiRetryAt.clear()
       await this.refresh()
+      // 어떤 폰은 페어링 직후 접속점을 한동안 알리지 않는다(실기 2026-10-28 임형준 폰) — 같은 IP 의 접속점이 뜰 때까지 잠시 기다린다.
+      // 끝내 안 뜨면 connected: false 로 알려, 화면이 "자동으로 연결돼요" 대신 다음 할 일을 안내하게 한다
+      const host = target.split(':')[0]
+      let connected = false
+      for (let i = 0; i < PAIR_CONNECT_WAIT_TRIES && !connected; i++) {
+        connected = (await this.discover()).some((sv) => sv.address.split(':')[0] === host)
+        if (!connected) await (this.deps.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))))(PAIR_CONNECT_WAIT_MS)
+        await this.refresh()
+      }
+      return { ok, message: res.stdout.trim() || res.stderr.trim(), connected }
     }
     return { ok, message: res.stdout.trim() || res.stderr.trim() }
   }

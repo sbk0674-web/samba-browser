@@ -91,7 +91,8 @@ function makeHarness(options: { autoReconnect?: boolean; adbPath?: () => string 
     autoReconnect: () => options.autoReconnect !== false,
     onChange: (list, warning) => changes.push({ list, warning }),
     setInterval: timer.setInterval,
-    clearInterval: timer.clearInterval
+    clearInterval: timer.clearInterval,
+    sleep: async () => undefined
   })
   return { adb, repo, timer, changes, manager }
 }
@@ -497,6 +498,27 @@ describe('무선 디버깅 페어링(adb pair)', () => {
       '123456'
     ])
     expect(deviceCalls(h.adb).length).toBeGreaterThan(0)
+  })
+
+  it('페어링 뒤 같은 IP 의 접속점이 안 뜨면 connected 가 false 다(폰이 접속점을 알리지 않는 경우)', async () => {
+    const h = makeHarness()
+    h.adb.reply('pair 192.168.45.220:37123', 'Successfully paired to 192.168.45.220:37123 [guid=adb-X]')
+    h.adb.reply('devices -l', 'List of devices attached\n')
+    h.adb.reply('mdns services', 'List of discovered mdns services\n')
+    const r = await h.manager.pairWifi('192.168.45.220:37123', '123456')
+    expect(r).toMatchObject({ ok: true, connected: false })
+  })
+
+  it('페어링 뒤 같은 IP 의 접속점이 뜨면 connected 가 true 다', async () => {
+    const h = makeHarness()
+    h.adb.reply('pair 192.168.45.220:37123', 'Successfully paired to 192.168.45.220:37123 [guid=adb-X]')
+    h.adb.reply('devices -l', 'List of devices attached\n')
+    h.adb.reply(
+      'mdns services',
+      'List of discovered mdns services\nadb-RF9X4021NHD-iEPG7p\t_adb-tls-connect._tcp\t192.168.45.220:44985\n'
+    )
+    const r = await h.manager.pairWifi('192.168.45.220:37123', '123456')
+    expect(r).toMatchObject({ ok: true, connected: true })
   })
 
   it('주소·코드 형식이 틀리면 adb 를 부르지 않는다', async () => {

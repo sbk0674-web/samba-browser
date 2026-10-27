@@ -97,7 +97,7 @@ export class PhoneService {
     return this.devices.connectWifi(address)
   }
 
-  async pairWifi(address: string, code: string): Promise<{ ok: boolean; message: string }> {
+  async pairWifi(address: string, code: string): Promise<{ ok: boolean; message: string; connected?: boolean }> {
     // 직접 페어링한다는 건 그 폰을 다시 쓰겠다는 뜻이다 — 지운 폰 목록을 비우고 찾는다
     this.clearIgnored()
     return this.devices.pairWifi(address, code)

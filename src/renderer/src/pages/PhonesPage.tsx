@@ -104,7 +104,9 @@ export function PhonesPage(): React.JSX.Element {
     setPairCode('')
     if (r === null) return
     if (r.ok) setPairAddress('')
-    setNotice(r.ok ? t('phone.pairDone') : t('phone.pairFailed', { message: r.message }))
+    // 페어링은 됐는데 접속점이 안 뜨면(폰이 알리지 않음) 다음 할 일을 알려 준다
+    if (r.ok && r.connected === false) setNotice(t('phone.pairNoConnect'))
+    else setNotice(r.ok ? t('phone.pairDone') : t('phone.pairFailed', { message: r.message }))
   }
 
   const onConnect = async (): Promise<void> => {

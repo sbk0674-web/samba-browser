@@ -550,7 +550,7 @@ const api = {
     assign: (accountId: number, phoneId: number | null): Promise<IpcResult<void>> =>
       invoke(IPC.phoneAssign, accountId, phoneId),
     remove: (id: number): Promise<IpcResult<void>> => invoke(IPC.phoneRemove, id),
-    pair: (address: string, code: string): Promise<IpcResult<{ ok: boolean; message: string }>> =>
+    pair: (address: string, code: string): Promise<IpcResult<{ ok: boolean; message: string; connected?: boolean }>> =>
       invoke(IPC.phonePair, address, code),
     assigned: (accountId: number): Promise<IpcResult<number | null>> =>
       invoke(IPC.phoneAssigned, accountId),

@@ -1315,6 +1315,7 @@
     "pairCodePlaceholder": "6자리 코드",
     "pairButton": "페어링",
     "pairDone": "페어링됐어요. 잠시 뒤 폰이 자동으로 연결돼요",
+    "pairNoConnect": "페어링은 됐는데 폰이 연결 주소를 알리지 않아요. 폰의 무선 디버깅을 껐다 켠 뒤 \"IP 주소 및 포트\"를 위 와이파이 주소 칸에 적고 연결을 눌러 주세요",
     "pairFailed": "페어링하지 못했어요: {{message}}",
     "remove": "지우기",
     "removeConfirm": "한 번 더 누르면 지워요",
