@@ -107,6 +107,19 @@ def _norm_address(text: str) -> str:
     return _ADDR_DROP.sub('', text).lower()
 
 
+# 시·군·구 이름(광역·특별시 제외) — 되읽은 배송지가 다른 도시인데 번지 숫자만 같아 통과하던 구멍을 막는다
+# (실기 2026-10-23: '부산 금정구 남산동 262-4' 가 '여수시 남산동 262-4' 로 저장돼 여수로 배송)
+_DISTRICT = re.compile(r'([가-힣]{1,6}(?:시|군|구))(?=\s|$|\d)')
+
+
+def address_districts(text: object) -> set[str]:
+    """주소에서 시·군·구 이름 집합(광역시·특별시·특별자치시/도는 뺀다). 없으면 빈 집합."""
+    raw = str(text or '')
+    for new_name, old_name in _ADDR_RENAMED:
+        raw = raw.replace(new_name, old_name)
+    return {k for k in _DISTRICT.findall(raw) if not re.search(r'(특별자치|광역|특별)시$', k)}
+
+
 # 소싱처와 무관하게 사무실 수령으로 고정한 브랜드 — 사용자 지시 2026-10-12
 KKADAEGI_BRANDS = re.compile(
     r'스케[쳐처]스|skechers|르무통|\blemouton\b|데상트|\bdescente\b|휠라|\bfila\b',
@@ -154,6 +167,11 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
     "서울 중구 세종대로 110 (서울특별시청)" 으로 되읽어 정확 비교가 어긋났다).
     """
     if _norm(str(expected.get('name', ''))) != _norm(str(applied.get('name', ''))):
+        return False
+    # 시·군·구가 양쪽에 있는데 하나도 겹치지 않으면 다른 도시다 — 번지 숫자가 같아도 같은 곳이 아니다
+    exp_d = address_districts(expected.get('address'))
+    app_d = address_districts(applied.get('address'))
+    if exp_d and app_d and not (exp_d & app_d):
         return False
     # 호수 — 되읽은 주소에 'NNN호'가 보이면 넣으려던 호수와 같아야 한다(실기 29CM: 1층 101호 / 1층 102호가 함께 있다)
     want_ho = re.findall(r'(\d+)\s*호', str(expected.get('address_detail') or ''))
@@ -3905,6 +3923,7 @@ class BuyerAgent(AgentBase):
         self._current_order_no = a.order.order_no
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
         self._ship_key = ''
+        self._ship_districts: list[str] = []
         source0 = source_of(self.spec.name)
         if source0.gift_unless_poison and self._shipping_fn is not None:
             try:
@@ -4201,6 +4220,11 @@ class BuyerAgent(AgentBase):
                 'accounts_compared': len(accounts),
                 'shipping_set': True,
                 **({'ship_key': self._ship_key} if getattr(self, '_ship_key', '') else {}),
+                **(
+                    {'ship_districts': self._ship_districts}
+                    if getattr(self, '_ship_districts', None)
+                    else {}
+                ),
                 'order_type': self.order_type_of(a.order, snap),
                 'shipping_fee': shipping_fee_for(a.order, self.order_type_of(a.order, snap)),
                 'card': card,
@@ -4442,6 +4466,7 @@ class BuyerAgent(AgentBase):
             # 까대기는 사무실이 받는 곳이다 — 결제 직전 주문서에 사무실 도로명이 보여야 한다(고객 주소와 대조하지 않는다).
             # 기본 배송지 유지·기존 사무실 선택 경로가 열쇠를 안 만들어 대조 없이 결제되던 구멍(2026-10-08)
             self._ship_key = road_key(OFFICE_SHIPPING.get('address'))
+            self._ship_districts = sorted(address_districts(OFFICE_SHIPPING.get('address')))
             if self._keep_default_shipping(snap):
                 return
             # 기본 배송지가 사무실이 아니다(또는 없다) — 목록에 사무실 배송지가 있으면 그것을 고르고,
@@ -4463,6 +4488,7 @@ class BuyerAgent(AgentBase):
             # 기존 배송지를 골라 통과한 경로도 결제 직전 주문서 대조 열쇠를 만든다 — 새 배송지 입력 경로에서만 만들어져
             # 재시도(기존 항목 선택)로 엉뚱한 줄이 골라져도 대조 없이 결제되던 오배송 구멍(2026-10-08, 5건)
             self._ship_key = road_key(shipping.get('address'))
+            self._ship_districts = sorted(address_districts(shipping.get('address')))
             return
         self._apply_shipping(a, shipping, account)
 
@@ -4688,6 +4714,8 @@ class BuyerAgent(AgentBase):
         self._confirm_shipping(shipping, args)
         # 결제 직전 주문서 대조용 열쇠(도로명+번호) — 전체 주소는 남기지 않는다
         self._ship_key = road_key(shipping.get('address'))
+        # 결제 직전 시·군·구 대조용 — 동·번지가 같은 다른 도시(여수 남산동 262-4)를 걸러낸다(2026-10-23)
+        self._ship_districts = sorted(address_districts(shipping.get('address')))
         # 마스킹 규칙이 이름을 가리려면 라벨이 앞에 있어야 한다(ops.masking) — 라벨을 붙여서 가린다
         summary = f'수취인 {shipping.get("name", "")} · {shipping.get("address", "")}'
         self.note('배송지', f'반영 완료 — {mask_text(summary)}')

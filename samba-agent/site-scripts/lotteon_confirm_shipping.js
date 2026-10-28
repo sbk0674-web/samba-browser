@@ -2,59 +2,118 @@ function pe(t){const o=[];for(const l of t.split('\n')){const m=l.match(/^\[(\d+
 const G=async(q,sel)=>page.get(q?{query:q}:(sel?{selector:sel,interactive:true}:{}));
 const els=async(q,sel)=>pe((await G(q,sel)).tree);
 const text=async sel=>((await G(null,sel)).tree.split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ');
-const A=args||{};const name0=String(A.name||'').trim();const name=name0.replace(/\*/g,'O');const addr=String(A.address||'').trim();
+const A=args||{};const name0=String(A.name||'').trim();let name=name0.replace(/\*/g,'O');const addr=String(A.address||'').trim();
+// 받는 분 칸은 한글·영어·숫자만 허용 — 괄호 등 특수문자 제거한 이름을 저장 이름으로 쓴다
+const nameS=name.replace(/[^가-힣A-Za-z0-9]/g,'');const nameP=name.split(/[(\[]/)[0].replace(/[^가-힣A-Za-z0-9]/g,'');
+let cand=[name,nameS];
+const mk=n=>n.length>2?[n[0]+'*'+n.slice(2),n.slice(0,-1)+'O',n[0]+'O'+n.slice(2)]:[n];
+const mkc=()=>[...new Set(cand.flatMap(n=>[n,...mk(n)]).filter(n=>n&&n.length>=2))];
+let hasName=t=>mkc().some(n=>t.includes(n));
 const R={ok:false,name:null,address:null,note:null};
-const dlg=await els(null,'[role=dialog]');
-const svb=async()=>(await els(null,'[role=dialog]')).find(e=>e.role==='button'&&e.text==='저장')||(await els('저장')).find(e=>e.role==='button'&&e.text==='저장');
-const saved=dlg.length>0&&!!(await svb());
-let opened=false;
-if(saved){
-  const req=(await els('(필수)')).filter(e=>e.role==='checkbox'&&/\(필수\)/.test(e.text));
-  const reqs=req.length?req:dlg.filter(e=>e.role==='checkbox'&&/\(필수\)/.test(e.text));
-  for(const c of reqs.filter(e=>e.value!=='on'))await page.click(c.id);
-  const sv=await svb();
-  await page.click(sv.id);await sleep(4000);
-}else if(!dlg.length){
-  // 창이 닫혀 있고 선물 주문서에 받는 분 이름이 없으면 배송지 선택하기로 목록을 다시 연다(저장은 이미 됐을 수 있다, 실기 2026-10-07)
-  const t0=await text();
-  if(/받는 분 주소로 보내기/.test(t0)&&!t0.includes(name)){
-    const ob=(await els('배송지 선택하기')).find(e=>e.role==='button'&&/배송지 ?(선택|변경)/.test(e.text));
-    if(ob){await page.click(ob.id);await sleep(2500);opened=true;}
+// 같은 이름 배송지가 여럿이면 주소로 고르고, 선택 뒤 주문서 시군구를 되읽어 검증(2026-10-23 여수 오배송)
+const NS=s=>String(s||'').replace(/\s+/g,'');
+const rk=addr.match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/);const roadKey=rk?NS(rk[1]+rk[2]):'';
+const jk=rk?null:addr.match(/([가-힣]+(?:동|리|가))\s+(\d+(?:-\d+)?)/);const jibKey=jk?NS(jk[1]+jk[2]):'';
+const gus=(addr.match(/[가-힣]{1,6}(?:시|군|구)(?=\s)/g)||[]).filter(k=>!/(특별자치|광역|특별)시$/.test(k));
+const addrHit=t=>{const n=NS(t);return (roadKey&&n.includes(roadKey))||(jibKey&&n.includes(jibKey))||gus.some(g=>n.includes(g));};
+// 이미 주문서에 'TO. 이름' 으로 반영돼 있으면 저장 단계 생략(남은 숨은 창 때문에 재저장 방지)
+const t00=await text();
+const to=(t00.match(/TO\. (.{1,40}?) 배송비/)||[])[1]||'';
+const already=!!to&&hasName(to)&&!/배송지 선택하기/.test(t00);
+let tx='';let named=false;let saved=false;let opened=false;let dlg=[];
+const regForm=async()=>{const L=await els(null,'[role=dialog]');const segs=[];let cur=null;
+  for(const e of L){if(e.role==='dialog'){cur=/^배송지 등록/.test(e.text)?{els:[]}:null;if(cur)segs.push(cur);}else if(cur)cur.els.push(e);}
+  const ok=segs.filter(s=>s.els.some(e=>e.role==='button'&&e.text==='저장'));
+  const filled=ok.filter(s=>s.els.some(e=>e.role==='textbox'&&e.value&&e.text==='주소')&&s.els.some(e=>e.role==='textbox'&&!e.text&&/[가-힣]/.test(e.value||'')));
+  return {L,form:(filled.length?filled:ok).pop()||null};};
+const regForm2=async()=>{const m=new Map();for(const q of ['저장','필수','휴대폰 번호','받는 분']){for(const e of await els(q))m.set(e.id,e);}
+  const all=[...m.values()].sort((a,b)=>a.id-b.id);const ds=all.filter(e=>e.role==='dialog'&&/^배송지 등록/.test(e.text));
+  const segs=ds.map((d,i)=>({els:all.filter(e=>e.id>d.id&&e.id<(ds[i+1]?ds[i+1].id:1e9)&&e.role!=='dialog')})).filter(s=>s.els.some(e=>e.role==='button'&&e.text==='저장'));
+  const filled=segs.filter(s=>s.els.some(e=>e.role==='textbox'&&/받는 분/.test(e.text)&&/[가-힣]/.test(e.value||'')));
+  return (filled.length?filled:segs).slice(-1)[0]||null;};
+const regOpen=d=>d.some(e=>e.role==='dialog'&&/^배송지 등록/.test(e.text));
+const isOpen=async()=>(await els(null,'[role=dialog]')).some(e=>e.role==='radio'&&/배송지/.test(e.text));
+const openList=async()=>{const ob=(await els('배송지 선택하기')).find(e=>e.role==='button'&&/배송지 ?(선택|변경)/.test(e.text));
+  if(ob){await page.click(ob.id);for(let k=0;k<6;k++){await sleep(700);if(await isOpen())break;}return true;}return false;};
+const pick=async()=>{
+  let labs=[];const qn=nameS||name;
+  for(let k=0;k<3&&!labs.length;k++){labs=(await els(qn)).filter(e=>e.role==='label'&&hasName(e.text));if(!labs.length)await sleep(1000);}
+  if(!labs.length){
+    const L=await els(null,'[role=dialog]');
+    const rd=addr.match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/);
+    if(rd)labs=L.filter(e=>e.role!=='radio'&&e.text&&e.text.replace(/\s+/g,'').includes(rd[1]+rd[2]));
+  }
+  if(!labs.length){const vt=await text();const er=(vt.match(/[^ ]{0,12}\s?[^ ]{0,12}\s?(?:입력해|선택해|확인해|동의해)\s?주세요/)||[''])[0];return{...R,note:'저장 뒤 목록에 없음'+(er?' — '+er:'')+(saved?'(저장 시도함)':'(저장 폼 못 찾음)')};}
+  if(labs.length>1){const pref=labs.filter(e=>addrHit(e.text));if(pref.length)labs=pref;}
+  const lid=labs[labs.length-1].id;
+  for(let t=0;t<2;t++){
+    await page.click(lid-2);await sleep(500);
+    if(t===1)await page.click(lid);
+    const done=(await els('선택완료')).filter(e=>e.role==='button'&&e.text==='선택완료').sort((a,b)=>b.id-a.id)[0];
+    if(done){await page.click(done.id);await sleep(1200);}
+    const tt=await text();
+    if(hasName(tt)&&!/배송지 선택하기/.test(tt))break;
+  }
+  return null;
+};
+if(already){named=true;}
+else{
+  dlg=await els(null,'[role=dialog]');
+  let form=null;
+  if(regOpen(dlg)){form=(await regForm()).form;if(!form)form=await regForm2();}
+  saved=!!form;
+  if(saved){
+    let nb=form.els.find(e=>e.role==='textbox'&&/받는 분/.test(e.text));
+    if(!nb){const q=await els('받는 분');nb=q.find(e=>e.role==='textbox'&&/받는 분/.test(e.text));}
+    if(nb){
+      if(nb.value!==nameS&&nameS){await page.type(nb.id,nameS);await sleep(400);}
+      const q=await els('받는 분');const nb2=q.find(e=>e.id===nb.id);
+      cand.push((nb2&&nb2.value)||nameS,nameP);
+    }
+    const reqs=form.els.filter(e=>e.role==='checkbox'&&/\(필수\)/.test(e.text));
+    for(const c of reqs){
+      for(let t=0;t<3;t++){
+        const q=await els('필수');
+        const cur=q.find(e=>e.id===c.id);
+        if(cur&&cur.value==='on')break;
+        if(t===0)await page.click(c.id);
+        else{const lb=q.find(e=>e.role==='label'&&e.text===c.text);if(lb)await page.click(lb.id);}
+        await sleep(400);
+      }
+    }
+    const pm=(await text('[role=dialog]')).match(/01\d-\d{3,4}-\d{4}/);
+    const p=form.els.find(e=>e.role==='textbox'&&/휴대폰/.test(e.text));
+    if(pm&&p&&!p.value){await page.type(p.id,pm[0].replace(/-/g,''));await sleep(400);}
+    const sb=form.els.find(e=>e.role==='button'&&e.text==='저장');
+    if(sb)await page.click(sb.id);
+    for(let k=0;k<4;k++){await sleep(700);const cur=await els('저장');if(!cur.some(e=>e.id===(sb&&sb.id)))break;}
+    await sleep(800);
+  }else if(!dlg.length){
+    if(/받는 분 주소로 보내기/.test(t00)&&!hasName(t00)){if(await openList())opened=true;}
+  }
+  if(saved&&!(await isOpen())){if(await openList())opened=true;}
+  if(saved||opened||dlg.some(e=>e.role==='radio'&&/배송지/.test(e.text))){const r=await pick();if(r)return r;}
+  for(let k=0;k<3;k++){tx=await text();if(hasName(tx))break;await sleep(1000);}
+  named=hasName(tx);
+  if(!named){
+    const ob=(await els('배송지')).find(e=>e.role==='button'&&/배송지 ?(선택|변경|수정)/.test(e.text));
+    if(ob){await page.click(ob.id);await sleep(1500);const r=await pick();if(r)return r;for(let k=0;k<3;k++){tx=await text();if(hasName(tx))break;await sleep(1000);}named=hasName(tx);}
   }
 }
-if(saved||opened||(await els(null,'[role=dialog]')).some(e=>e.role==='radio'&&/배송지/.test(e.text))){
-  let L=await els(null,'[role=dialog]');
-  const fl=()=>{let x=L.filter(e=>e.role==='label'&&e.text.includes(name));if(!x.length)x=L.filter(e=>e.role!=='radio'&&e.text&&e.text.includes(name));return x;};
-  // 창 목록 읽기가 길이 제한으로 잘려 새 항목이 빠질 수 있다 — 글자 검색으로 라벨을 따로 찾는다(실기 2026-10-07)
-  const fq=async()=>(await els(name)).filter(e=>e.role==='label'&&e.text.includes(name));
-  let viaQuery=false;
-  let labs=fl();
-  if(!labs.length){await sleep(2000);L=await els(null,'[role=dialog]');labs=fl();}
-  if(!labs.length){labs=await fq();viaQuery=labs.length>0;}
-  const rd=addr.match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/);
-  if(!labs.length&&rd)labs=L.filter(e=>e.role!=='radio'&&e.text&&e.text.replace(/\s+/g,'').includes(rd[1]+rd[2]));
-  if(!labs.length){const vt=await text();const er=(vt.match(/[^ ]{0,12}\s?[^ ]{0,12}\s?(?:입력해|선택해|확인해|동의해)\s?주세요/)||[''])[0];return{...R,note:'저장 뒤 목록에 없음'+(er?' — '+er:'')+' 라벨수 '+L.filter(e=>e.role==='label').length};}
-  const lid=labs[labs.length-1].id;
-  if(viaQuery){await page.click(lid);await sleep(1000);}
-  else{const rid=Math.max(...L.filter(e=>e.role==='radio'&&e.id<lid).map(e=>e.id),0);
-  if(rid){await page.click(rid);await sleep(800);const rv=(await els(null,'[role=dialog]')).find(e=>e.id===rid);if(!rv||rv.value!=='on'){await page.click(lid);await sleep(800);}}}
-  const done=(await els('선택완료')).find(e=>e.role==='button'&&e.text==='선택완료');
-  if(done){await page.click(done.id);await sleep(3000);}else await sleep(1500);
+if(!named)return{...R,note:'주문서에 받는 분 이름 없음'+(saved?'(저장 창 거침)':'(저장 창 없음)')+(opened?'(목록 재오픈)':'')+(/받는 분 주소로 보내기/.test(tx)?'(선물 주문서)':'')};
+{
+  const vt=await text();
+  const names=mkc();let at=-1;for(const n of names){const i=vt.indexOf(n);if(i>=0&&(at<0||i<at))at=i;}
+  const zone=at>=0?vt.slice(at,at+500):vt;const zn=NS(zone);
+  const seen=(zone.match(/[가-힣]{1,6}(?:시|군|구)(?=\s|\d)/g)||[]).filter(k=>!/(특별자치|광역|특별)시$/.test(k));
+  const guOk=!gus.length||!seen.length?true:gus.some(g=>seen.includes(g));
+  if(!guOk)return{...R,note:'받는 분 시군구 불일치('+seen.slice(0,3).join('/')+')'};
+  if(roadKey&&!zn.includes(roadKey)&&/(로|길)\d/.test(zn))return{...R,note:'받는 분 도로명 불일치'};
+  if(gus.length&&!seen.length&&!(roadKey&&zn.includes(roadKey))&&!(jibKey&&zn.includes(jibKey)))return{...R,note:'받는 분 주소 못 읽음'};
 }
-const tx=await text();
-const rd2=addr.match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/);
-if(!/받는 분 주소로 보내기/.test(tx)){
-  if((await els(null,'[role=dialog]')).length)return{...R,note:'배송지 창이 닫히지 않음 — 주문서 배송지 확인 불가'};
-  if(tx.includes(name)&&rd2&&!tx.replace(/\s+/g,'').includes(rd2[1]+rd2[2]))return{...R,note:'주문서에 받는 분 주소 없음(이름만 있음) — 배송지가 바뀌지 않았다'};
-}else if(rd2&&!(await els(null,'[role=dialog]')).length){
-  const cut=tx.search(/회사소개|롯데쇼핑 주식회사/);const body=cut>0?tx.slice(0,cut):tx;
-  const flat=body.replace(/\s+/g,'');const roads=flat.match(/[가-힣A-Za-z0-9.]+(?:로|길)\d+(?:-\d+)?/g)||[];
-  if(roads.length&&!flat.includes(rd2[1]+rd2[2]))return{...R,note:'선물 주문서의 받는 분 주소가 주문 주소와 다르다('+roads[0].replace(/\d/g,'0')+') — 배송지 다시 확인'};
-}
-if(!tx.includes(name))return{...R,note:'주문서에 받는 분 이름 없음'+(saved?'(저장 창 거침)':'(저장 창 없음)')+(opened?'(목록 재오픈)':'')+(tx.includes(name.slice(0,2))?'(앞 두 글자는 있음)':'')+(/받는 분 주소로 보내기/.test(tx)?'(선물 주문서)':'')+' 창'+dlg.length+' 배송지칸 '+(/새 ?배송지|배송지 ?(선택|변경)/.exec(tx)||[''])[0]};
 let cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');
 if(cb){
-  if(cb.value!=='on'){await page.click(cb.id);for(let k=0;k<8&&(!cb||cb.value!=='on');k++){await sleep(800);cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');}}
+  if(cb.value!=='on'){await page.click(cb.id);for(let k=0;k<6&&(!cb||cb.value!=='on');k++){await sleep(800);cb=(await els('빠른 선물')).find(e=>e.role==='checkbox');}}
   if(!cb||cb.value!=='on')return{...R,name:name0,address:addr,note:'빠른 선물 못 켬'};
 }
 return{ok:true,name:name0,address:addr,note:null,quick_gift:!!cb};

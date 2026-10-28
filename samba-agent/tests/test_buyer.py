@@ -9,6 +9,7 @@ from samba_agent.agents.base import AgentFailure
 from samba_agent.agents.buyer import (
     OFFICE_SHIPPING,
     BuyerAgent,
+    address_districts,
     road_key,
     shipping_matches,
     snapshot_args,
@@ -796,6 +797,7 @@ def test_ABC마트는_항상_까대기로_기본_배송지를_유지한다(reg):
     assert any(e.detail == '사무실 수령(기본 배송지 유지)' for e in out.evidence)
     # 까대기는 사무실 도로명이 결제 직전 대조 열쇠다(기본 배송지 유지 경로도 열쇠를 만든다)
     assert out.payload.get('ship_key') == road_key(OFFICE_SHIPPING['address'])
+    assert out.payload.get('ship_districts') == sorted(address_districts(OFFICE_SHIPPING['address']))
 
 
 @respx.mock
@@ -1249,6 +1251,27 @@ def test_배송지_비교는_사이트_표기_차이를_허용한다():
         zip_exp, {'name': '홍길동', 'address': '경기 수원시 영통구 법조로14번길 11', 'zip': '16515'}
     )
     assert not shipping_matches(zip_exp, {'name': '홍길동', 'address': '', 'zip': '16514'})
+
+
+def test_되읽은_배송지가_다른_시군구면_번지가_같아도_같은_곳이_아니다():
+    # 2026-10-23: '부산 금정구 남산동 262-4' 가 '여수시 남산동 262-4' 로 저장돼 여수로 배송됐다
+    exp = {
+        'name': '이영란',
+        'address': '부산광역시 금정구 남산동 262-4 수민아파트',
+        'address_detail': '502호',
+        'postal_code': '46215',
+    }
+    assert not shipping_matches(
+        exp, {'name': '이영란', 'address': '전라남도 여수시 남산동 262-4', 'zip': '59700'}
+    )
+    assert shipping_matches(
+        exp, {'name': '이영란', 'address': '부산 금정구 남산동 262-4 수민아파트', 'zip': '46215'}
+    )
+    # 되읽은 주소에 시군구가 없으면(동·번지만) 예전처럼 번지로 본다
+    assert shipping_matches(exp, {'name': '이영란', 'address': '남산동 262-4 수민아파트 502호'})
+    # 행정구역 개편 이름(서해구↔서구)은 같은 곳
+    assert address_districts('인천광역시 서해구 원창동') == {'서구'}
+    assert address_districts('부산광역시 금정구 남산동 262-4') == {'금정구'}
     # 인천 서구 → 서해구(2026-07 개편) — 주문은 옛 이름, 사이트 주소검색은 새 이름으로 되읽는다(실기 2026-09-27 29CM)
     old = {
         'name': '홍길동',
@@ -1467,6 +1490,7 @@ def test_까대기_사무실_배송지가_목록에_있으면_골라서_쓴다(r
     out = abc(_abc_assignment(reg, spec))
     assert out.status == 'ok', out.reason
     assert out.payload.get('ship_key') == road_key(OFFICE_SHIPPING['address'])
+    assert out.payload.get('ship_districts') == sorted(address_districts(OFFICE_SHIPPING['address']))
     assert 'abc_order_prep' in calls
     assert 'abc_select_shipping' in calls and 'abc_set_shipping' not in calls
     assert any('목록의 기존 배송지' in e.detail for e in out.evidence)

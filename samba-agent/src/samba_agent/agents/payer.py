@@ -15,6 +15,7 @@ from samba_agent.agents.base import AgentBase, AgentFailure, run_agent, split_pa
 from samba_agent.agents.buyer import (
     DIRECT_CARD_METHODS,
     POINTS_ONLY_METHOD,
+    address_districts,
     product_no_of,
     size_letters,
 )
@@ -1190,7 +1191,23 @@ class PayerAgent(AgentBase):
                     '주문서의 받는 분 주소가 주문 주소와 다르다 — 결제하지 않음(배송지 다시 확인)',
                     FailReason.VERIFY_MISMATCH,
                 )
-        self.note('주문서 대조', '상품·옵션 일치 확인' + (' · 받는 분 주소 일치' if ship_key else ''))
+        # 받는 분 주소의 시·군·구 — 동 이름과 번지만 같은 다른 도시(실기 2026-10-23: '부산 금정구 남산동 262-4' 주문이
+        # '여수시 남산동 262-4' 로 저장돼 여수로 배송)를 결제 직전에 걸러낸다. 주문서에 시·군·구가 하나도 안 보이면 건너뛴다
+        districts = {str(d) for d in (a.handoff.get('ship_districts') or []) if d}
+        if districts:
+            page_districts = address_districts(page)
+            if page_districts and not (districts & page_districts):
+                raise AgentFailure(
+                    'needs_ai',
+                    '주문서의 받는 분 주소 시·군·구가 주문 주소와 다르다 — 결제하지 않음(배송지 다시 확인)',
+                    FailReason.VERIFY_MISMATCH,
+                )
+        self.note(
+            '주문서 대조',
+            '상품·옵션 일치 확인'
+            + (' · 받는 분 주소 일치' if ship_key else '')
+            + (' · 시군구 일치' if districts else ''),
+        )
 
     def _web_pay(self, a: Assignment) -> None:
         """사이트 결제창(팝업)의 '결제하기' → 웹 키패드에 fill_secret(password) — 플레이북 §7 무신사머니 흐름.

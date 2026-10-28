@@ -1189,6 +1189,31 @@ def test_결제_전_주문서_대조는_인계받은_사이트_상품명을_쓴�
         )  # 사이트 상품명이 없으면 예전처럼 막는다
 
 
+@respx.mock
+def test_결제_직전_주문서의_받는_분_시군구가_주문_주소와_다르면_결제하지_않는다(reg):
+    """2026-10-23: '부산 금정구 남산동 262-4' 주문이 '여수시 남산동 262-4' 로 저장돼 여수로 배송 — 결제 직전에 막는다."""
+    form = ABC_FORM_204 + ' 받는 분 이OO 전라남도 여수시 남산동 262-4 (59700) 010-****-****'
+    respx.post(f'{URL}/tool/get_page').mock(return_value=page(form))
+    respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
+    respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
+    a = agent(reg)
+    base = {'selected': '290', 'product_name': '나이키 에어 맥스 인비고 WMNS NIKE AIR MAX INVIGOR'}
+    asg = assignment(reg, dry_run=True, handoff={**base, 'ship_districts': ['금정구']})
+    order = asg.order.model_copy(
+        update={'sku': '나이키 749866 101 봄신발 가을신발 우먼스 에어 맥스 인비고 1010120521 [290]', 'option': '290'}
+    )
+    with pytest.raises(AgentFailure) as ex:
+        a._check_order_form(asg.model_copy(update={'order': order}))
+    assert '시·군·구' in ex.value.reason
+    # 주문서의 시군구가 주문 주소와 같으면 통과
+    a._check_order_form(
+        asg.model_copy(update={'order': order, 'handoff': {**base, 'ship_districts': ['여수시']}})
+    )
+    # 주문서에 시군구가 아예 없으면(가린 주소) 예전처럼 상품·옵션만 본다
+    respx.post(f'{URL}/tool/get_page').mock(return_value=page(ABC_FORM_204))
+    a._check_order_form(asg.model_copy(update={'order': order}))
+
+
 def test_상품번호를_주소에서_뽑는다() -> None:
     from samba_agent.agents.payer import product_no_of
 
