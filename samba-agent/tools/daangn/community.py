@@ -250,8 +250,15 @@ def write_post(title, body, place=None, tag='생활/편의', photo=None, match=N
         nodes = dump()
         if find(nodes, text='지도보기'):               # 행이 없는 자리 → 이 검색어는 끝
           print('행 없음:', q, row); sh('input', 'keyevent', '4'); time.sleep(1.2); break
-        tap(sx(540), select_button_y(), 2.5)          # 지도 화면 아래 주황 '선택' 버튼(웹뷰라 화면 픽셀로 찾음)
-        nodes = dump(); assert find(nodes, rid='title'), '폼 복귀 실패'
+        sel = next((n for n in nodes if n['t'].endswith(' 선택') and n['cy'] > sy(1500)), None)   # 지도 화면 아래 '○○ 선택' 버튼이 노드로 잡히면 그 노드를(G950N 은 픽셀 탐색이 빗나가 지도에 머물렀다, 10/27)
+        if sel: tap(sel['cx'], sel['cy'], 2.5)
+        else: tap(sx(540), select_button_y(), 2.5)          # 지도 화면 아래 주황 '선택' 버튼(웹뷰라 화면 픽셀로 찾음)
+        nodes = dump()
+        if not find(nodes, rid='title'):   # 실패 순간 화면을 남긴다(10/27 임귀태 폼 복귀 실패 원인 추적)
+          try: open(os.path.join(os.environ.get('DAANGN_FAIL_DIR', '.'), 'fail_form_return.png'), 'wb').write(subprocess.run([ADB, '-s', DEV, 'exec-out', 'screencap', '-p'], capture_output=True, creationflags=0x08000000).stdout)
+          except Exception: pass
+          print('폼 복귀 실패 화면:', focused(), [n['t'] for n in nodes if n['t']][:12])
+        assert find(nodes, rid='title'), '폼 복귀 실패'
         chosen = find(nodes, desc='선택된 장소') or find(nodes, text='선택된 장소')
         label = (chosen['d'] or chosen['t']) if chosen else ''
         if chosen and label_ok(label): found = label; break
