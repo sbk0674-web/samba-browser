@@ -1,7 +1,9 @@
 """삼바 브라우저 당근 채팅 감지 경로. 본문이나 구매자 정보는 파일에 저장하지 않는다."""
 
+from datetime import datetime
+
 import httpx
-from datetime import datetime, timezone
+
 from tools.daangn.collector import Candidate, ChatEvidence, SourceUnavailable
 
 
@@ -55,6 +57,13 @@ class ChatBridge:
             raise SourceUnavailable('채팅 판매금액 확인 실패')
         event_time = None
         # 마지막 메시지는 구매자가 보낸 글일 수 있다. 결제 시각 증거로 쓰지 않는다.
+        if signal.get('systemNotice') is True and isinstance(signal.get('paymentEventAt'), str):
+            try:
+                parsed = datetime.fromisoformat(signal['paymentEventAt'])
+                if parsed.utcoffset() is not None:
+                    event_time = parsed
+            except ValueError:
+                pass
         return ChatEvidence(payment_confirmed=signal.get('payment') is True,
                             cancelled=signal.get('cancelled') is True,
                             product_title=candidate.product_title, sale_price=price,

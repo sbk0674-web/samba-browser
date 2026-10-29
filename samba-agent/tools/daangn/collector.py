@@ -62,6 +62,8 @@ def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
     # 감지 시각은 결제 시각이 아니다. build_submission 의 검증을 통과해야 한다.
     if candidate.product_image and not phone.get('product_image'):
         phone = {**phone, 'product_image': candidate.product_image}
+    if not phone.get('product_image'):
+        return {'status': 'held', 'reason': '주문 사진 확인 필요'}
     result = submit(phone)
     if not isinstance(result, dict) or not result.get('id'):
         raise ValueError('저장 결과 확인 필요')

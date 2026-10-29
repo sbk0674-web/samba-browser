@@ -26,6 +26,18 @@ def wave_order(order_no: str, *, source: str = 'MUSINSA', minutes: int = 0, **ov
     )
 
 
+def test_daangn_musinsa_single_stock_is_first_even_with_new_intake_cap(setup):
+    queue, _slack, make = setup
+    urgent = wave_order('당근 999', id='ord_urgent', source_url='https://www.musinsa.com/products/7046744')
+    old = wave_order('old', minutes=60, id='ord_old')
+    it, _wave = make([old, urgent])
+    it._max_new = 1
+    it.run_once()
+    job = queue.claim()
+    assert job.order_no == '당근 999'
+    assert job.options['_daangn_single_stock'] is True
+
+
 class _FakeWave:
     """WaveClient 중 intake 가 쓰는 메서드 하나만 흉내 낸다."""
 

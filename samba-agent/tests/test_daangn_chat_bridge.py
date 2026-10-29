@@ -6,6 +6,16 @@ from tools.daangn.chat_bridge import ChatBridge
 from tools.daangn.collector import collect_candidate
 
 
+def test_payment_time_requires_verified_system_notice_time_not_candidate_clock():
+    from tools.daangn.collector import Candidate
+    bridge = ChatBridge('http://127.0.0.1', 'test', accounts={'서병기'})
+    bridge._request = lambda *_a, **_kw: {'signal': {'ready': True, 'payment': True,
+        'productMatches': True, 'salePrice': 14000, 'systemNotice': True,
+        'paymentEventAt': '2026-10-29T20:13:00+09:00'}}
+    evidence = bridge.inspect(Candidate('서병기', 'room', 'item', account_id=1))
+    assert evidence.payment_event_at.isoformat() == '2026-10-29T20:13:00+09:00'
+
+
 def test_logged_account_candidates_are_inspected_without_sending_chat_messages():
     calls = []
     def handler(req):

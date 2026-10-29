@@ -7,6 +7,47 @@ from tools.daangn.collector import Candidate
 from tools.daangn import runtime
 
 
+def test_fast_schedule_only_reopens_urgent_after_cooldown_and_new_event_immediately():
+    from dataclasses import replace
+    urgent = Candidate('a', 'room', 'item', last_at=1, preview_signal='pickup_request')
+    normal = Candidate('a', 'normal', 'item', last_at=1)
+    schedule = runtime.CandidateSchedule()
+    assert schedule.select([urgent, normal], 100) == [urgent, normal]
+    schedule.inspected(urgent, 100)
+    schedule.inspected(normal, 100)
+    assert schedule.select([urgent, normal], 102) == []
+    assert schedule.select([urgent, normal], 115) == [urgent]
+    new = replace(urgent, last_at=2)
+    assert schedule.select([new, normal], 116) == [new]
+
+
+def test_fast_collector_waits_two_seconds_without_opening_site(monkeypatch):
+    stop = Mock()
+    stop.is_set.side_effect = [False, True]
+    run = Mock(return_value=[])
+    monkeypatch.setattr(runtime, 'run_round', run)
+    runtime.run_forever(Mock(), Mock(), stop)
+    stop.wait.assert_called_once_with(2)
+
+
+def test_fast_collector_backs_off_when_bridge_fails(monkeypatch):
+    stop = Mock()
+    stop.is_set.side_effect = [False, True]
+    monkeypatch.setattr(runtime, 'run_round', Mock(side_effect=RuntimeError('private')))
+    runtime.run_forever(Mock(), Mock(), stop)
+    stop.wait.assert_called_once_with(30)
+
+
+def test_saved_pickup_wakes_order_intake(monkeypatch):
+    stop = Mock()
+    stop.is_set.side_effect = [False, True]
+    run = Mock(return_value=[{'status': 'saved'}])
+    monkeypatch.setattr(runtime, 'run_round', run)
+    wake = Mock()
+    runtime.run_forever(Mock(), Mock(), stop, on_saved=wake)
+    assert run.call_args.kwargs['on_saved'] is wake
+
+
 def test_active_call_is_busy_even_without_recent_touch():
     phone = Mock()
     phone._run.return_value = b'mCallState=2\nmCallState=0'

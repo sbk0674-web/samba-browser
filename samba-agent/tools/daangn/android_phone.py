@@ -134,9 +134,13 @@ class AndroidPhone:
             found = [n for n in root.iter('node') if n.get('text', '').strip() == peer]
             if found:
                 self._tap_unique(root, peer)
-                _xml, room = self._screen()
-                texts = [n.get('text', '').strip() for n in room.iter('node')]
-                return title in texts and f'{price:,}원' in texts
+                for _ in range(3):
+                    _xml, room = self._screen()
+                    texts = [n.get('text', '').strip() for n in room.iter('node')]
+                    if title in texts and f'{price:,}원' in texts:
+                        return True
+                    time.sleep(1)
+                return False
             if attempt < 4:
                 self._run('shell', 'input', 'swipe', '500', '1750', '500', '650', '500')
                 time.sleep(0.7)
@@ -220,10 +224,16 @@ class AndroidPhone:
             raise ValueError('수거 장소 화면 확인 실패')
         if not labels.index('문 앞') < labels.index('경비실') < labels.index('직접 입력'):
             raise ValueError('수거 장소 배치 확인 실패')
-        doors = [n for n in root.iter('node') if n.get('text', '').strip() == '문 앞']
-        if len(doors) != 1:
+        doors = [n for n in root.iter('node') if '문 앞' in
+                 (n.get('text', '').strip(), n.get('content-desc', '').strip())]
+        if not doors:
             raise ValueError('문 앞 위치 확인 실패')
-        xy = [int(x) for x in re.findall(r'\d+', doors[0].get('bounds', ''))]
+        # 같은 선택지의 컨테이너와 글자가 중첩되어도 _tap_unique가 겹침을 검증한다.
+        valid = [[int(x) for x in re.findall(r'\d+', n.get('bounds', ''))] for n in doors]
+        valid = [b for b in valid if len(b) == 4 and b[2] > b[0] and b[3] > b[1]]
+        if not valid:
+            raise ValueError('문 앞 위치 확인 실패')
+        xy = min(valid, key=lambda b: (b[2]-b[0])*(b[3]-b[1]))
         if len(xy) != 4 or xy[2] <= xy[0] or xy[3] <= xy[1]:
             raise ValueError('문 앞 위치 확인 실패')
         y = (xy[1] + xy[3]) // 2

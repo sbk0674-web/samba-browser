@@ -12,6 +12,7 @@
 
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -69,6 +70,12 @@ def _paid_key(order: WaveOrder) -> tuple[int, float]:
     if paid is None:
         return (1, 0.0)
     return (0, paid.timestamp())
+
+
+def _daangn_single_stock(order: WaveOrder) -> bool:
+    return (order.order_number.startswith('당근 ')
+            and (order.source_site or '').upper() == 'MUSINSA'
+            and bool(order.source_url))
 
 
 def intake_line(order: OrderRef) -> str:
@@ -133,6 +140,11 @@ class Intake:
         self._unlinked_cancelled: set[str] = set()
         # 슬랙 `수집 중지` 가 세우는 깃발. 세워져 있으면 run_once 는 아무것도 하지 않는다
         self.paused = False
+        self._wake = threading.Event()
+
+    def wake(self) -> None:
+        """수거 확인 후 저장된 새 주문을 정기 주기까지 기다리지 않고 받는다."""
+        self._wake.set()
 
     def pause(self) -> None:
         self.paused = True
@@ -155,7 +167,7 @@ class Intake:
         handled: set[str] = set()
         # 이번 목록에 실려 온 주문번호 — 같은 마켓 주문의 두 표기(KT알파 ':001' ↔ 플레이오토 '-001')가 함께 오면 대시 쪽을 거른다
         listed_numbers = {o.order_number for o in orders}
-        for wave_order in sorted(orders, key=_paid_key):
+        for wave_order in sorted(orders, key=lambda o: (not _daangn_single_stock(o), _paid_key(o))):
             seen += 1
             order = wave_order.to_order_ref()
             if self._dash_twin_listed(order.order_no, listed_numbers):
@@ -190,12 +202,14 @@ class Intake:
                 break
             handled.add(order.wave_key)
             ts = self._post_new(intake_line(order))
+            options = ({'_order_received_at': wave_order.paid_at.isoformat()}
+                       if wave_order.paid_at else {})
+            if _daangn_single_stock(wave_order):
+                options['_daangn_single_stock'] = True
             job, _created = self._queue.enqueue(
                 order.order_no,
                 self._requester,
-                {'_order_received_at': wave_order.paid_at.isoformat()}
-                if wave_order.paid_at
-                else {},
+                options,
                 thread_ts=ts,
                 wave_id=order.wave_id,
             )
@@ -343,6 +357,9 @@ class Intake:
                 log.exception('자동 수집 한 바퀴가 실패했다 — 다음 주기로 넘어간다')
             waited = 0.0
             while waited < interval_s and not stop():
+                if self._wake.is_set():
+                    self._wake.clear()
+                    break
                 nap = min(TICK_S, interval_s - waited)
                 time.sleep(nap)
                 waited += nap
@@ -351,7 +368,8 @@ class Intake:
         """수집 범위 안인가 — 소싱처 목록·포이즌 판매만(사용자 설정)."""
         if self._sources and str(order.source_site or '').upper() not in self._sources:
             return False
-        if self._poison_only and str(order.source_site or '').upper() not in self._all_sellers:
+        if (self._poison_only and not _daangn_single_stock(order)
+                and str(order.source_site or '').upper() not in self._all_sellers):
             from samba_agent.supervisor.policy import is_poison_seller
 
             if not is_poison_seller(order.seller):

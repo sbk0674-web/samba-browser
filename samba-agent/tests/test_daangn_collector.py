@@ -43,6 +43,18 @@ def test_matched_phone_order_is_submitted_with_representative_photo():
     assert submit.call_args.args[0]['product_image'] == candidate.product_image
 
 
+def test_missing_photo_never_creates_incomplete_order():
+    candidate = module.Candidate('서병기', 'room', '신발')
+    phone = {'payment_confirmed': True, 'sales_account': '서병기', 'product_name': '신발',
+             'sale_price': 69000, 'pickup_number': '056', 'pickup_date': date(2026, 10, 30)}
+    submit = Mock()
+    result = module.collect_candidate(candidate,
+        inspect_chat=lambda _: module.ChatEvidence(True, False, '신발', 69000),
+        inspect_phone=lambda *_: phone, submit=submit)
+    assert result == {'status': 'held', 'reason': '주문 사진 확인 필요'}
+    submit.assert_not_called()
+
+
 def test_round_checks_sale_signals_first_and_stops_after_error():
     unknown = module.Candidate('서병기', 'unknown', '바지')
     pickup = module.Candidate('서병기', 'pickup', '신발', preview_signal='pickup_request')

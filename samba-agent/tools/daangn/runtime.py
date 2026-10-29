@@ -1,16 +1,16 @@
 """당근 채팅 → 해당 폰 → 삼바 주문 저장. 로그와 기록에 채팅 본문을 남기지 않는다."""
 
-from datetime import datetime, timezone, timedelta
 import hashlib
 import importlib.util
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import sqlite3
 import subprocess
 import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from tools.daangn.account_switch import AndroidAccountPhone, switch_account
 from tools.daangn.android_phone import AndroidPhone
@@ -152,7 +152,23 @@ def make_phone_reader(journal: ReservationJournal):
     return inspect
 
 
-def run_round(settings, wave):
+class CandidateSchedule:
+    """앱의 캐시 목록만 빠르게 읽고, 같은 상세 화면은 반복해서 열지 않는다."""
+
+    def __init__(self):
+        self.next_check = {}
+
+    def select(self, candidates, now):
+        keys = {CollectionState.key(c) for c in candidates}
+        self.next_check = {k: v for k, v in self.next_check.items() if k in keys}
+        return [c for c in candidates if now >= self.next_check.get(CollectionState.key(c), 0)]
+
+    def inspected(self, candidate, now):
+        delay = 15 if candidate.preview_signal in ('pickup_request', 'pickup_scheduled') else 300
+        self.next_check[CollectionState.key(candidate)] = now + delay
+
+
+def run_round(settings, wave, schedule=None, on_saved=None):
     RECEIPTS.mkdir(parents=True, exist_ok=True)
     state = CollectionState(str(RECEIPTS / 'collection-state.sqlite'))
     journal = ReservationJournal(str(RECEIPTS / 'reservation-attempts.sqlite'))
@@ -162,18 +178,41 @@ def run_round(settings, wave):
         accounts = {r[0] for r in db.execute('SELECT label FROM daangn_accounts WHERE state=?', ('logged_in',)) if r[0]}
     chat = ChatBridge(settings.bridge_url, settings.bridge_token.get_secret_value(), accounts=accounts)
     try:
-        return collect_round(chat=chat, inspect_phone=make_phone_reader(journal),
+        selected_chat = chat
+        if schedule is not None:
+            class ScheduledChat:
+                def candidates(self):
+                    return schedule.select(chat.candidates(), time.monotonic())
+
+                def inspect(self, candidate):
+                    schedule.inspected(candidate, time.monotonic())
+                    return chat.inspect(candidate)
+
+            selected_chat = ScheduledChat()
+        def mark_saved(candidate, result):
+            state.mark(candidate, result)
+            if on_saved is not None:
+                on_saved()
+
+        return collect_round(chat=selected_chat, inspect_phone=make_phone_reader(journal),
             submit=lambda order: submit_collected_order(wave, order), already_done=state.done,
-            mark_done=state.mark, limit=15, offset=state.next_offset())
+            mark_done=mark_saved, limit=15, offset=0 if schedule is not None else state.next_offset())
     finally:
         chat._client.close()
 
 
-def run_forever(settings, wave, stop):
+def run_forever(settings, wave, stop, on_saved=None):
+    schedule = CandidateSchedule()
     while not stop.is_set():
+        delay = 2
         try:
-            run_round(settings, wave)
+            results = run_round(settings, wave, schedule=schedule, on_saved=on_saved)
+            if results:
+                log.info('당근 주문 확인: 저장 %d · 보류 %d',
+                         sum(r['status'] == 'saved' for r in results),
+                         sum(r['status'] == 'held' for r in results))
         except Exception as exc:
             # 인증·연결·차단의 상세에는 민감한 값이 들어갈 수 있어 기록하지 않는다.
             log.warning('당근 주문수집 회차 보류: %s', type(exc).__name__)
-        stop.wait(300)
+            delay = 30
+        stop.wait(delay)

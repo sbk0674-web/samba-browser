@@ -311,3 +311,13 @@ def test_옛_표_order_no_UNIQUE_는_행_id_표로_옮기고_행과_id_를_지�
     q2 = JobQueue(path)
     assert q2.get_by_id(b.id).wave_id == 'ord_B'
     assert q2.find('X', 'ord_B').id == b.id
+
+
+def test_daangn_single_stock_precedes_older_queue_without_interrupting_running(q):
+    first, _ = q.enqueue('normal', 'U1', {}, 'ts1')
+    assert q.claim().id == first.id
+    q.enqueue('older', 'U1', {}, 'ts2')
+    urgent, _ = q.enqueue('당근 123', 'U1', {'_daangn_single_stock': True}, 'ts3')
+    assert q.claim() is None
+    q.finish(first.id, 'done')
+    assert q.claim().id == urgent.id

@@ -681,6 +681,7 @@ def main() -> None:
             args=(settings, wave, stop),
             daemon=True,
             name='daangn-collection',
+            kwargs={'on_saved': intake.wake},
         ).start()
     else:
         log.warning('자동 수집을 띄우지 않는다 — 삼바웨이브 설정이 없거나 꺼져 있다')

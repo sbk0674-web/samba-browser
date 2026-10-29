@@ -256,7 +256,9 @@ class JobQueue:
             if running is not None:
                 return None
             row = self._db.execute(
-                "SELECT * FROM jobs WHERE state='queued' ORDER BY id LIMIT 1"
+                "SELECT * FROM jobs WHERE state='queued' "
+                "ORDER BY CASE WHEN json_extract(options, '$._daangn_single_stock') = 1 "
+                "THEN 0 ELSE 1 END, id LIMIT 1"
             ).fetchone()
             if row is None:
                 return None

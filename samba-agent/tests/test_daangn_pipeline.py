@@ -19,9 +19,11 @@ def test_chat_payment_to_pickup_to_idempotent_saved_order(tmp_path, monkeypatch)
             return httpx.Response(200, json={'ok': True, 'candidates': [{
                 'accountId': 1, 'accountLabel': '서병기', 'roomId': 'room',
                 'productTitle': '신발 230mm', 'peerName': '상대', 'lastAt': stamp,
+                'productThumb': 'https://example.com/shoe.jpg',
                 'lastAtPrecise': True, 'previewSignal': 'pickup_request'}]})
         return httpx.Response(200, json={'ok': True, 'signal': {'ready': True, 'payment': True,
-            'cancelled': False, 'productMatches': True, 'salePrice': 69000, 'systemNotice': True}})
+            'cancelled': False, 'productMatches': True, 'salePrice': 69000, 'systemNotice': True,
+            'paymentEventAt': '2026-10-29T12:06:00+09:00'}})
     chat = ChatBridge('http://127.0.0.1', 'test', accounts={'서병기'},
                       client=httpx.Client(transport=httpx.MockTransport(handler)))
     phone = Mock(unsafe=True)
@@ -40,7 +42,8 @@ def test_chat_payment_to_pickup_to_idempotent_saved_order(tmp_path, monkeypatch)
         {'id': 'ord_test', 'created': True},
         {'id': 'ord_test', 'order_number': '당근 056', 'sales_account': '서병기',
          'product_name': '신발 230mm', 'sale_price': 69000,
-         'paid_at': '2026-10-28T15:00:00+00:00', 'ship_by_at': '2026-10-29T15:00:00+00:00'}]
+         'paid_at': '2026-10-28T15:00:00+00:00', 'ship_by_at': '2026-10-29T15:00:00+00:00',
+         'product_image': 'https://example.com/shoe.jpg'}]
     state = CollectionState(str(tmp_path / 'state.sqlite'))
     def run():
         return collect_round(chat=chat, inspect_phone=lambda candidate, evidence: read_phone_order(
