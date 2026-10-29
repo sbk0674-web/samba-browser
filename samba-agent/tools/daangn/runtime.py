@@ -1,6 +1,6 @@
 """당근 채팅 → 해당 폰 → 삼바 주문 저장. 로그와 기록에 채팅 본문을 남기지 않는다."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import hashlib
 import importlib.util
 import json
@@ -11,7 +11,6 @@ import re
 import sqlite3
 import subprocess
 import time
-from zoneinfo import ZoneInfo
 
 from tools.daangn.account_switch import AndroidAccountPhone, switch_account
 from tools.daangn.android_phone import AndroidPhone
@@ -148,7 +147,7 @@ def make_phone_reader(journal: ReservationJournal):
             phone.assert_connected()
             _phone_idle(phone)
             _prepare_account(phone, locks)
-            today = datetime.now(ZoneInfo('Asia/Seoul')).date()
+            today = datetime.now(timezone(timedelta(hours=9))).date()
             return read_phone_order(phone, candidate, chat, today=today)
     return inspect
 
