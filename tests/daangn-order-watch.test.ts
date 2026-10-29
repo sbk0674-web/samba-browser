@@ -13,6 +13,19 @@ const base: DaangnChannelDto = {
 }
 
 describe('당근 주문 후보', () => {
+  it.each(['오전 8:13', '오후 8:13'])('결제 안내의 날짜와 시각만 묶고 나중 채팅은 무시한다 (%s)', clock => {
+    const notice = '수거 날짜를 선택해 주세요. 모바일에서 확인해주세요. 모바일에서 확인해주세요.'
+    const children = [
+      { textContent: '2026년 10월29일 목요일', classList: { contains: (s: string) => s === 'day-divider' } },
+      { textContent: notice + clock },
+      { textContent: '구매자 메시지 오후 9:00' }
+    ]
+    const document = { querySelector: () => ({ textContent: notice, children }),
+      querySelectorAll: () => [{ textContent: '상품14,000원' }] }
+    expect(runInNewContext(buildInspectSaleScript('상품'), { document })).toMatchObject({
+      paymentEventAt: clock.startsWith('오전') ? '2026-10-29T08:13:00+09:00' : '2026-10-29T20:13:00+09:00'
+    })
+  })
   it('채팅 목록의 수거 안내를 폰 확인이 필요한 후보로 찾는다', () => {
     expect(findOrderCandidates([base], cutoff)).toEqual([{
       accountId: 3, roomId: 'room-1', productTitle: base.productTitle,

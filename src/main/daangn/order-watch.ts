@@ -8,6 +8,7 @@ export interface DaangnSaleSignal {
   productMatches: boolean
   salePrice: number | null
   systemNotice: boolean
+  paymentEventAt?: string | null
 }
 
 export interface DaangnOrderCandidate {
@@ -46,6 +47,33 @@ export function buildInspectSaleScript(expectedTitle: string): string {
       const mobile = t.match(/모바일에서\\s*확인해\\s*주세요/g) || [];
       return /수거\\s*날짜를\\s*선택해\\s*주세요/.test(t) && mobile.length >= 2;
     });
+    // 날짜 구분선과 바로판매 시스템 안내 자체의 시각을 묶는다. 마지막 채팅 시각은 쓰지 않는다.
+    let day = null;
+    const paymentTimes = [];
+    for (const el of list.children) {
+      const body = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (el.classList?.contains('day-divider')) {
+        const match = body.match(/^(\\d{4})년\\s*(\\d{1,2})월\\s*(\\d{1,2})일/);
+        day = match ? match.slice(1).map(Number) : null;
+        continue;
+      }
+      const mobile = body.match(/모바일에서\\s*확인해\\s*주세요/g) || [];
+      if (!day || mobile.length < 2 || !/수거\\s*날짜를\\s*선택해\\s*주세요/.test(body)) continue;
+      const clocks = [...body.matchAll(/(오전|오후)\\s*(\\d{1,2}):(\\d{2})/g)];
+      if (clocks.length !== 1) continue;
+      const [, half, h, m] = clocks[0];
+      if (+h < 1 || +h > 12 || +m > 59) continue;
+      const hour = (+h % 12) + (half === '오후' ? 12 : 0);
+      const stamp = day[0] + '-' + String(day[1]).padStart(2, '0') + '-' + String(day[2]).padStart(2, '0')
+        + 'T' + String(hour).padStart(2, '0') + ':' + m + ':00+09:00';
+      const parsed = new Date(stamp);
+      const dateCheck = new Date(Date.UTC(day[0], day[1] - 1, day[2]));
+      if (Number.isFinite(parsed.getTime()) && dateCheck.getUTCFullYear() === day[0]
+          && dateCheck.getUTCMonth() === day[1] - 1 && dateCheck.getUTCDate() === day[2])
+        paymentTimes.push(stamp);
+    }
+    const verifiedTimes = [...new Set(paymentTimes)];
+    const paymentEventAt = verifiedTimes.length === 1 ? verifiedTimes[0] : null;
     const title = ${JSON.stringify(expectedTitle)}.replace(/\\s+/g, ' ').trim();
     const links = [...document.querySelectorAll('main section a')].map(a => (a.textContent || '').replace(/\\s+/g, ' ').trim());
     const matches = links.filter(t => title && t.startsWith(title));
@@ -57,7 +85,7 @@ export function buildInspectSaleScript(expectedTitle: string): string {
     });
     const prices = [...new Set(parsedPrices)];
     const productMatches = matches.length > 0 && prices.length === 1 && prices[0] !== null;
-    return { ready: true, payment, cancelled, productMatches, salePrice: productMatches ? prices[0] : null, systemNotice };
+    return { ready: true, payment, cancelled, productMatches, salePrice: productMatches ? prices[0] : null, systemNotice, paymentEventAt };
   })()`
 }
 
