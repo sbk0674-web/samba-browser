@@ -219,6 +219,12 @@ class Intake:
         방치하지 않고 근거를 남겨 취소중으로 둔다(사용자 2026-10-08: "매칭이 안 되면 취소중인 거 몰라?").
         처음 본 뒤 UNLINKED_CANCEL_AFTER 가 지나야 한다 — 연결이 돌 틈을 준다. 하네스가 이미 다루는 주문은 건드리지 않는다.
         """
+        # 당근은 보유 재고가 있어 소싱처 공란만으로 취소 사유가 되지 않는다.
+        if (wave_order.order_number or '').strip().startswith('당근 ') or any(
+            (value or '').strip().startswith('당근마켓')
+            for value in (wave_order.seller, wave_order.channel_name)
+        ):
+            return False
         if (wave_order.source_site or '').strip() or wave_order.source_inferred:
             return False
         if wave_order.inferred_product_prefix:

@@ -42,6 +42,7 @@ class FakeView implements AccountViewLike {
   scanGate: Promise<void> | null = null
   openGate: Promise<void> | null = null
   scans = 0
+  inspected: string[] = []
   constructor(readonly accountId: number) {}
   async start(): Promise<void> {
     this.started = true
@@ -62,6 +63,10 @@ class FakeView implements AccountViewLike {
     if (this.openGate) await this.openGate
     this.opened.push(roomId)
     this.room = roomId
+  }
+  async inspectSale(roomId: string): Promise<{ ready: boolean; payment: boolean; cancelled: boolean; productMatches: boolean; salePrice: number | null; systemNotice: boolean }> {
+    this.inspected.push(roomId)
+    return { ready: true, payment: true, cancelled: false, productMatches: true, salePrice: 34000, systemNotice: true }
   }
   async openLogin(): Promise<void> {
     this.loginOpened += 1
@@ -140,6 +145,25 @@ describe('DaangnService', () => {
   afterEach(() => {
     vi.useRealTimers()
     db.close()
+  })
+
+  it('로그인된 계정의 최근 상품 채팅만 주문 본문 확인 후보로 제공한다', async () => {
+    const a = repo.addAccount({ label: '서병기', partitionPrefix: 'p-' })
+    const b = repo.addAccount({ label: '임귀태', partitionPrefix: 'p-' })
+    const svc = make()
+    await svc.runTick()
+    views.get(a.id)!.channels = [{ ...chan(a.id, 'room-a', 0), productTitle: '바지', lastAt: 1000 }]
+    views.get(b.id)!.channels = [{ ...chan(b.id, 'room-b', 0), productTitle: '상의', lastAt: 1000 }]
+    views.get(b.id)!.st = 'expired'
+    await svc.runTick()
+    expect(svc.orderInspectionCandidates(900)).toEqual([
+      { accountId: a.id, accountLabel: '서병기', roomId: 'room-a', productTitle: '바지', productThumb: null, previewSignal: 'unknown', lastAtPrecise: false, lastAt: 1000, peerName: '상대room-a' }
+    ])
+    expect(await svc.inspectOrderSignal(a.id, 'room-a')).toEqual({ ready: true, payment: true, cancelled: false, productMatches: true, salePrice: 34000, systemNotice: true })
+    expect(views.get(a.id)!.inspected).toEqual(['room-a'])
+    expect(views.get(a.id)!.opened).toEqual([])
+    await expect(svc.inspectOrderSignal(a.id, 'room-b')).rejects.toThrow()
+    svc.dispose()
   })
 
   it('계정이 0개면 뷰도 타이머도 만들지 않고 dispose 뒤에도 남지 않는다', () => {

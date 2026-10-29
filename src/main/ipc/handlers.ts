@@ -149,6 +149,7 @@ import { DaangnAccountView } from '../daangn/account-view'
 import { registerDaangnIpc } from '../daangn/register'
 import { DaangnRepo } from '../daangn/repo'
 import { DaangnService } from '../daangn/service'
+import type { DaangnOrderCandidate, DaangnSaleSignal } from '../daangn/order-watch'
 import { installPhoneTools, phoneToolsStatus } from '../phone/tools-install'
 import { createPhoneOps } from '../agent/tools-phone'
 import { readCodeFromImage, readKeypadLayout } from '../ai/visual'
@@ -303,6 +304,8 @@ export function registerIpc(
     tabs: entry.tabs.list().length,
     primary: entry === windows.primary()
   })
+  let daangnOrderCandidates: (() => DaangnOrderCandidate[]) | undefined
+  let daangnInspectSale: ((accountId: number, roomId: string) => Promise<DaangnSaleSignal>) | undefined
   const bridge = new BridgeServer({
     // X-Samba-Window 가 있으면 그 창의 탭 관리자로 세션을 연다.
     // 번호는 있어야 하고(없으면 404), 별칭은 없으면 그 이름으로 새 창을 만든다(재시작 뒤에도 같은 이름으로 이어 쓴다)
@@ -325,6 +328,14 @@ export function registerIpc(
       })
     },
     token: () => settings.get().bridgeToken,
+    daangnOrderCandidates: () => {
+      if (!daangnOrderCandidates) throw new Error('당근 채팅 서비스 준비 전')
+      return daangnOrderCandidates()
+    },
+    daangnInspectSale: (accountId, roomId) => {
+      if (!daangnInspectSale) throw new Error('당근 채팅 서비스 준비 전')
+      return daangnInspectSale(accountId, roomId)
+    },
     windows: () => windows.all().map(bridgeWindowInfo),
     createWindow: (name) =>
       bridgeWindowInfo(
@@ -1839,6 +1850,8 @@ export function registerIpc(
         openExternal: (url) => void shell.openExternal(url)
       })
   })
+  daangnOrderCandidates = () => daangn.orderInspectionCandidates(Date.parse('2026-10-29T10:00:00+09:00'))
+  daangnInspectSale = (accountId, roomId) => daangn.inspectOrderSignal(accountId, roomId)
   registerDaangnIpc({
     handle: handleFromRenderer,
     handleWin: (channel, fn) =>

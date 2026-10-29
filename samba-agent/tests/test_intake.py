@@ -489,6 +489,30 @@ class _CancelWave(_FakeWave):
         return True
 
 
+def test_당근_소싱처_미확인은_자동취소하지_않는다(tmp_path, monkeypatch):
+    from samba_agent.queue import intake as intake_mod
+
+    monkeypatch.setattr(intake_mod, 'UNLINKED_CANCEL_AFTER', timedelta(seconds=0))
+    orders = [
+        wave_order('당근 136', source='', product_name='보유 재고 바지', id='ord_a', seller='당근마켓(서병기)'),
+        wave_order('다른번호', source='', product_name='보유 재고 신발', id='ord_b', seller='당근마켓(서병기)'),
+    ]
+    wave = _CancelWave(orders, [])
+    slack = _Slack()
+    intake = Intake(wave, JobQueue(tmp_path / 'j.sqlite'), Registry.load(DEFAULT_ROOT),
+                    slack.post_new, slack.post_line, days=7)
+    intake.run_once()
+    assert wave.set_calls == []
+
+
+def test_당근_상품명_숫자로_무신사를_추정하지_않는다():
+    order = wave_order('당근 056', source='', product_name='보유 재고 신발 6079566',
+                       seller='당근마켓(서병기)')
+    assert not order.source_inferred
+    assert not order.source_site
+    assert not order.source_url
+
+
 def test_마켓이_취소로_돌린_미이행_주문은_취소중으로_정리한다(tmp_path):
     """실기 2026-10-06 탑텐 청자켓 — 마켓 취소완료인데 주문접수로 20시간+ 방치됐다."""
     reg = Registry.load(DEFAULT_ROOT)

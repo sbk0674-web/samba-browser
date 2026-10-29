@@ -17,6 +17,7 @@ import {
 } from '../../shared/daangn'
 import type { DaangnRepo } from './repo'
 import { NotifyThrottle, diffUnread, planScan } from './schedule'
+import { findOrderCandidates, type DaangnOrderCandidate, type DaangnSaleSignal } from './order-watch'
 
 /** 알림이 같은 방에 다시 울리기까지 최소 간격 */
 const NOTIFY_COOLDOWN_MS = 120_000
@@ -57,6 +58,7 @@ export interface AccountViewLike {
     channels: DaangnChannelDto[]
   }>
   openRoom(roomId: string): Promise<void>
+  inspectSale?(roomId: string, expectedTitle: string): Promise<DaangnSaleSignal>
   openLogin(): Promise<void>
   currentRoomId(): string | null
   show(bounds: DaangnBounds, target: BrowserWindow): void
@@ -151,6 +153,32 @@ export class DaangnService {
       unread: unread[r.id] ?? 0
     }))
     return { accounts, channels }
+  }
+
+  /** 최근 상품 채팅은 본문 확인 대상일 뿐 결제완료 판정이 아니다. */
+  orderInspectionCandidates(cutoff: number): DaangnOrderCandidate[] {
+    if (!this.deps.settings().daangnEnabled) return []
+    const labels = new Map(
+      this.deps.repo.listAccounts()
+        .filter((account) => this.states.get(account.id) === 'logged_in')
+        .map((account) => [account.id, account.label] as const)
+    )
+    return findOrderCandidates([...this.channelsBy.values()].flat(), cutoff)
+      .filter((candidate) => labels.has(candidate.accountId))
+      .map((candidate) => ({ ...candidate, accountLabel: labels.get(candidate.accountId)! }))
+  }
+
+  async inspectOrderSignal(accountId: number, roomId: string): Promise<DaangnSaleSignal> {
+    const candidate = this.orderInspectionCandidates(0).find(c => c.accountId === accountId && c.roomId === roomId)
+    if (this.states.get(accountId) !== 'logged_in' || !candidate)
+      throw new Error('로그인된 계정과 채팅방을 확인할 수 없습니다')
+    const view = await this.ensureView(accountId)
+    if (view.state() !== 'logged_in') {
+      await view.scan()
+      if (view.state() !== 'logged_in') throw new Error('당근 계정 로그인 확인 필요')
+    }
+    if (!view.inspectSale) throw new Error('채팅 확인 기능을 사용할 수 없습니다')
+    return view.inspectSale(roomId, candidate.productTitle)
   }
 
   // --- 계정 ----------------------------------------------------------------------

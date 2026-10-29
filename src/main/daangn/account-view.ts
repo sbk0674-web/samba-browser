@@ -10,6 +10,7 @@ import type { DaangnAccountState, DaangnBounds, DaangnChannelDto } from '../../s
 import { clampBounds, hiddenBounds } from './bounds'
 import { buildFillScript, buildHideListCss, buildScanScript, parseScan, type RawScan } from './selectors'
 import { persistentCookieDetails } from './cookies'
+import { buildInspectSaleScript, type DaangnSaleSignal } from './order-watch'
 import { classifyChatUrl, isAllowedChatUrl, roomIdOf } from './url-guard'
 
 /** 페이지의 alert·confirm·prompt 를 무력화한다(확인 대화상자가 쌓여 읽기가 멈추는 것도 막는다) */
@@ -159,6 +160,37 @@ export class DaangnAccountView {
   currentRoomId(): string | null {
     const wc = this.alive()
     return wc ? roomIdOf(wc.getURL()) : null
+  }
+
+  /** 별도 숨김 뷰에서 해당 방 본문만 읽는다. 현재 사용 중인 채팅 화면을 바꾸지 않는다. */
+  async inspectSale(roomId: string, expectedTitle: string): Promise<DaangnSaleSignal> {
+    if (!this.host || !this.loggedIn || !/^[A-Za-z0-9_-]{1,200}$/.test(roomId))
+      throw new Error('로그인 계정 또는 채팅방 확인 필요')
+    const view = new WebContentsView({ webPreferences: {
+      session: session.fromPartition(this.deps.partition), sandbox: true,
+      contextIsolation: true, backgroundThrottling: false
+    } })
+    const wc = view.webContents
+    const host = this.host
+    host.contentView.addChildView(view)
+    view.setBounds(hiddenBounds())
+    wc.setAudioMuted(true)
+    wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+    wc.on('will-navigate', (e, url) => { if (!isAllowedChatUrl(url)) e.preventDefault() })
+    wc.on('will-redirect', (e, url) => { if (!isAllowedChatUrl(url)) e.preventDefault() })
+    try {
+      await wc.loadURL(`${CHAT_HOME}room/${encodeURIComponent(roomId)}`)
+      if (roomIdOf(wc.getURL()) !== roomId) throw new Error('채팅방 연결 확인 필요')
+      for (let i = 0; i < 6; i++) {
+        const result = await wc.executeJavaScript(buildInspectSaleScript(expectedTitle)) as DaangnSaleSignal
+        if (result?.ready && result.productMatches) return result
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      throw new Error('채팅 본문을 확인하지 못했습니다')
+    } finally {
+      try { host.contentView.removeChildView(view) } catch { /* 창이 이미 닫힘 */ }
+      if (!wc.isDestroyed()) wc.close()
+    }
   }
 
   /** 방을 연다. 목록에 그 줄이 있으면 눌러서(페이지 새로고침 없이), 없으면 주소로 이동한다 */

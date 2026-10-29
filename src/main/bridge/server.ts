@@ -8,6 +8,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 import type { ToolSession } from '../agent/runner'
+import type { DaangnOrderCandidate, DaangnSaleSignal } from '../daangn/order-watch'
 
 /** 브릿지가 밖에 보여 주는 창 한 개(비밀값 없음) */
 export interface BridgeWindowInfo {
@@ -47,6 +48,9 @@ export interface BridgeDeps {
   windows?: () => BridgeWindowInfo[]
   /** 새 창 만들기(POST /windows {name?}) — 사람 탭 하나가 열린 빈 창. 같은 이름이 있으면 그 창. 없으면 404 */
   createWindow?: (name?: string) => BridgeWindowInfo
+  /** 로그인된 당근 계정에서 최근 상품 채팅을 찾아 본문 확인 대상으로 전달한다. */
+  daangnOrderCandidates?: () => DaangnOrderCandidate[]
+  daangnInspectSale?: (accountId: number, roomId: string) => Promise<DaangnSaleSignal>
   toolTimeoutMs?: number
   /** 폰을 기다리는 긴 도구(결제 승인·인증번호)의 제한 시간. 없으면 LONG_TOOL_TIMEOUT_MS */
   longToolTimeoutMs?: number
@@ -79,6 +83,7 @@ export class BridgeServer {
   private busy = false
   /** 지금 도는 레인들 — 레인이 다르면 동시에 돈다(하네스 계정 동시 처리) */
   private busyLanes = new Set<string>()
+  private inspectingDaangn = false
   /** 마지막으로 도구 호출이 시작·끝난 시각(ms) — 호출 사이 틈에 뜬 페이지 대화상자도 자동화 중으로 본다 */
   private lastActivityAt = 0
 
@@ -149,6 +154,26 @@ export class BridgeServer {
     if (!this.authorized(req)) return json(res, 401, { error: 'unauthorized' })
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (req.method === 'GET' && url.pathname === '/health') return this.health(res)
+    if (req.method === 'GET' && url.pathname === '/daangn/order-candidates') {
+      if (!this.deps.daangnOrderCandidates) return json(res, 404, { error: 'not available' })
+      return json(res, 200, { ok: true, candidates: this.deps.daangnOrderCandidates() })
+    }
+    if (req.method === 'POST' && url.pathname === '/daangn/inspect-sale') {
+      if (!this.deps.daangnInspectSale) return json(res, 404, { error: 'not available' })
+      if (this.inspectingDaangn) return json(res, 409, { error: 'busy' })
+      let input: { accountId?: unknown; roomId?: unknown }
+      try { input = JSON.parse(await readBody(req)) as typeof input } catch { return json(res, 400, { error: 'invalid json' }) }
+      if (!Number.isSafeInteger(input.accountId) || (input.accountId as number) <= 0 ||
+          typeof input.roomId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(input.roomId))
+        return json(res, 400, { error: 'invalid account or room' })
+      this.inspectingDaangn = true
+      try {
+        const signal = await this.deps.daangnInspectSale(input.accountId as number, input.roomId)
+        return json(res, 200, { ok: true, signal })
+      } catch {
+        return json(res, 503, { error: 'chat unavailable' })
+      } finally { this.inspectingDaangn = false }
+    }
     // 창 목록·새 창 — 호출을 창 단위로 묶을 때(영상수익화 창 ≠ 주문처리 창) 창 번호를 고르는 데 쓴다
     if (url.pathname === '/windows') {
       if (req.method === 'GET' && this.deps.windows)

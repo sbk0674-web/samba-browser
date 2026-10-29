@@ -45,6 +45,20 @@ async function up(
 const H = { 'X-Samba-Token': TOKEN, 'content-type': 'application/json' }
 
 describe('BridgeServer', () => {
+  it('당근 주문 후보는 브릿지 인증 후에만 읽는다', async () => {
+    const base = await up({ daangnOrderCandidates: () => [{ accountId: 1, roomId: 'r1', productTitle: '상품', productThumb: null, previewSignal: 'unknown', lastAtPrecise: false, lastAt: 100, peerName: '구매자' }] })
+    expect((await fetch(`${base}/daangn/order-candidates`)).status).toBe(401)
+    const res = await fetch(`${base}/daangn/order-candidates`, { headers: H })
+    expect(await res.json()).toEqual({ ok: true, candidates: [{ accountId: 1, roomId: 'r1', productTitle: '상품', productThumb: null, previewSignal: 'unknown', lastAtPrecise: false, lastAt: 100, peerName: '구매자' }] })
+  })
+  it('당근 방 본문 신호 확인은 인증과 정확한 방 식별자가 필요하다', async () => {
+    const base = await up({ daangnInspectSale: async () => ({ ready: true, payment: true, cancelled: false, productMatches: true, salePrice: 69000, systemNotice: true }) })
+    const body = JSON.stringify({ accountId: 1, roomId: 'room-1' })
+    expect((await fetch(`${base}/daangn/inspect-sale`, { method: 'POST', body })).status).toBe(401)
+    expect((await fetch(`${base}/daangn/inspect-sale`, { method: 'POST', headers: H, body: JSON.stringify({ accountId: 1, roomId: '../bad' }) })).status).toBe(400)
+    const ok = await fetch(`${base}/daangn/inspect-sale`, { method: 'POST', headers: H, body })
+    expect(await ok.json()).toEqual({ ok: true, signal: { ready: true, payment: true, cancelled: false, productMatches: true, salePrice: 69000, systemNotice: true } })
+  })
   it('토큰이 없거나 틀리면 401', async () => {
     const base = await up()
     expect((await fetch(`${base}/health`)).status).toBe(401)
