@@ -48,9 +48,16 @@ export function buildInspectSaleScript(expectedTitle: string): string {
     });
     const title = ${JSON.stringify(expectedTitle)}.replace(/\\s+/g, ' ').trim();
     const links = [...document.querySelectorAll('main section a')].map(a => (a.textContent || '').replace(/\\s+/g, ' ').trim());
-    const matches = links.filter(t => title && t.includes(title));
-    const prices = [...new Set(matches.flatMap(t => [...t.matchAll(/([\\d,]+)\\s*원/g)].map(m => Number(m[1].replace(/,/g, '')))).filter(n => Number.isSafeInteger(n) && n > 0))];
-    return { ready: true, payment, cancelled, productMatches: matches.length > 0 && prices.length === 1, salePrice: prices.length === 1 ? prices[0] : null, systemNotice };
+    const matches = links.filter(t => title && t.startsWith(title));
+    // textContent는 제목 끝 품번과 가격을 붙인다. 제목을 먼저 제거하고 가격만 검증한다.
+    const parsedPrices = matches.map(t => {
+      const price = t.slice(title.length).trim().match(/^(\\d+|\\d{1,3}(?:,\\d{3})+)\\s*원$/);
+      const value = price ? Number(price[1].replace(/,/g, '')) : null;
+      return Number.isSafeInteger(value) && value > 0 ? value : null;
+    });
+    const prices = [...new Set(parsedPrices)];
+    const productMatches = matches.length > 0 && prices.length === 1 && prices[0] !== null;
+    return { ready: true, payment, cancelled, productMatches, salePrice: productMatches ? prices[0] : null, systemNotice };
   })()`
 }
 

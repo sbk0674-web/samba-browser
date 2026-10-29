@@ -46,4 +46,29 @@ describe('당근 주문 후보', () => {
     expect(runInNewContext(buildInspectSaleScript('다른 상품'), { document: doc })).toMatchObject({ productMatches: false, salePrice: null })
     expect(runInNewContext(buildInspectSaleScript('신발'), { document: { querySelector: () => null } })).toMatchObject({ ready: false, payment: false })
   })
+  it('제목 끝 품번과 가격이 붙어 있어도 제목을 뺀 가격만 읽는다', () => {
+    const title = '나이키 조거 팬츠 M AO2371-091'
+    const document = {
+      querySelector: () => ({ textContent: '수거 날짜를 선택해 주세요.', children: [] }),
+      querySelectorAll: () => [{ textContent: `${title}14,000원` }]
+    }
+    expect(runInNewContext(buildInspectSaleScript(title), { document })).toMatchObject({
+      productMatches: true, salePrice: 14000
+    })
+  })
+  it.each([
+    ['', ['상품14,000원']],
+    ['상품', ['다른 상품14,000원']],
+    ['상품', ['상품 다른 옵션14,000원']],
+    ['상품', ['상품14,000원', '상품15,000원']],
+    ['상품', ['상품14,000원 15,000원']]
+  ])('제목이 없거나 제목·가격이 충돌하면 보류한다 (%s)', (title, links) => {
+    const document = {
+      querySelector: () => ({ textContent: '수거 날짜를 선택해 주세요.', children: [] }),
+      querySelectorAll: () => links.map(textContent => ({ textContent }))
+    }
+    expect(runInNewContext(buildInspectSaleScript(title), { document })).toMatchObject({
+      productMatches: false, salePrice: null
+    })
+  })
 })
