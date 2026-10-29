@@ -79,7 +79,7 @@ export function buildInspectSaleScript(expectedTitle: string): string {
     const matches = links.filter(t => title && t.startsWith(title));
     // textContent는 제목 끝 품번과 가격을 붙인다. 제목을 먼저 제거하고 가격만 검증한다.
     const parsedPrices = matches.map(t => {
-      const price = t.slice(title.length).trim().match(/^(\\d+|\\d{1,3}(?:,\\d{3})+)\\s*원$/);
+      const price = t.slice(title.length).trim().match(/^(\\d+|\\d{1,3}(?:,\\d{3})+)\\s*원\\s*(?:판매중|예약중|거래완료|판매완료)?$/);
       const value = price ? Number(price[1].replace(/,/g, '')) : null;
       return Number.isSafeInteger(value) && value > 0 ? value : null;
     });

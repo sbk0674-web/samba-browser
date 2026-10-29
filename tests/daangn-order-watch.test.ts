@@ -59,11 +59,11 @@ describe('당근 주문 후보', () => {
     expect(runInNewContext(buildInspectSaleScript('다른 상품'), { document: doc })).toMatchObject({ productMatches: false, salePrice: null })
     expect(runInNewContext(buildInspectSaleScript('신발'), { document: { querySelector: () => null } })).toMatchObject({ ready: false, payment: false })
   })
-  it('제목 끝 품번과 가격이 붙어 있어도 제목을 뺀 가격만 읽는다', () => {
+  it.each(['', '예약중', '판매완료'])('제목 끝 품번과 가격·상태가 붙어도 가격만 읽는다 (%s)', status => {
     const title = '나이키 조거 팬츠 M AO2371-091'
     const document = {
       querySelector: () => ({ textContent: '수거 날짜를 선택해 주세요.', children: [] }),
-      querySelectorAll: () => [{ textContent: `${title}14,000원` }]
+      querySelectorAll: () => [{ textContent: `${title}14,000원${status}` }]
     }
     expect(runInNewContext(buildInspectSaleScript(title), { document })).toMatchObject({
       productMatches: true, salePrice: 14000
