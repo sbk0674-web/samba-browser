@@ -167,6 +167,7 @@ class WaveOrder(BaseModel):
     # SAMBA 정산금. 목록 응답에 실리면 마진을 정산금 기준으로 계산한다(없으면 판매가 근사)
     revenue: float | None = None
     seller: str | None = None
+    channel_name: str | None = None
     # 중국 크림 주문 — 판매처(得物 …)·판매처 가격(위안)·수집상품 상품코드(식화 품번). 삼바웨이브가 실어 줄 때만
     source_seller: str | None = None
     source_price_cny: float | None = None
@@ -194,6 +195,12 @@ class WaveOrder(BaseModel):
     def _infer_source(self) -> Self:
         """소싱처 미등록 주문 — 상품명 뒤쪽 번호로 무신사·ABC마트·롯데온 상품을 찾는다(사용자 2026-09-25)."""
         if (self.source_site or '').strip():
+            return self
+        # 당근은 실제 무신사 원본 연결만 소싱으로 취급한다. 품번 숫자를 추측하면 보유재고를 잘못 구매·취소할 수 있다.
+        if (self.order_number or '').strip().startswith('당근 ') or any(
+            (value or '').strip().startswith('당근마켓')
+            for value in (self.seller, self.channel_name)
+        ):
             return self
         found = infer_source(self.product_name)
         if found:

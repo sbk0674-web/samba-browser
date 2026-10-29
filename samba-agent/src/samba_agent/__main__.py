@@ -672,6 +672,16 @@ def main() -> None:
             daemon=True,
             name='intake',
         ).start()
+        # 당근은 채팅에서 바로판매를 확인한 뒤 폰·수거번호를 대조해 기존 주문 저장소에 넣는다.
+        # 작업 결과는 파일에만 남기며 새 대화 메시지를 만들지 않는다.
+        from tools.daangn.runtime import run_forever as run_daangn_collection
+
+        threading.Thread(
+            target=run_daangn_collection,
+            args=(settings, wave, stop),
+            daemon=True,
+            name='daangn-collection',
+        ).start()
     else:
         log.warning('자동 수집을 띄우지 않는다 — 삼바웨이브 설정이 없거나 꺼져 있다')
 
