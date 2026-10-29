@@ -1,8 +1,24 @@
 import sqlite3
+import pytest
+from unittest.mock import Mock
 from pathlib import Path
 
 from tools.daangn.collector import Candidate
 from tools.daangn import runtime
+
+
+def test_active_call_is_busy_even_without_recent_touch():
+    phone = Mock()
+    phone._run.return_value = b'mCallState=2\nmCallState=0'
+    with pytest.raises(RuntimeError, match='통화'):
+        runtime._phone_idle(phone)
+    assert phone._run.call_count == 1
+
+
+def test_idle_phone_requires_no_call_and_no_recent_touch():
+    phone = Mock()
+    phone._run.side_effect = [b'mCallState=0', b'lastUserActivityTime=123 (45000 ms ago)']
+    runtime._phone_idle(phone)
 
 
 def test_account_uses_current_clone_not_older_phone(tmp_path, monkeypatch):

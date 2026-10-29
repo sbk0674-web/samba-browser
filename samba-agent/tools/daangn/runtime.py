@@ -105,6 +105,10 @@ def _transport(serial: str) -> str:
 
 
 def _phone_idle(phone: AndroidPhone):
+    calls = phone._run('shell', 'dumpsys', 'telephony.registry').decode('utf8', 'replace')
+    states = re.findall(r'mCallState\s*=\s*(\d+)', calls)
+    if not states or any(state != '0' for state in states):
+        raise RuntimeError('폰이 통화 중이거나 통화 상태를 확인할 수 없습니다')
     text = phone._run('shell', 'dumpsys', 'power').decode('utf8', 'replace')
     m = re.search(r'lastUserActivityTime=\d+\s*\((\d+) ms ago\)', text)
     if not m or int(m.group(1)) < 30000:
