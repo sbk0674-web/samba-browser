@@ -208,14 +208,6 @@ class AndroidPhone:
         self._tap_unique(root, '날짜 선택하기')
         xml, root = self._screen()
         chosen, bounds = choose_pickup_date(xml, today=today, is_musinsa=is_musinsa)
-        first_ys = []
-        for node in root.iter('node'):
-            if re.fullmatch(r'\d{1,2}월\s*\d{1,2}일\s*\([월화수목금토일]\)', node.get('text', '').strip()):
-                xy = [int(x) for x in re.findall(r'\d+', node.get('bounds', ''))]
-                if len(xy) == 4 and xy[3] > xy[1]:
-                    first_ys.append((xy[1] + xy[3]) // 2)
-        if not first_ys:
-            raise ValueError('첫 수거일 위치 확인 실패')
         xy = [int(x) for x in re.findall(r'\d+', bounds)]
         self._tap_bounds(bounds)
         if not self._selected_ring((xy[1] + xy[3]) // 2):
@@ -228,9 +220,14 @@ class AndroidPhone:
             raise ValueError('수거 장소 화면 확인 실패')
         if not labels.index('문 앞') < labels.index('경비실') < labels.index('직접 입력'):
             raise ValueError('수거 장소 배치 확인 실패')
-        # 동일한 당근 수거 흐름에서 첫 선택 행은 바로 앞 날짜 화면 첫 행과 같다.
-        y = min(first_ys)
-        self._run('shell', 'input', 'tap', '200', str(y))
+        doors = [n for n in root.iter('node') if n.get('text', '').strip() == '문 앞']
+        if len(doors) != 1:
+            raise ValueError('문 앞 위치 확인 실패')
+        xy = [int(x) for x in re.findall(r'\d+', doors[0].get('bounds', ''))]
+        if len(xy) != 4 or xy[2] <= xy[0] or xy[3] <= xy[1]:
+            raise ValueError('문 앞 위치 확인 실패')
+        y = (xy[1] + xy[3]) // 2
+        self._tap_unique(root, '문 앞')
         time.sleep(1)
         if not self._selected_ring(y):
             raise ValueError('문 앞 선택 확인 실패')

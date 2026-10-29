@@ -54,9 +54,7 @@ class ChatBridge:
         if isinstance(price, bool) or not isinstance(price, int) or price <= 0:
             raise SourceUnavailable('채팅 판매금액 확인 실패')
         event_time = None
-        if (signal.get('systemNotice') is True and candidate.preview_signal == 'pickup_request'
-                and candidate.last_at_precise and candidate.last_at > 0):
-            event_time = datetime.fromtimestamp(candidate.last_at / 1000, timezone.utc)
+        # 마지막 메시지는 구매자가 보낸 글일 수 있다. 결제 시각 증거로 쓰지 않는다.
         return ChatEvidence(payment_confirmed=signal.get('payment') is True,
                             cancelled=signal.get('cancelled') is True,
                             product_title=candidate.product_title, sale_price=price,

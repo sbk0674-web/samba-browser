@@ -39,7 +39,7 @@ class CollectionState:
         with sqlite3.connect(self.path, timeout=10) as db:
             row = db.execute('SELECT value FROM cursor WHERE id=1').fetchone()
             value = row[0] if row else 0
-            db.execute('INSERT INTO cursor(id,value) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value', (value + 15,))
+            db.execute('INSERT INTO cursor(id,value) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value', (value + 1,))
             return value
 
     @staticmethod

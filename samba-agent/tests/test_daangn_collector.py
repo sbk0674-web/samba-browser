@@ -54,3 +54,15 @@ def test_round_checks_sale_signals_first_and_stops_after_error():
     assert result == [{'status': 'held', 'reason': '확인 또는 저장 실패'}]
     assert chat.inspect.call_count == 1
     assert chat.inspect.call_args.args[0].room_id == 'pickup'
+
+
+def test_held_pickup_rooms_do_not_starve_other_new_orders():
+    chat = Mock()
+    chat.candidates.return_value = [
+        module.Candidate('서병기', str(i), '신발', preview_signal='pickup_request')
+        for i in range(15)
+    ] + [module.Candidate('서병기', 'new', '신발')]
+    chat.inspect.return_value = module.ChatEvidence(False, False, '신발', 69000)
+    module.collect_round(chat=chat, inspect_phone=Mock(), submit=Mock(),
+                         already_done=lambda _: False, mark_done=Mock(), limit=15)
+    assert 'new' in [call.args[0].room_id for call in chat.inspect.call_args_list]

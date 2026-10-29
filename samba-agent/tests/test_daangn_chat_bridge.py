@@ -42,7 +42,7 @@ def test_missing_live_bridge_stops_without_retry():
     assert len(calls) == 1
 
 
-def test_cutoff_event_needs_system_card_and_precise_matching_preview():
+def test_last_message_time_never_proves_payment_notice_time():
     timestamp = int(datetime(2026, 10, 29, 3, 6, tzinfo=timezone.utc).timestamp() * 1000)
     def handler(req):
         if req.method == 'GET':
@@ -55,4 +55,4 @@ def test_cutoff_event_needs_system_card_and_precise_matching_preview():
     bridge = ChatBridge('http://127.0.0.1', 'test', accounts={'서병기'},
                         client=httpx.Client(transport=httpx.MockTransport(handler)))
     evidence = bridge.inspect(bridge.candidates()[0])
-    assert evidence.payment_event_at == datetime(2026, 10, 29, 3, 6, tzinfo=timezone.utc)
+    assert evidence.payment_event_at is None

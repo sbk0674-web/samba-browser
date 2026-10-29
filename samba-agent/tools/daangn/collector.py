@@ -77,10 +77,15 @@ def collect_round(*, chat, inspect_phone: Callable, submit: Callable,
     # 신호가 드러난 방을 먼저 확인한다. 일반 메시지로 덮인 방도 본문 확인 대상이다.
     urgent = sorted((c for c in candidates if c.preview_signal in ('pickup_request', 'pickup_scheduled')), key=lambda c: -c.last_at)
     ordinary = sorted((c for c in candidates if c.preview_signal not in ('pickup_request', 'pickup_scheduled')), key=lambda c: -c.last_at)
+    if urgent:
+        start = offset % len(urgent)
+        urgent = urgent[start:] + urgent[:start]
     if ordinary:
-        offset %= len(ordinary)
-        ordinary = ordinary[offset:] + ordinary[:offset]
-    candidates = urgent + ordinary
+        start = offset % len(ordinary)
+        ordinary = ordinary[start:] + ordinary[:start]
+    # 보류된 수거 안내가 많아도 일반 메시지에 가려진 새 주문을 확인한다.
+    budget = max(1, limit * 2 // 3) if ordinary else limit
+    candidates = urgent[:budget] + ordinary + urgent[budget:]
     results = []
     for candidate in candidates:
         if len(results) >= limit:

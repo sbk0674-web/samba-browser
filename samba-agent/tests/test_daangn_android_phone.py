@@ -61,7 +61,7 @@ def test_inventory_reservation_uses_tomorrow_and_door_then_checks_receipt(tmp_pa
              '<node text="10월 30일(금)" bounds="[91,483][341,535]"/>'
              '<node text="11월 6일(금)" bounds="[91,1500][341,1550]"/>'
              '<node text="다음" bounds="[42,2055][1039,2194]"/></hierarchy>')
-    place = ('<hierarchy><node text="어디에서 수거할까요?"/><node text="문 앞"/>'
+    place = ('<hierarchy><node text="어디에서 수거할까요?"/><node text="문 앞" bounds="[91,670][341,730]"/>'
              '<node text="경비실"/><node text="직접 입력"/>'
              '<node text="완료" bounds="[548,2055][1039,2194]"/></hierarchy>')
     receipt = ('<hierarchy><node text="택배 접수가 완료됐어요"/>'
@@ -73,10 +73,10 @@ def test_inventory_reservation_uses_tomorrow_and_door_then_checks_receipt(tmp_pa
     device._tap_unique = lambda _root, label: actions.append(label)
     device._tap_bounds = lambda bounds: actions.append(bounds)
     device._run = lambda *args, **kwargs: actions.append(args) or b''
-    device._selected_ring = lambda y: y == 509
+    device._selected_ring = lambda y: y in (509, 700)
     monkeypatch.setattr('tools.daangn.android_phone.time.sleep', lambda _: None)
     result = device.reserve_pickup(is_musinsa=False, today=date(2026, 10, 29), location='문 앞')
     assert result == date(2026, 10, 30)
     assert actions == ['날짜 선택하기', '[91,483][341,535]', '다음',
-                       ('shell', 'input', 'tap', '200', '509'), '완료', '진행 현황 보기']
+                       '문 앞', '완료', '진행 현황 보기']
     assert not device.journal.begin('서병기', 'room')
