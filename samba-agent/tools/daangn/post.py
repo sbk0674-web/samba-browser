@@ -113,6 +113,7 @@ def category_for(it):
   return '남성패션/잡화'
 
 def push_images(it):
+  from photo_policy import is_musinsa_item
   DIR = '/sdcard/DCIM/Bunjang'
   old = sh('ls', DIR).stdout.decode().split()
   for f in old:
@@ -123,7 +124,7 @@ def push_images(it):
   sh('mkdir', '-p', DIR)
   imgs = list(it['images'][:10])
   MAIN.update(json.load(open('main_images.json', encoding='utf-8')) if os.path.exists('main_images.json') else {})   # 매번 다시 읽음
-  main = MAIN.get(it['pid'])              # 대표사진 번호(1부터), 옆면 사진
+  main = None if is_musinsa_item(it) else MAIN.get(it['pid'])  # 무신사는 첫 썸네일을 유지한다
   if main and 1 <= main <= len(imgs):
     imgs.insert(0, imgs.pop(main - 1))
   for n, src in enumerate(imgs, 1):
@@ -141,6 +142,8 @@ def edit_text_below(nodes, label):
   return min(cands, key=lambda n: n['cy'])
 
 def post(it):
+  from photo_policy import validate_photo_policy
+  validate_photo_policy(it)
   n_img = push_images(it)
   want = it.get('category') or category_for(it)
   # 1) 판매관리 화면의 글쓰기
