@@ -33,7 +33,7 @@ describe('parseScan', () => {
       roomId: 'UMTA1ODgtMjA0NzIxMTY',
       peerName: '당근당근바니바니',
       unread: 3,
-      lastAt: new Date(2026, 9, 21, 15, 32).getTime(),
+      lastAt: 0, // 날짜 근거 없는 목록 시각은 미확인
       lastAtText: '오후 03:32'
     })
     expect(out.channels[1]).toMatchObject({ roomId: 'ABC', unread: 99 })

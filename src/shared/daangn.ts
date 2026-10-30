@@ -20,9 +20,13 @@ export interface DaangnChannelDto {
   peerName: string
   region: string
   lastMessage: string
-  /** 마지막 메시지 시각(epoch ms). 화면의 "오후 03:26" 같은 글에서 읽는다 — 못 읽으면 0 */
+  /** 마지막 메시지 시각(epoch ms). 원본 날짜 근거가 없으면 0(시각만으로 오늘을 추정하지 않는다) */
   lastAt: number
   lastAtText: string
+  /** 날짜가 확인된 원본 출처. 구버전의 시각만으로 만든 lastAt에는 이 표시가 없다 */
+  lastAtSource?: 'message' | 'list'
+  /** 원본에 날짜와 분 단위 시각이 함께 있을 때만 true */
+  lastAtPrecise?: boolean
   unread: number
   productTitle: string
   productThumb: string | null
@@ -64,20 +68,35 @@ export function parseUnread(text: string): number {
 }
 
 /**
- * 채팅 목록의 시각 글("오후 03:26"·"어제"·"10월 20일"·"2025년 3월 2일"·"방금")을 epoch ms 로 바꾼다.
- * 계정이 여러 개라 시각순 정렬이 필요하다. 모르는 글은 0(맨 뒤)
+ * 원본에 날짜가 있는 시각·상대 표기만 KST epoch ms 로 바꾼다.
+ * "오후 03:26"처럼 날짜가 없는 글은 조회 시각으로 채우지 않고 0(미확인)으로 둔다.
  */
 export function parseKoreanTime(text: string, now: Date): number {
   const t = text.trim()
-  const day = (y: number, m: number, d: number, h = 0, mi = 0): number =>
-    new Date(y, m, d, h, mi, 0, 0).getTime()
-  const ampm = /^(오전|오후)\s*(\d{1,2}):(\d{2})$/.exec(t)
-  if (ampm) {
-    let h = Number(ampm[2]) % 12
-    if (ampm[1] === '오후') h += 12
-    const today = day(now.getFullYear(), now.getMonth(), now.getDate(), h, Number(ampm[3]))
-    // 당근은 오늘 온 글만 시각만 쓴다 — 지금보다 뒤 시각이면 어제 글이다(어제 오후 11:41 이 오늘 오후 7:18 보다 위로 올라가던 문제)
-    return today > now.getTime() + 60_000 ? today - 86_400_000 : today
+  const offset = 9 * 3_600_000
+  const kst = new Date(now.getTime() + offset)
+  const day = (y: number, m: number, d: number, h = 0, mi = 0): number => {
+    const check = new Date(Date.UTC(y, m, d, h, mi))
+    return check.getUTCFullYear() === y && check.getUTCMonth() === m && check.getUTCDate() === d &&
+      h >= 0 && h <= 23 && mi >= 0 && mi <= 59 ? check.getTime() - offset : 0
+  }
+  const clock = (half: string, h: string, m: string): number[] | null =>
+    +h >= 1 && +h <= 12 && +m <= 59 ? [(+h % 12) + (half === '오후' ? 12 : 0), +m] : null
+  const full = /^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s*[월화수목금토일]요일)?(?:\s+(오전|오후)\s*(\d{1,2}):(\d{2}))?$/.exec(t)
+  if (full) {
+    const hm = full[4] ? clock(full[4], full[5], full[6]) : [0, 0]
+    return hm ? day(+full[1], +full[2] - 1, +full[3], hm[0], hm[1]) : 0
+  }
+  const iso = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(t)
+  if (iso) {
+    const at = Date.parse(t)
+    return day(+iso[1], +iso[2] - 1, +iso[3]) && Number.isFinite(at) ? at : 0
+  }
+  const relativeDay = /^(오늘|어제)(?:\s+(오전|오후)\s*(\d{1,2}):(\d{2}))?$/.exec(t)
+  if (relativeDay) {
+    const hm = relativeDay[2] ? clock(relativeDay[2], relativeDay[3], relativeDay[4]) : [12, 0]
+    return hm ? day(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate(), hm[0], hm[1]) -
+      (relativeDay[1] === '어제' ? 86_400_000 : 0) : 0
   }
   if (t === '방금' || t === '방금 전') return now.getTime()
   const rel = /^(\d+)\s*(분|시간|일|주|달|개월|년)\s*전$/.exec(t)
@@ -93,11 +112,11 @@ export function parseKoreanTime(text: string, now: Date): number {
     }
     return now.getTime() - Number(rel[1]) * unit[rel[2]]
   }
-  if (t === '어제') return day(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0)
-  const full = /^(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일$/.exec(t)
-  if (full) return day(Number(full[1]), Number(full[2]) - 1, Number(full[3]))
   const md = /^(\d{1,2})월\s*(\d{1,2})일$/.exec(t)
-  if (md) return day(now.getFullYear(), Number(md[1]) - 1, Number(md[2]))
+  if (md) {
+    const at = day(kst.getUTCFullYear(), +md[1] - 1, +md[2])
+    return at > now.getTime() ? day(kst.getUTCFullYear() - 1, +md[1] - 1, +md[2]) : at
+  }
   return 0
 }
 

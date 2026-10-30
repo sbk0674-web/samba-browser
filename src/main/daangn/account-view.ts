@@ -56,6 +56,7 @@ export class DaangnAccountView {
   private loggedIn = false
   private failures = 0
   private failed = false
+  private lastChannels: DaangnChannelDto[] = []
 
   constructor(private readonly deps: DaangnAccountViewDeps) {}
 
@@ -144,7 +145,8 @@ export class DaangnAccountView {
     if (classifyChatUrl(wc.getURL()) !== 'chat') return { me: null, channels: [] }
     try {
       const raw = await wc.executeJavaScript(buildScanScript())
-      const parsed = parseScan(raw, this.deps.accountId, this.deps.now())
+      const parsed = parseScan(raw, this.deps.accountId, this.deps.now(), this.lastChannels)
+      this.lastChannels = parsed.channels
       this.failures = 0
       this.failed = false
       // 이름이 읽혔을 때만 로그인된 것으로 본다(목록이 아직 안 그려졌으면 loading 그대로)
@@ -211,6 +213,7 @@ export class DaangnAccountView {
     const wc = this.alive()
     if (!wc) throw new Error('뷰가 없어요')
     this.loggedIn = false
+    this.lastChannels = []
     await wc.loadURL(LOGIN_URL).catch(() => undefined)
   }
 

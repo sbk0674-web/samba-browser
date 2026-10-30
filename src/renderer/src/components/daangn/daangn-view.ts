@@ -6,6 +6,20 @@ import {
   type DaangnChannelDto
 } from '@shared/daangn'
 
+/** 조회 시간이 아닌 원본 메시지 날짜로 표시한다. 날짜가 없으면 그 사실을 드러낸다. */
+export function lastAtLabel(text: string, lastAt: number, now = Date.now()): string {
+  if (!/^(?:(?:오전|오후)\s*)?\d{1,2}:\d{2}$/.test(text.trim())) return text
+  if (!Number.isFinite(lastAt) || lastAt <= 0) return `날짜 미확인 ${text}`
+  const kstDay = (at: number): number => Math.floor((at + 9 * 3_600_000) / 86_400_000)
+  const days = kstDay(now) - kstDay(lastAt)
+  if (days === 0) return text
+  if (days === 1) return `어제 ${text}`
+  const date = new Date(lastAt + 9 * 3_600_000)
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(date.getUTCDate()).padStart(2, '0')
+  return `${date.getUTCFullYear()}.${mm}.${dd} ${text}`
+}
+
 /** 통합 목록에 보일 채널 — 안읽음만/전체, 계정 필터, 최근순 */
 export function visibleChannels(state: {
   channels: readonly DaangnChannelDto[]

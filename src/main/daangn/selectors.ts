@@ -14,6 +14,7 @@ export const SELECTORS = {
   /** "지역 · 시각" 또는 시각만 있는 글 조각들 */
   subText: '.preview-title-wrap .sub-text span',
   lastMessage: '.description-text',
+  messageTime: '.preview-title-wrap .sub-text time[datetime]',
   /** 상품 썸네일 — alt 가 상품 이름이다 */
   productThumb: 'img.preview-image',
   /** 안 읽은 수 배지(원형, 안 읽은 줄에만 있다) */
@@ -40,6 +41,8 @@ export interface RawRow {
   region: string
   lastMessage: string
   timeText: string
+  /** 같은 목록 행의 datetime 또는 현재 방 마지막 메시지의 날짜+시각. 조회 시각은 넣지 않는다 */
+  messageAt?: string
   unreadText: string
   productTitle: string
   productThumb: string | null
@@ -56,17 +59,49 @@ export function buildScanScript(): string {
   return `(() => {
   const S = ${S}
   const text = (el) => (el ? (el.textContent || '').replace(/\\s+/g, ' ').trim() : '')
+  const compact = (s) => s.replace(/\\s+/g, '')
+  const clockKey = (s) => {
+    const m = s.match(/^(?:(오전|오후)\\s*)?(\\d{1,2}):(\\d{2})$/)
+    return m ? (m[1] ? +m[2] % 12 + (m[1] === '오후' ? 12 : 0) : +m[2]) + ':' + m[3] : ''
+  }
+  const roomId = (typeof location === 'object' && location.pathname.match(/^\\/room\\/([^/?#]+)$/) || [])[1] || ''
+  const list = roomId ? document.querySelector('[aria-label="메시지 리스트"]') : null
+  let day = '', latest = null
+  for (const el of list ? list.children : []) {
+    const body = text(el)
+    if (!body) continue
+    latest = null
+    if (el.classList.contains('day-divider')) {
+      const date = body.match(/^\\d{4}년\\s*\\d{1,2}월\\s*\\d{1,2}일/)
+      day = date ? date[0] : ''
+      continue
+    }
+    const clocks = [...body.matchAll(/(오전|오후)\\s*\\d{1,2}:\\d{2}/g)]
+    if (day && clocks.length === 1) latest = {
+      message: compact(body.replace(clocks[0][0], '')),
+      clock: clockKey(clocks[0][0]),
+      at: day + ' ' + clocks[0][0]
+    }
+  }
   const rows = [...document.querySelectorAll(S.row)].map((a) => {
     const subs = [...a.querySelectorAll(S.subText)].map(text).filter((t) => t && t !== '·')
     const timeText = subs.length ? subs[subs.length - 1] : ''
     const region = subs.length > 1 ? subs[0] : ''
     const thumb = a.querySelector(S.productThumb)
+    const href = a.getAttribute('href') || ''
+    const id = (href.match(/\\/room\\/([^/?#]+)/) || [])[1]
+    const lastMessage = text(a.querySelector(S.lastMessage))
+    const stamp = a.querySelector(S.messageTime)
+    const messageAt = id === roomId && latest && lastMessage && latest.message === compact(lastMessage)
+      && (!clockKey(timeText) || clockKey(timeText) === latest.clock)
+      ? latest.at : stamp ? stamp.getAttribute('datetime') || '' : ''
     return {
-      href: a.getAttribute('href') || '',
+      href,
       peerName: text(a.querySelector(S.peerName)),
       region,
-      lastMessage: text(a.querySelector(S.lastMessage)),
+      lastMessage,
       timeText,
+      messageAt,
       unreadText: text(a.querySelector(S.unread)),
       productTitle: thumb ? thumb.getAttribute('alt') || '' : '',
       productThumb: thumb ? thumb.getAttribute('src') : null
@@ -102,7 +137,8 @@ export function buildFillScript(text: string): string {
 export function parseScan(
   raw: unknown,
   accountId: number,
-  now: Date
+  now: Date,
+  previous: readonly DaangnChannelDto[] = []
 ): { me: RawScan['me']; channels: DaangnChannelDto[] } {
   if (typeof raw !== 'object' || raw === null) throw new Error('채팅 목록을 읽지 못했어요')
   const r = raw as { me?: unknown; rows?: unknown }
@@ -114,15 +150,30 @@ export function parseScan(
     const m = /\/room\/([^/?#]+)/.exec(typeof row.href === 'string' ? row.href : '')
     if (!m) continue
     const timeText = str(row.timeText)
+    const messageAt = str(row.messageAt)
+    const lastMessage = str(row.lastMessage)
+    const unread = parseUnread(str(row.unreadText))
+    const known = previous.find(c => (c.lastAtSource === 'message' || c.lastAtSource === 'list') &&
+      Number.isFinite(c.lastAt) && c.lastAt > 0 && c.accountId === accountId && c.roomId === m[1] &&
+      c.lastMessage === lastMessage && c.lastAtText === timeText && c.unread >= unread)
+    // 확인했던 같은 메시지의 날짜는 유지한다. 메시지가 바뀌면 예전 날짜를 새 글에 붙이지 않는다.
+    const listAt = parseKoreanTime(timeText, now)
+    const lastAt = messageAt ? parseKoreanTime(messageAt, now) : listAt || known?.lastAt || 0
+    const sourceText = messageAt || timeText
+    const lastAtSource = lastAt > 0 ? (messageAt ? 'message' : listAt ? 'list' : known?.lastAtSource) : undefined
+    const lastAtPrecise = lastAt > 0 && (messageAt || listAt
+      ? /T\d{2}:\d{2}|(?:오전|오후)\s*\d{1,2}:\d{2}/.test(sourceText) : known?.lastAtPrecise === true)
     channels.push({
       accountId,
       roomId: m[1],
       peerName: str(row.peerName),
       region: str(row.region),
-      lastMessage: str(row.lastMessage),
-      lastAt: parseKoreanTime(timeText, now),
+      lastMessage,
+      lastAt,
       lastAtText: timeText,
-      unread: parseUnread(str(row.unreadText)),
+      lastAtSource,
+      lastAtPrecise,
+      unread,
       productTitle: str(row.productTitle),
       productThumb: typeof row.productThumb === 'string' ? row.productThumb : null
     })

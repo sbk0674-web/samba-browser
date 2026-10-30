@@ -3,17 +3,10 @@ import { useTranslation } from 'react-i18next'
 import type { DaangnChannelDto } from '@shared/daangn'
 import { cn } from '@renderer/lib/utils'
 import { useDaangnStore } from '@renderer/stores/daangnStore'
-import { accountLabelOf, visibleChannels } from '@renderer/components/daangn/daangn-view'
+import { accountLabelOf, lastAtLabel, visibleChannels } from '@renderer/components/daangn/daangn-view'
 import { Badge } from '@renderer/components/daangn/AccountPanel'
 
 // 가운데 통합 채팅 목록 — 모든 계정의 채팅을 최근순으로 섞어 보인다(카톡처럼)
-/** 시각만 있는 글이 오늘이 아니면 '어제' 를 붙여 날짜가 맞게 보이게 한다 */
-function lastAtLabel(text: string, lastAt: number): string {
-  if (!/^(오전|오후)\s*\d{1,2}:\d{2}$/.test(text.trim())) return text
-  const startOfToday = new Date().setHours(0, 0, 0, 0)
-  return lastAt > 0 && lastAt < startOfToday ? `어제 ${text}` : text
-}
-
 export function ChannelList(): React.JSX.Element {
   const { t } = useTranslation()
   const accounts = useDaangnStore((s) => s.accounts)

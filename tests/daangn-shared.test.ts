@@ -49,14 +49,14 @@ describe('parseKoreanTime', () => {
   const at = (y: number, m: number, d: number, h = 0, mi = 0): number =>
     new Date(y, m - 1, d, h, mi, 0, 0).getTime()
 
-  it('오후·오전 시각은 오늘 날짜로 읽는다', () => {
-    expect(parseKoreanTime('오후 03:26', now)).toBe(at(2026, 10, 21, 15, 26))
-    expect(parseKoreanTime('오전 12:05', now)).toBe(at(2026, 10, 21, 0, 5))
-    expect(parseKoreanTime('오후 12:10', now)).toBe(at(2026, 10, 21, 12, 10))
+  it('오후·오전 시각만으로 오늘 날짜를 만들지 않는다', () => {
+    expect(parseKoreanTime('오후 03:26', now)).toBe(0)
+    expect(parseKoreanTime('오전 12:05', now)).toBe(0)
+    expect(parseKoreanTime('오후 12:10', now)).toBe(0)
   })
-  it('지금보다 뒤 시각이면 어제 글이다', () => {
-    expect(parseKoreanTime('오후 11:41', now)).toBe(at(2026, 10, 20, 23, 41))
-    expect(parseKoreanTime('오후 03:59', now)).toBe(at(2026, 10, 21, 15, 59))
+  it('미래 시각이라는 이유만으로 어제 날짜를 만들지 않는다', () => {
+    expect(parseKoreanTime('오후 11:41', now)).toBe(0)
+    expect(parseKoreanTime('오후 03:59', now)).toBe(0)
   })
   it('"어제" 는 어제 안의 시각이다', () => {
     const v = parseKoreanTime('어제', now)

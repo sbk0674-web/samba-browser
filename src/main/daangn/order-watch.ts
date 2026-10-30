@@ -96,14 +96,18 @@ export function findOrderCandidates(
 ): DaangnOrderCandidate[] {
   const result: DaangnOrderCandidate[] = []
   for (const channel of channels) {
-    if (!channel.roomId || !channel.productTitle || !Number.isFinite(channel.lastAt) || channel.lastAt < cutoff) continue
+    if (!channel.roomId || !channel.productTitle || !Number.isFinite(channel.lastAt) || channel.lastAt < 0) continue
+    const signal = previewSignal(channel.lastMessage || '')
+    if (channel.lastAt > 0 && channel.lastAt < cutoff) continue
+    // 날짜 불명은 오늘로 꾸미지 않는다. 수거 신호/안읽음은 본문 확인 후보로 남겨 새 주문 누락을 막는다.
+    if (channel.lastAt === 0 && channel.unread <= 0 && signal !== 'pickup_request' && signal !== 'pickup_scheduled') continue
     result.push({
       accountId: channel.accountId,
       roomId: channel.roomId,
       productTitle: channel.productTitle,
       productThumb: channel.productThumb,
-      previewSignal: previewSignal(channel.lastMessage || ''),
-      lastAtPrecise: /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(channel.lastAtText.trim()),
+      previewSignal: signal,
+      lastAtPrecise: channel.lastAt > 0 && channel.lastAtPrecise === true,
       lastAt: channel.lastAt,
       peerName: channel.peerName
     })
