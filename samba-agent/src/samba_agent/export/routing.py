@@ -46,7 +46,7 @@ class ExportRouting(BaseModel):
     # 이 표식이 들어 있으면 어디에도 기입하지 않는다
     skip: tuple[str, ...] = ()
     # 위 둘에 해당하지 않는 판매처의 대상
-    default: Target = 'shopmine'
+    default: Target | None = 'shopmine'
 
     @classmethod
     def load(cls, path: Path) -> 'ExportRouting':

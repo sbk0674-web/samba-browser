@@ -20,4 +20,5 @@ skip:
   - kream
 
 # 위에 해당하지 않는 나머지
-default: shopmine
+# 샵마인 작업은 사용자 요청으로 중단(2026-10-31). EMP 대상만 유지한다.
+default: null

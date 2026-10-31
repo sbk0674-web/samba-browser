@@ -64,4 +64,13 @@ def test_저장소의_설정_파일이_스펙과_같다():
     assert routing.target_for('KT알파쇼핑') == 'emp'
     assert routing.target_for('포이즌') is None
     assert routing.target_for('크림') is None
-    assert routing.target_for('스마트스토어') == 'shopmine'
+    assert routing.target_for('스마트스토어') is None
+
+
+def test_기본_대상을_끄면_emp만_남는다(tmp_path: Path):
+    path = tmp_path / 'export.yaml'
+    path.write_text('emp: [롯데홈쇼핑]\ndefault: null\n', encoding='utf-8')
+    routing = ExportRouting.load(path)
+    assert routing.target_for('롯데홈쇼핑(계정)') == 'emp'
+    assert routing.target_for('쿠팡') is None
+    assert routing.target_for('당근마켓') is None
