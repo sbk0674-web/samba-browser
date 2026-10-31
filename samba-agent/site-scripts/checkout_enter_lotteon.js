@@ -1,8 +1,8 @@
 
 const isEasy = args.card === '간편결제';
-const card = isEasy ? '간편결제' : (args.issuer || args.card || '');
 const cardCompanies=['롯데카드','신한카드','KB국민카드','삼성카드','현대카드','BC카드','하나카드','씨티카드','우리BC카드','우리카드','NH농협카드','카카오뱅크','광주카드'];
 const simplePays=['간편결제','카카오페이','네이버페이','토스페이','삼성페이','휴대폰결제','충전결제','퀵계좌이체','온누리상품권'];
+const card=simplePays.find(p=>String(args.card||'').startsWith(p))||(args.issuer||args.card||'');
 if (args.tab && (await tabs.list()).some(t => t.id === String(args.tab))) await tabs.switch(String(args.tab));
 { const ot=(await tabs.list()).filter(t=>/orderSheet/.test(t.url||''));
 const good=async()=>{const T=String((await page.get({})).tree||'');const r=T.split('\n').find(l=>/radio "받는 분 주소로/.test(l));return !r||(/value="on"/.test(r)&&!/배송지를 선택해 ?주세요/.test(T));};
