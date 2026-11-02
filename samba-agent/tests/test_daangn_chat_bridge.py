@@ -52,6 +52,20 @@ def test_missing_live_bridge_stops_without_retry():
     assert len(calls) == 1
 
 
+def test_transport_timeout_uses_round_hold_instead_of_global_timeout_backoff():
+    calls = []
+    def handler(req):
+        calls.append(req)
+        raise httpx.ReadTimeout('private response text', request=req)
+    bridge = ChatBridge('http://127.0.0.1', 'test', accounts={'서병기'},
+                        client=httpx.Client(transport=httpx.MockTransport(handler)))
+    from tools.daangn.collector import Candidate, SourceUnavailable
+    with pytest.raises(SourceUnavailable, match='주문 확인 연결 실패') as caught:
+        bridge.inspect(Candidate('서병기', 'room', '상품', account_id=1))
+    assert 'private' not in str(caught.value)
+    assert len(calls) == 1
+
+
 def test_last_message_time_never_proves_payment_notice_time():
     timestamp = int(datetime(2026, 10, 29, 3, 6, tzinfo=timezone.utc).timestamp() * 1000)
     def handler(req):

@@ -15,8 +15,13 @@ class ChatBridge:
         self._client = client or httpx.Client(timeout=15)
 
     def _request(self, method: str, path: str, **kwargs):
-        response = self._client.request(method, self._url + path,
-                                        headers={'X-Samba-Token': self._token}, **kwargs)
+        try:
+            response = self._client.request(method, self._url + path,
+                                            headers={'X-Samba-Token': self._token}, **kwargs)
+        except httpx.RequestError:
+            # collect_round의 보류 경로로 보내 다음 후보가 30초마다 같은
+            # 첫 요청의 시간 초과에 가로막히지 않게 한다. 여기서 재시도하지 않는다.
+            raise SourceUnavailable('주문 확인 연결 실패') from None
         if response.status_code != 200:
             raise SourceUnavailable(f'채팅 확인 실패 HTTP {response.status_code}')
         result = response.json()

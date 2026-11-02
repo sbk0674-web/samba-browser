@@ -174,24 +174,41 @@ export class DaangnAccountView {
     } })
     const wc = view.webContents
     const host = this.host
-    host.contentView.addChildView(view)
-    view.setBounds(hiddenBounds())
-    wc.setAudioMuted(true)
-    wc.setWindowOpenHandler(() => ({ action: 'deny' }))
-    wc.on('will-navigate', (e, url) => { if (!isAllowedChatUrl(url)) e.preventDefault() })
-    wc.on('will-redirect', (e, url) => { if (!isAllowedChatUrl(url)) e.preventDefault() })
+    // Python 호출자는 15초에 연결을 닫는다. 그 전에 이 요청의 뷰까지 정리한다.
+    let expired = false
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => {
+        expired = true
+        reject(new Error('주문 확인 시간 초과'))
+      }, 12_000)
+    })
     try {
-      await wc.loadURL(`${CHAT_HOME}room/${encodeURIComponent(roomId)}`)
-      if (roomIdOf(wc.getURL()) !== roomId) throw new Error('채팅방 연결 확인 필요')
-      for (let i = 0; i < 6; i++) {
-        const result = await wc.executeJavaScript(buildInspectSaleScript(expectedTitle)) as DaangnSaleSignal
-        if (result?.ready && result.productMatches) return result
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      }
-      throw new Error('채팅 본문을 확인하지 못했습니다')
+      host.contentView.addChildView(view)
+      view.setBounds(hiddenBounds())
+      wc.setAudioMuted(true)
+      wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+      wc.on('will-navigate', (e, url) => { if (!isAllowedChatUrl(url)) e.preventDefault() })
+      wc.on('will-redirect', (e, url) => { if (!isAllowedChatUrl(url)) e.preventDefault() })
+      return await Promise.race([timeout, (async () => {
+        await wc.loadURL(`${CHAT_HOME}room/${encodeURIComponent(roomId)}`)
+        if (expired || wc.isDestroyed()) throw new Error('주문 확인 시간 초과')
+        if (roomIdOf(wc.getURL()) !== roomId) throw new Error('채팅방 연결 확인 필요')
+        for (let i = 0; i < 6; i++) {
+          const result = await wc.executeJavaScript(buildInspectSaleScript(expectedTitle)) as DaangnSaleSignal
+          if (expired || wc.isDestroyed()) throw new Error('주문 확인 시간 초과')
+          if (result?.ready && result.productMatches) return result
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          if (expired || wc.isDestroyed()) throw new Error('주문 확인 시간 초과')
+        }
+        throw new Error('채팅 본문을 확인하지 못했습니다')
+      })()])
     } finally {
+      clearTimeout(deadline)
       try { host.contentView.removeChildView(view) } catch { /* 창이 이미 닫힘 */ }
-      if (!wc.isDestroyed()) wc.close()
+      if (!wc.isDestroyed()) {
+        try { wc.stop() } finally { wc.close() }
+      }
     }
   }
 
