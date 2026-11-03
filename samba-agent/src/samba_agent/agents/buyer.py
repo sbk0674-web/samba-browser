@@ -3872,11 +3872,9 @@ class BuyerAgent(AgentBase):
             # 모든 계정이 같은 폭으로 비싸다 — 쿠폰이 빠진 게 아니라 상품 화면 할인가가 주문서에 없는 할인을 담은 것이다
             # (2026-11-03 4080: 4계정 모두 5천원 넘게 차이). 가장 싼 계정의 주문서 값으로 산다(마진 검사는 그대로)
             self.note('계정 선택', f'{len(gap_only)}계정 모두 화면가보다 비쌈 — 주문서 값으로 {accounts[0]} 견적')
+            # 이 주문이 끝날 때까지 끈다 — 고른 뒤 구매용 주문서를 다시 만들 때도 같은 검사에 걸렸다(4080 재시도)
             self._coupon_gap_off = True
-            try:
-                quotes = self._payable_only(self._quote_batch(a, [accounts[0]]))
-            finally:
-                self._coupon_gap_off = False
+            quotes = self._payable_only(self._quote_batch(a, [accounts[0]]))
         if not quotes:
             if unpayable:
                 raise AgentFailure(
@@ -3968,6 +3966,7 @@ class BuyerAgent(AgentBase):
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
         self._current_order_no = a.order.order_no
+        self._coupon_gap_off = False
         self._already_bought(a)
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
         self._ship_key = ''
