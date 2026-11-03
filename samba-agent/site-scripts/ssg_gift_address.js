@@ -1,5 +1,5 @@
 // SSG 선물 받는 분 지정(2026-09-29 수동 성공 이식): 선물 정보 화면 '배송지 대신 입력하기' → 주소록 팝업(selectShpplocPopup)에서
-// 고객 항목(도로명 조각+상세 앞 6자+별표만 ㅇ 치환하고 다른 특수기호를 지운 이름) 하나를 체크 → 선택완료 → 선물 화면 되읽기
+// 고객 항목(도로명 조각+상세 앞 6자+이름 앞부분 — SSG 는 이름의 '*' 를 빼고 저장한다) 하나를 체크 → 선택완료 → 선물 화면 되읽기
 // → 계속하기 → 주문서(ordPage). 주소록에 없으면 팝업의 '배송지 추가'로 목록 팝업(shpplocList)을 열어 두고 need_address 를 돌려준다
 // (하네스가 ssg_set_shipping{gift:true} → 전화 → ssg_gift_save_address 뒤 다시 부른다). 고객 글자는 결과에 싣지 않는다.
 // 인자 {name, address, address_detail}  반환 {ok, order_tab, amount, gift, need_address?, entries, matched, note}

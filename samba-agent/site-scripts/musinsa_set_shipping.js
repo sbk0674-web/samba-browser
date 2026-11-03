@@ -1,17 +1,24 @@
-async function G(){for(let i=0;i<8;i++){try{return await page.get({interactive:true});}catch(e){await sleep(800);}}throw new Error('page busy');}
-async function C(id){try{return await page.click(id);}catch(e){return 'warn';}}
-async function T(id,s){for(let i=0;i<3;i++){try{return await page.type(id,s,false);}catch(e){if(!/frame|gone|detach/i.test(''+e))throw e;await sleep(700);}}return 'warn';}
-async function W(t,ms){try{return await page.waitFor(t,ms||8000);}catch(e){return null;}}
+const D0=Date.now();
+const R=(p,ms)=>Promise.race([Promise.resolve(p),sleep(ms||6000).then(()=>{throw new Error('timeout')})]);
+async function G(){for(let i=0;i<4;i++){try{return await R(page.get({interactive:true}),6000);}catch(e){await sleep(400);}}throw new Error('page busy');}
+async function C(id){try{return await R(page.click(id),5000);}catch(e){return 'warn';}}
+async function T(id,s){for(let i=0;i<2;i++){try{return await R(page.type(id,s,false),5000);}catch(e){if(!/frame|gone|detach|timeout/i.test(''+e))throw e;await sleep(500);}}return 'warn';}
+async function W(t,ms){try{return await R(page.waitFor(t,ms||6000),(ms||6000)+1500);}catch(e){return null;}}
 async function P(re,ms){const t0=Date.now();let g=await G();while(!re.test(g.tree)&&Date.now()-t0<(ms||5000)){await sleep(300);g=await G();}return g;}
 const nrm=s=>(s||'').replace(/[()\[\],]/g,' ').replace(/\s+/g,' ').trim();
 const toks=s=>nrm(s).split(' ').filter(t=>t.length>1);
 const out={name:null,address:null,phone:null,phone_field_ids:[],ok:false,note:null};
 let list=await tabs.list();
-const __ofs=list.filter(t=>t.url&&t.url.includes('/order/order-form'));const __one=args.tab?__ofs.find(t=>t.id===args.tab):__ofs.length===1?__ofs[0]:null;
-let ot=__one;
-if(!ot){out.note=__ofs.length?'order forms '+__ofs.length+' open — pass args.tab':'no order-form tab open';return out;}
+let __ofs=list.filter(t=>t.url&&t.url.includes('/order/order-form'));
+if(args.tab)__ofs=__ofs.filter(t=>t.id===args.tab);
+if(__ofs.length>1&&args.profile){const f=__ofs.filter(t=>t.profile===args.profile);if(f.length)__ofs=f;}
+if(__ofs.length>1){const withPop=__ofs.filter(t=>list.some(p=>p.kind==='popup'&&p.openerId===t.id));if(withPop.length)__ofs=withPop;}
+if(__ofs.length>1){const act=__ofs.filter(t=>t.active);if(act.length)__ofs=act;}
+if(__ofs.length>1)__ofs=[__ofs[__ofs.length-1]];
+let ot=__ofs[0];
+if(!ot){out.note='no order-form tab open';return out;}
 let pp=list.find(t=>t.kind==='popup'&&t.openerId===ot.id);
-if(!pp)pp=list.find(t=>t.kind==='popup'&&t.url&&/addresses/.test(t.url));
+if(!pp)pp=list.find(t=>t.kind==='popup'&&t.url&&/addresses/.test(t.url)&&(!args.profile||t.profile===args.profile));
 if(!pp){
   await tabs.switch(ot.id);await sleep(300);
   let g0=await G();
@@ -23,12 +30,12 @@ if(!pp){
   pp=list.find(t=>t.kind==='popup'&&t.openerId===ot.id)||list.find(t=>t.kind==='popup'&&t.url&&/addresses/.test(t.url));
 }
 if(!pp){out.note='배송지 팝업 못 찾음';return out;}
-await tabs.switch(pp.id);await W('배송지',8000);
+await tabs.switch(pp.id);await W('배송지',6000);
 let g=await G();
 if(!/name=address1/.test(g.tree)){
   let m=g.tree.match(/^\[(\d+)\] (?:link|button) "[^"]*배송지 추가[^"]*"/m);
   if(!m){out.note='배송지 추가하기 링크 없음';return out;}
-  C(parseInt(m[1]));g=await P(/name=address1/,8000);
+  await C(parseInt(m[1]));g=await P(/name=address1/,8000);
 }
 const nM=g.tree.match(/^\[(\d+)\] textbox name=name/m);
 const mM=g.tree.match(/^\[(\d+)\] textbox name=(?:mobile|phone|tel)\b/m);
@@ -41,6 +48,7 @@ const qs=[at.slice(0,at.findIndex(t=>/^\d/.test(t))+1).join(' ')||args.address,a
 const bad=/(취소|검색|영문보기|더보기|지도|확인|안내)/;
 const dbg=[];
 for(const q of [...qs,...qs]){
+  if(Date.now()-D0>45000){dbg.push('시간초과');break;}
   g=await G();
   if(/name=address1 value="[^"]+"/.test(g.tree))break;
   let kM=g.tree.match(/\[(\d+)\] textbox "[^"]*" name=region_name/);
@@ -53,7 +61,7 @@ for(const q of [...qs,...qs]){
   g=await G();
   const sb=g.tree.match(/\[(\d+)\] button "검색"/);
   if(sb)await C(parseInt(sb[1]));
-  g=await P(/검색 결과 보기|검색 결과가 없|결과가 없습니다|name=address1 value="[^"]+"/,9000);
+  g=await P(/검색 결과 보기|검색 결과가 없|결과가 없습니다|name=address1 value="[^"]+"/,6000);
   const re=/\[(\d+)\] button "([^"]+)"/g;let bm,best=null;
   while((bm=re.exec(g.tree))){
     const id=parseInt(bm[1]),lb=bm[2];
@@ -62,7 +70,7 @@ for(const q of [...qs,...qs]){
     const sc=lt.filter(t=>at.indexOf(t)>=0).length+(/(로|길)\s?\d/.test(nrm(lb))?1:0);
     if(sc>=2&&(!best||sc>best.sc))best={id,sc};
   }
-  if(best){await C(best.id);await P(/name=address1 value="[^"]+"/,8000);}
+  if(best){await C(best.id);await sleep(500);await P(/name=address1 value="[^"]+"/,6000);}
   g=await G();
   const hit=/name=address1 value="[^"]+"/.test(g.tree);
   dbg.push('q'+dbg.length+(best?':점수'+best.sc:/결과가 없/.test(g.tree)?':결과없음':':후보없음')+(hit?':OK':''));

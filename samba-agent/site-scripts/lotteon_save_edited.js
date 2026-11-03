@@ -6,20 +6,54 @@ const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&
 if(!s)return{ok:false,note:'저장 버튼 없음'};
 const ag=pe((await page.get({query:'수취인정보'})).tree).filter(e=>e.role==='checkbox').pop();
 if(ag&&ag.value!=='on'){await page.click(ag.id);await sleep(400);}
-await page.click(s.id);await sleep(2500);
+await page.click(s.id);
+try{await page.waitFor('선택완료',8000);}catch(e){await sleep(2500);}
+await sleep(500);
+const nm=x=>x.replace(/\s+/g,'');
+const norm=nm(name);
+const road=(addr.match(/[가-힣A-Za-z0-9.]+(?:로|길)\s*\d+(?:-\d+)?/)||[''])[0].replace(/\s+/g,'');
+const words=addr.split(/\s+/).filter(Boolean);
+const keys=words.filter((w,i)=>i>0&&!/\d/.test(w)&&!/(시|도|군|구)$/.test(w));
+const okRow=seg=>(road&&seg.includes(road))||(keys.length>0&&keys.every(k=>seg.includes(nm(k))))||seg.includes(nm(addr));
+const clean=n=>n.replace(/기본배송지$/,'').replace(/^기본배송지/,'');
+const parseRows=txt=>{let t=txt.replace(/\s+/g,' ');const out=[];
+let re=/(\S+)\s+수정\s+(?:삭제\s+)?\[(\d{5})\]\s+(.*?)\s+01\d-[\d*]{3,4}-[\d*]{4}/g;let m;
+while((m=re.exec(t))){out.push({name:nm(clean(m[1])),seg:nm('['+m[2]+']'+m[3])});}
+if(out.length)return out;
+const hd=/배송지 선택\s+Checked/.test(t.slice(0,60));
+re=/(\S+)\s+(?:기본배송지\s+)?\[(\d{5})\]\s+(.*?)\s+01\d-[\d*]{3,4}-[\d*]{4}/g;
+while((m=re.exec(t))){out.push({name:nm(m[1]),seg:nm('['+m[2]+']'+m[3])});}
+return hd?out.slice(1):out;};
+const generic=x=>/^(기본)?배송지$/.test(x);
+const getRadios=L=>{const out=[];L.forEach((e,i)=>{if(e.role!=='radio')return;
+let n=null;
+if(!generic(e.text)){n=nm(e.text);}else{for(let j=i+1;j<L.length;j++){const x=L[j];if(x.role==='radio'||x.role==='button')break;if(x.role==='label'&&!generic(x.text)){n=nm(x.text);break;}}}
+if(n===null)return;
+if(!generic(e.text)&&!L.slice(i+1,i+5).some(x=>x.role==='button'&&x.text==='수정'))return;
+out.push({id:e.id,text:n});});return out;};
+let r=null,found=0;
+for(let k=0;k<8&&!r;k++){
+if(k)await sleep(1000);
 const L0=await dl();
-let r=L0.filter(e=>e.role==='radio'&&e.text===name)[0]||L0.filter(e=>e.role==='radio'&&e.text.includes(name))[0];
-if(!r){const ed=L0.filter(e=>e.role==='button'&&e.text==='수정')[1];if(ed)r=L0.filter(e=>e.role==='radio'&&e.id<ed.id).pop();}
-if(!r)return{ok:false,note:'저장한 배송지 줄 없음'};
-const road=(addr.match(/[가-힣A-Za-z0-9.]+(?:로|길)\s*\d+(?:-\d+)?/)||[addr])[0].replace(/\s+/g,'');
-const rows=String((await page.get({selector:'[role=dialog]'})).tree).replace(/\s+/g,'');
-if(!rows.includes(name)||!rows.includes(road))return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
+const radios=getRadios(L0);
+const tx=String((await page.get({selector:'[role=dialog]'})).tree).split('PAGE TEXT:')[1]||'';
+const rows=parseRows(tx);
+const cands=[];
+for(let i=0;i<radios.length&&i<rows.length;i++){
+if(radios[i].text!==rows[i].name)continue;
+if(rows[i].name===norm){found++;if(okRow(rows[i].seg))cands.push(radios[i]);}
+}
+if(cands.length)r=cands[0];
+}
+if(!found)return{ok:false,note:'저장한 배송지 줄 없음'};
+if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
 await page.click(r.id);await sleep(600);
 const L1=await dl();
 if(!L1.some(e=>e.id===r.id&&e.value==='on'))return{ok:false,note:'배송지 줄 선택 안 됨'};
 const ok=L1.filter(e=>e.role==='button'&&/^(선택완료|확인)$/.test(e.text))[0];
 if(!ok)return{ok:false,note:'확인 버튼 없음'};
-await page.click(ok.id);await sleep(1800);
+await page.click(ok.id);
+try{await page.waitFor('빠른 선물',8000);}catch(e){await sleep(1800);}
 if(A.gift){
 let q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');
 if(q&&q.value!=='on'){await page.click(q.id);await sleep(900);q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');}

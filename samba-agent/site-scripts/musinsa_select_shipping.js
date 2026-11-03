@@ -8,9 +8,12 @@ const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const nmRe=new RegExp(nm.split('').map(esc).join('[*xX·]?'));
 const nmMask=nm.length>1?new RegExp('^'+esc(nm[0])+'[*xX]'+(nm.length>2?esc(nm[nm.length-1]):'')+'$'):/$^/;
 let list=await tabs.list();
-const __ofs=list.filter(t=>t.url&&t.url.includes('/order/order-form'));const __one=args.tab?__ofs.find(t=>t.id===args.tab):__ofs.length===1?__ofs[0]:null;
-let orderTab=__one;
-if(!orderTab){out.note=__ofs.length?'order forms '+__ofs.length+' open — pass args.tab':'no order-form tab open';return out;}
+let __ofs=list.filter(t=>t.url&&t.url.includes('/order/order-form'));
+if(args.profile){const pf=__ofs.filter(t=>t.profile===args.profile);if(pf.length)__ofs=pf;}
+let orderTab=args.tab?__ofs.find(t=>t.id===args.tab):null;
+if(!orderTab&&__ofs.length===1)orderTab=__ofs[0];
+if(!orderTab&&__ofs.length>1)orderTab=__ofs.find(t=>t.active)||__ofs[0];
+if(!orderTab){out.note=__ofs.length?'order form 탭 지정 필요':'no order-form tab open';return out;}
 let popup=list.find(t=>t.kind==='popup'&&/address/i.test(t.url||''));
 if(!popup){
   await tabs.switch(orderTab.id);
@@ -28,7 +31,6 @@ function rowsFrom(g){
   const lines=g.tree.split('\n');const ids=[];
   for(let i=0;i<lines.length;i++){
     if(!/^\[\d+\] (?:button|clickable) "수정"/.test(lines[i]))continue;
-    // 수정 바로 앞의 행 clickable 을 거슬러 찾는다(변경하기·검색어 삭제 버튼이 끼어도 건너뜀)
     for(let j=i-1;j>=Math.max(0,i-5);j--){
       const m=lines[j].match(/^\[(\d+)\] clickable/);
       if(m){ids.push(parseInt(m[1]));break;}

@@ -39,13 +39,16 @@ async function pickForm() {
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
+  // 같은 상품·옵션·금액의 중복 탭이면 첫 탭 사용
+  const sig = o => o.f.nos.join(',') + '|' + o.f.opt + '|' + ((o.f.tx.match(/(?:총|최종) 결제 ?금액 [\d,]+원/) || [])[0] || '')
+  if (ok.length > 1 && ok.every(o => sig(o) === sig(ok[0]))) ok.length = 1
   if (ok.length !== 1) return { err: ok.length ? 'multiple checkout tabs — args.expect/tab 필요' : 'order form mismatch', why }
   await tabs.switch(ok[0].id)
   return ok[0]
 }
 async function radios() {
   const r = (await page.get({ selector: 'label:has(input[type=radio])' })).tree
-  const ids = lines(r).filter(l => /\] radio(?: "[^"]*")?(?: name=\S+)? value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
+  const ids = lines(r).filter(l => /\] radio(?: "[^"]*")?(?: name=\S+)? value=/.test(l) && !/소득공제|지출증빙|미발행/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
   const K = [['적립', /구매 적립/], ['선할인', /선할인/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
   const got = []
   let p = 0

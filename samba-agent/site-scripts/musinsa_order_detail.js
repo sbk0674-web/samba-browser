@@ -1,11 +1,7 @@
-// 무신사 주문 상세(2026-09-26 재작성): 계정 profile 로 주문 상세를 새 탭에서 열어 source_order_no 주문의 결제 값을 읽고 탭을 닫는다. 주문을 바꾸지 않는다.
-// 원가 = paid × 카드 청구할인 − reward + points_used. '적립금 사용'은 보유 적립금 + 선할인 합계라 펼쳐서 보유분만 쓴다
-// (선할인은 결제액을 이미 깎고 구매 적립도 없앤다 — 되더하지 않는다, 사용자 2026-09-25). reward 는 후기 적립 제외, 하위 항목(기본·프로모션) 중복 제외.
-// 반환 {source_order_no, status, paid, points_used, points_total, points_box, prepay_points, reward, card, note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const no = nz(args.source_order_no || args.orderNo)
-const R = { shipping: {name:null,address:null,address_detail:null}, selected:null, option:null, qty:null, source_order_no: no || null, status: '', paid: 0, points_used: 0, points_total: 0, points_box: null, prepay_points: null, reward: 0, card: '', note: null }
+const R = { source_order_no: no || null, status: '', paid: 0, points_used: 0, points_total: 0, points_box: null, prepay_points: null, reward: 0, card: '', selected: null, option: null, qty: null, shipping: { name: null, address: null, address_detail: null }, recipient: null, address: null, address_detail: null, note: null }
 if (!/^\d{10,}$/.test(no)) return { ...R, note: 'no order number' }
 const get = async o => { for (let i = 0; i < 6; i++) { try { return (await page.get(o)).tree } catch (e) { await sleep(600) } } return '' }
 const text = async () => nz((await get({})).split('PAGE TEXT:')[1])
@@ -19,7 +15,6 @@ await open('https://www.musinsa.com/order/order-detail/' + no)
 try { await page.waitFor('결제 정보', 8000) } catch (e) {}
 let t = await text()
 if (!good(t)) {
-  // 결제 직후엔 상세가 '주문정보를 찾을 수 없습니다'일 수 있다 — 주문 완료 화면의 '주문 상세'로 들어간다
   await open('https://www.musinsa.com/order/result/' + no)
   try { await page.waitFor('주문 상세', 8000) } catch (e) {}
   const l = (await get({ query: '주문 상세' })).split('\n').find(x => /^\[\d+\] (link|clickable|button) "주문 상세"/.test(x))
@@ -28,7 +23,6 @@ if (!good(t)) {
 }
 if (!good(t)) { await closeAll(); return { ...R, note: 'order detail not found for ' + no } }
 
-// 상태: '주문 상품 N개' 바로 뒤
 R.status = ((t.match(/주문 상품 \d+개\s*(결제 완료|입금 대기|상품 준비 중|배송 준비 중|배송 시작|배송 중|배송 완료|구매 확정|취소 요청|취소 완료|반품 요청|반품 처리 중|반품 완료|교환 요청|교환 완료|환불 완료|[가-힣]{2,4} ?(?:완료|대기|중|확정))/) || [])[1] || '')
 const pay = t.slice(t.indexOf('결제 정보'))
 R.paid = num((pay.match(/결제 금액\s*(?:\d+%\s*)?([\d,]+)\s*원/) || [])[1])
@@ -73,7 +67,6 @@ try {
   if (before) R.selected = R.option = before
 } catch (e) {}
 
-// 적립금: '적립금 사용 -N원'을 눌러 펼치면 '보유 적립금 사용 -X원'·'적립금 선할인 -Y원'
 const pm = pay.match(/적립금 사용\s*-\s?([\d,]+)\s*원/)
 if (pm) {
   R.points_total = R.points_used = num(pm[1])
@@ -88,12 +81,10 @@ if (pm) {
   if (sm) R.prepay_points = num(sm[1])
 }
 
-// 결제 수단: '무신사페이 - 롯데카드(1234)' 꼴이면 그대로, 아니면 수단 이름(광고 문구 앞까지)
 const ps = nz((pay.split('결제 수단')[1] || '').split(/이번 주문으로|받은 총 혜택|주문자 정보|배송 정보/)[0])
 const cm = ps.match(/([가-힣A-Za-z0-9]+)\s*[-–]\s*([가-힣A-Za-z0-9 ]{1,12}?(?:카드|은행|계좌)(?:\s*\([^)]{0,12}\))?)/)
 R.card = cm ? nz(cm[1] + ' - ' + cm[2]) : nz(ps.split(/\s(?:무신사머니 최대|최대 \d|첫 결제|무신사 삼성카드 결제 혜택|결제 혜택)/)[0]).split(' ').filter((x, i, a) => x !== a[i - 1]).join(' ').slice(0, 40)
 
-// 적립: '받은 혜택'~'받은 총 혜택' 구간을 '원'으로 잘라 '…적립 N' 항목만. 뒤 항목들 합이 앞 항목과 같으면 하위 항목이라 뺀다
 const s0 = t.indexOf('받은 혜택'), s1 = t.indexOf('받은 총 혜택')
 const seg = s0 >= 0 ? t.slice(s0, s1 > s0 ? s1 : s0 + 600) : ''
 const items = seg.split(/원\s*/).map(x => x.match(/(\S[^]*?적립)\s*(?:최대\s*)?([\d,]+)$/)).filter(Boolean).map(m => ({ name: nz(m[1]).split(' 원 ').pop(), v: num(m[2]) })).filter(x => !/후기|리뷰|스냅/.test(x.name))

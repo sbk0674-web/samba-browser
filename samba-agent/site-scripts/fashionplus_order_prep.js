@@ -1,7 +1,3 @@
-// 패션플러스 주문서 정돈 — 쿠폰 최대할인(상품·중복·장바구니)과 보유 적립금 모두 사용(사용자 규칙: 포인트·적립금 항상 사용). 결제 없음.
-// 탭: args.tab > 이 레인의 패션플러스 주문서 탭 하나(여럿이면 expect.product_no 로 고르고, 못 고르면 멈춤)
-// 쿠폰: '최대할인 적용'이 꺼져 있거나 쿠폰 창의 '총 N원 할인 적용'이 주문서 쿠폰 합보다 크면 창에서 켜고 적용한다
-// 반환 {ok,total,coupon,cart_coupon,discount,points_balance,points_used,points_box,points_limit,reward,prepay,order_tab,note}
 const OF = /fashionplus\.co\.kr\/order\/\d+(?:[?#]|$)/
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const lines = async q => (await page.get(q ? { selector: q } : {})).tree.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
@@ -36,7 +32,6 @@ const read = async () => {
     reward: num((t.match(/총 예상 적립금 \+ ([\d,]+)/) || [])[1])
   }
 }
-// 라벨 바로 앞 체크박스 줄
 const boxBefore = async lab => {
   const ls = await lines()
   const i = ls.findIndex(l => l.includes(`clickable "${lab}"`))
@@ -45,7 +40,6 @@ const boxBefore = async lab => {
 let r = await read()
 const notes = []
 
-// 1) 쿠폰 — 창을 열어 최대할인 합계를 읽고, 주문서 쿠폰 합보다 크거나 최대할인이 꺼져 있으면 적용
 const open = await page.idOf('쿠폰 선택')
 if (open >= 0) {
   await page.click(open)
@@ -65,9 +59,12 @@ if (open >= 0) {
   if (mx && !mx.on) notes.push('최대할인 적용 체크 못함')
 } else notes.push('쿠폰 선택 버튼 없음')
 
-// 2) 적립금 모두 사용
+// 2) 적립금: 보유 5만원 미만이면 0원, 이상이면 최대 사용
 let limit = r.balance
-if (r.balance > 0) {
+if (r.balance < 50000) {
+  limit = 0
+  notes.push(`적립금 ${r.balance}원 5만원 미만 — 사용 안 함`)
+} else {
   const pb = await boxBefore('적립금 모두사용')
   if (!pb) return fail('points checkbox not found', { order_tab: tab, points_balance: r.balance })
   if (!pb.on) { await page.click(pb.label); await sleep(1000) }
@@ -77,7 +74,10 @@ if (r.balance > 0) {
   r = await read()
   if (r.used === 0 && ap >= 0) { await page.click(ap); await sleep(1000); r = await read() }
   limit = Math.max(r.used, /textbox/.test(box) ? num((box.match(/value="(\d+)"/) || [])[1]) : 0)
-  if (r.used === 0) return fail('points not applied', { order_tab: tab, points_balance: r.balance })
+  if (r.used === 0) {
+    if (/사용\s*(제한|불가)|사용할 수 없|사용 가능한 적립금이 없/.test(r.t)) { limit = 0; notes.push('적립금 사용 제한 상품') }
+    else return fail('points not applied', { order_tab: tab, points_balance: r.balance })
+  }
 }
 return {
   ok: r.total > 0 || (r.total === 0 && r.used > 0),

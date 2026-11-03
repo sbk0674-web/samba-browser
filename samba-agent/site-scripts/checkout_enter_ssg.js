@@ -37,7 +37,9 @@ if (ex && ex.product_url) {
 const itemOf = t => { const i = t.indexOf('주문상품 목록'); if (i < 0) return ''; const s = t.slice(i + 7); const j = s.search(/수량\s*\d/); return nz(s.slice(0, j > 0 ? j : 200)) }
 const mismatch = seg => {
   if (!seg) return 'order item not readable'
-  if (!/^(신세계몰|신세계백화점)/.test(seg) || (/^신세계백화점/.test(seg) && args.allow_department !== true)) return 'not_shinsegaemall: 주문상품 판매처'
+  // 선물 주문서의 주문상품 줄에는 판매처 표기가 없다(2026-10-16 실측) — 표기가 없으면 구매가 검증한 상품 주소(siteNo)로 본다. 이마트 등 다른 몰 표기는 막는다
+  const tagged = /^(신세계몰|신세계백화점)/.test(seg)
+  if (tagged ? (/^신세계백화점/.test(seg) && args.allow_department !== true) : (/^(이마트|트레이더스|SSG)/.test(seg) || !(ex && ex.product_url && /siteNo=/.test(String(ex.product_url)) && mallOk(String(ex.product_url))))) return 'not_shinsegaemall: 주문상품 판매처'
   if (!ex) return null
   if (nz(ex.name) && !key(seg).includes(key(ex.name))) return 'product name not in order item'
   const opt = (seg.match(/옵션\s*:\s*(.*?)\s*판매가격/) || [])[1]

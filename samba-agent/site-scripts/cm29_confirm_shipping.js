@@ -1,14 +1,8 @@
-// 29CM 새 배송지 확정(2026-09-26 신규) — cm29_set_shipping 으로 채우고 하네스가 전화까지 넣은 '배송지 추가' 창의 '저장하기'를 누르고,
-// 2026-09-27: 인천 서구가 서해구로 바뀌어 사이트는 서해구, 주문은 서구로 온다 — 비교에서 같게 본다
-// 목록이 다시 뜨면 이름·주소(·호수)가 같은 항목을 '선택'해 주문서에 반영한 뒤 주문서 머리의 배송지를 되읽는다.
-// 받는 분이 다르면 고르지 않는다. args: name, address, address_detail, profile, tab, expect  반환 {ok, name, address, zip, note}
 const lines = t => t.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d/.test(l))
 const idOf = l => parseInt(l.slice(1))
 const nameOf = l => (l.match(/^\[\d+\] \w+ "([^"]*)"/) || [])[1]
 const text = t => (t.split('PAGE TEXT:')[1] || '').replace(/\s+/g, ' ')
-const num = s => s ? parseInt(String(s).replace(/[^0-9]/g, ''), 10) || 0 : 0
 const norm = s => String(s || '').toLowerCase().replace(/[\s\-_/:().,[\]·]/g, '')
-// --- 주문서 탭 고르기(공통) ---
 async function formInfo() {
   const t = (await page.get({})).tree, tx = text(t)
   const nos = [...new Set([...t.matchAll(/\/product\/catalog\/(\d+)/g)].map(m => m[1]))]
@@ -33,15 +27,13 @@ function mismatch(f, e) {
 async function pickForm() {
   let c = (await tabs.list()).filter(x => /29cm\.co\.kr\/order\/checkout/.test(x.url || ''))
   if (args.tab) c = c.filter(x => x.id === String(args.tab))
-  // 계정 비교를 동시에 돌리면 계정마다 주문서 탭이 열린다 — 이 계정(프로필)의 탭만 본다
-  // (실기 2026-09-29: 'multiple checkout tabs' 로 원가를 못 읽었다)
   if (args.profile) { const mine = c.filter(x => !x.profile || x.profile === args.profile); if (mine.length) c = mine }
   if (!c.length) return { err: 'no checkout tab' }
   const ok = []
   let why = null
   for (const x of c) {
     await tabs.switch(x.id)
-    await page.waitFor(/(?:총|최종) 결제 ?금액/, 8000).catch(() => {})
+    await page.waitFor(/(?:총|최종) 결제 ?금액|배송지 추가/, 8000).catch(() => {})
     const f = await formInfo(), m = mismatch(f, args.expect)
     if (m) why = m; else ok.push({ id: x.id, f })
   }
@@ -49,31 +41,23 @@ async function pickForm() {
   await tabs.switch(ok[0].id)
   return ok[0]
 }
-// --- 배송지 공통 ---
-// 주소 비교: 시·도 머리(경상북도·경북 …)와 표기 차이를 지운다. '숫자 숫자' 사이 공백은 '|'로 남긴다(번호 경계)
-const na = s => String(s || '').replace(/서해구/g, '서구').replace(/^\s*\S+(도|시)(?=\s)|^\s*(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?=\s)/, '').replace(/\([^)]*\)|특별자치도|특별자치시|특별시|광역시|자치/g, '').replace(/(\d)\s+(?=\d)/g, '$1|').replace(/\s+/g, '').toLowerCase()
+const na = s => String(s || '').replace(/서해구/g, '서구').replace(/^\s*\S+(도|시)(?=\s)|^\s*(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?=\s)/, '').replace(/\([^)]*\)|특별자치도|특별자치시|특별시|광역시|자치/g, '').replace(/[,，]/g, ' ').replace(/(\d)\s+(?=\d)/g, '$1|').replace(/\s+/g, '').toLowerCase()
 const hos = s => (String(s || '').match(/(\d+)\s*호/g) || []).map(x => x.replace(/\D/g, ''))
-// 항목 글자 '사무실 / 김사무 (38069) 경북 … 1층 102호 010-…' → {name, zip, address}(전화는 버린다)
 const entry = s => {
   const z = s.match(/\((\d{5})\)\s*(.*?)\s*(?:0\d{1,2}-\d{3,4}-\d{4}|$)/)
   const head = s.split(/\(\d{5}\)/)[0].replace(/기본 배송지|배송지 변경|선택된 배송지/g, ' ')
   return { name: head.split('/').pop().trim(), zip: z ? z[1] : '', address: z ? z[2].trim() : '' }
 }
-// 주문서 머리 배송지 되읽기('주문서' 뒤 — 주소는 전화번호 앞에서 끊는다)
 const readBack = async () => {
   const tx = text((await page.get({})).tree)
   const a = tx.indexOf('주문서 ')
   if (a >= 0) return entry(tx.slice(a + 4, a + 300))
-  // 09-27 개편: '주문서' 머리 글자가 없다 — '<이름> (기본 배송지) 배송지 변경 (우편번호) 주소 전화' 로 읽는다(270)
   const k = tx.indexOf(' 배송지 변경 (')
   if (k < 0) return entry('')
   const nm = tx.slice(Math.max(0, k - 60), k).replace(/기본 배송지/g, ' ').replace(/^\s*\d+\s+/, '').trim()
   return entry(nm + ' ' + tx.slice(k + 7, k + 300))
 }
-// a 안에 b 가 있고 바로 뒤가 숫자·'-숫자'가 아니다(번호 경계). 상세주소 '-'가 붙은 '12-34-'는 경계로 본다(job 244: '…12-34 -' 저장 항목을 못 찾음)
-// b 가 숫자로 끝날 때만 경계를 본다 — 주문 주소가 '인천 서구 원창동'처럼 번지 없이 오면 뒤에 번지가 붙어도 같다(270)
 const inc = (a, b) => { for (let i = a.indexOf(b); i >= 0; i = a.indexOf(b, i + 1)) if (!/\d$/.test(b) || !/^-?\d/.test(a.slice(i + b.length))) return true; return false }
-// 목록·주문서는 긴 이름을 '앞 몇 자...'로 줄이기도 한다 — 앞 5자 이상이 같고 ...이면 같은 이름
 const sameName = (a, b) => { if (norm(a) === norm(b)) return true; const m = String(a || '').trim().match(/^(.+?)\s*(?:\.{2,}|…)$/); return !!m && norm(m[1]).length >= 5 && norm(b).startsWith(norm(m[1])) }
 const same = (e, w) => {
   if (!sameName(e.name, w.name)) return false
@@ -89,21 +73,35 @@ if (F.err) return { ok: false, note: F.err + (F.why ? ': ' + F.why : '') }
 const dlg = async () => { const t = (await page.get({ selector: '[role=dialog]' })).tree; return /\] (button|textbox) /.test(t) ? t : (await page.get({})).tree }
 let dl = await dlg()
 const save = lines(dl).find(l => /\] button "저장하기"/.test(l))
-if (!save) return { ok: false, note: '배송지 추가 창(저장하기)이 열려 있지 않음' }
-// 하네스는 확정에 address_detail 을 안 넘긴다 — 저장 전 창의 '상세 주소' 칸 값(set_shipping 이 넣은 값)으로 호수·상세까지 대조한다
-if (!w.address_detail) w.address_detail = ((lines(dl).find(l => /textbox "상세 주소/.test(l)) || '').match(/value="([^"]*)"/) || [])[1] || ''
-await page.click(idOf(save))
-// 저장 뒤: 목록으로 돌아오거나(선택 필요) 창이 닫히고 주문서에 바로 반영된다
+const listOpen = /\] button "선택(된 배송지)?"/.test(dl) && /\(\d{5}\)/.test(text(dl))
+if (!save && !listOpen) return { ok: false, note: '배송지 추가 창(저장하기)이 열려 있지 않음' }
 let cur = null
-for (let i = 0; i < 25; i++) {
-  await sleep(200)
-  dl = await dlg()
-  if (/\(\d{5}\)/.test(text(dl)) && /\] button "선택/.test(dl)) break
-  cur = await readBack()
-  if (!/\] button "저장하기"/.test(dl) && same(cur, w)) return { ok: true, ...cur }
+if (save) {
+  const dtLine = lines(dl).find(l => /textbox "상세 주소/.test(l))
+  let dtVal = ((dtLine || '').match(/value="([^"]*)"/) || [])[1] || ''
+  if (!w.address_detail) w.address_detail = dtVal
+  if (dtLine && !dtVal.trim()) {
+    let d = w.address_detail
+    if (!d) { const m = w.address.match(/\)\s*([^()]+)$/); d = m ? m[1].trim() : '' }
+    if (!d) { const m = w.address.match(/\d+(?:-\d+)?\s+(.*\d.*)$/); d = m ? m[1].trim() : '' }
+    if (d) {
+      await page.type(idOf(dtLine), d)
+      await sleep(300)
+      w.address_detail = d
+      dl = await dlg()
+    }
+  }
+  const save2 = lines(dl).find(l => /\] button "저장하기"/.test(l)) || save
+  await page.click(idOf(save2))
+  for (let i = 0; i < 25; i++) {
+    await sleep(200)
+    dl = await dlg()
+    if (/\(\d{5}\)/.test(text(dl)) && /\] button "선택/.test(dl)) break
+    cur = await readBack()
+    if (!/\] button "저장하기"/.test(dl) && same(cur, w)) return { ok: true, ...cur }
+  }
+  if (/\] button "저장하기"/.test(dl)) return { ok: false, note: '저장 안 됨: ' + text(dl).slice(-120) }
 }
-if (/\] button "저장하기"/.test(dl)) return { ok: false, note: '저장 안 됨: ' + text(dl).slice(-120) }
-// 저장 직후 목록은 새 항목 없이 먼저 그려지기도 한다(270) — 새 항목이 보일 때까지 몇 번 다시 읽는다
 let items = [], sel = [], hits = []
 const dt = na(w.address_detail).replace(/^[-.·]+$/, '')
 for (let k = 0; k < 12; k++) {
@@ -116,7 +114,6 @@ for (let k = 0; k < 12; k++) {
 }
 if (!hits.length || items.length !== sel.length) return { ok: false, note: !hits.length ? '저장한 배송지가 목록에 없음' : '항목·선택 버튼 수가 다름' }
 if (new Set(hits.map(i => na(items[i].address))).size > 1) return { ok: false, note: '같은 이름·주소 항목이 여럿(' + hits.length + ')' }
-const hit = hits[0]
-await page.click(sel[hit])
+await page.click(sel[hits[0]])
 for (let i = 0; i < 20; i++) { await sleep(200); cur = await readBack(); if (same(cur, w)) break }
 return same(cur, w) ? { ok: true, ...cur } : { ok: false, ...cur, note: '선택 후 주문서 배송지가 바뀌지 않음' }

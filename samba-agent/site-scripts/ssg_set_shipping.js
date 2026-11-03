@@ -1,5 +1,3 @@
-// SSG 배송지: 목록→추가 폼→우편번호→받는분. gift 는 열린 목록 팝업. 전화는 칸 번호만(fill_secret), 저장은 별도.
-// 인자 {name,address,address_detail?,gift?,tab?} 반환 {ok,name,address(_detail),phone_field_ids,form_popup,note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const recipientName = nz(nz(args.name).replace(/\*/g, 'ㅇ').replace(/[^\p{L}\p{M}\p{N} ]/gu, ''))
 const cl = async id => { try { await tabs.close(id) } catch (e) {} }
@@ -9,10 +7,12 @@ const first = async sel => { const l = (await tree({ selector: sel })).split('\n
 const R = { ok: false, name: null, address: null, address_detail: null, phone_field_ids: [], phone_formats: ['phone-rest'], form_popup: null, note: null }
 if (!recipientName || !args.address) return { ...R, note: 'name·address 필요' }
 const waitPopup = async (re, ms) => { for (let i = 0; i < ms / 400; i++) { const p = (await tabs.list()).find(t => t.kind === 'popup' && re.test(t.url || '')); if (p) return p; await sleep(400) } return null }
-let list = args.gift ? (await tabs.list()).find(t => t.kind === 'popup' && /shpplocList/.test(t.url || '')) : null
+let list = (await tabs.list()).find(t => t.kind === 'popup' && /shpplocList/.test(t.url || ''))
 if (!list) {
-  const ofs = (await tabs.list()).filter(t => t.kind === 'tab' && OF.test(t.url || ''))
-  const tab = args.tab ? ofs.find(t => t.id === String(args.tab)) : ofs.length === 1 ? ofs[0] : null
+  const all = (await tabs.list()).filter(t => t.kind === 'tab' && OF.test(t.url || ''))
+  const pf = all.filter(t => t.profile === args.profile)
+  const ofs = pf.length ? pf : all
+  const tab = (args.tab && ofs.find(t => t.id === String(args.tab))) || (ofs.length === 1 ? ofs[0] : null)
   if (!tab) return { ...R, note: ofs.length ? '주문서 ' + ofs.length + '개 — args.tab 필요' : '주문서 없음' }
   await tabs.switch(tab.id)
   let b = await first('[id^="btnChangeShpploc"], [name="btnChangeShpploc"]')
@@ -73,7 +73,6 @@ if (pickBtn < 0) return { ...R, note: '주소 검색 결과 없음' }
 await page.click(pickBtn)
 await sleep(700)
 const dtl = await first('#addrDtlInput, input[name="dtlAddr"]')
-// 상세 없으면 끝 호·동·층; 지번은 번지까지
 const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || nz(args.address).match(/^.*?[동리가]\s*\d+(?:-\d+)?\s+(.*)$/) || [])[1])
 const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
 const dtlText = (dtlRaw.length > 40 ? nz(dtlRaw.replace(/\([^)]*\)?/g, ' ')) : dtlRaw).slice(0, 40).trim()
@@ -84,7 +83,7 @@ if (ok < 0) ok = await page.idOf('저장', 0)
 if (ok < 0) return { ...R, note: '우편번호 팝업 저장 버튼 없음' }
 page.click(ok).catch(() => {})
 for (let i = 0; i < 10 && (await tabs.list()).some(t => t.id === zip.id); i++) await sleep(300)
-if ((await tabs.list()).some(t => t.id === zip.id)) { const zt = await tree({}); const dlg = (zt.match(/^OVERLAY: "([^"]{0,80})/m) || [])[1] || ''; await cl(zip.id); return { ...R, note: '우편번호 팝업 저장이 안 닫힘' + (dlg ? '(' + dlg + ')' : '') + (dtlText ? '' : ' — 상세주소 없음') } }
+if ((await tabs.list()).some(t => t.id === zip.id)) { await cl(zip.id); return { ...R, note: '우편번호 팝업 저장이 안 닫힘' + (dtlText ? '' : ' — 상세주소 없음') } }
 await tabs.switch(form.id)
 await sleep(500)
 { const V = l => (l.match(/value="([^"]*)"/) || [])[1] || ''

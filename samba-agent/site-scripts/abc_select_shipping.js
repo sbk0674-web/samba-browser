@@ -31,6 +31,8 @@ const fields = async () => {
   return { nameId: nameL ? parseInt(nameL.slice(1)) : null, name: valOf(nameL).trim(), addr: vals[0] || {}, det: vals[1] || {} }
 }
 const finish = async (f) => {
+  // 같은 주소지만 수령인 이름이 다르면 주문서 칸의 이름만 args 로 덮어씀(새 배송지는 만들지 않음)
+  if (f.nameId && norm(f.name) !== norm(wantName)) { await focus(); await page.type(f.nameId, wantName); await sleep(300); f = await fields() }
   if (wantDet && f.det.id && norm(f.det.v) !== norm(wantDet)) { await focus(); await page.type(f.det.id, wantDet); await sleep(300); f = await fields() }
   const got = { name: f.name, address: f.addr.v || '', address_detail: f.det.v || '' }
   const same = norm(got.name) === norm(wantName) && addrHas(got.address, wantAddr) && (!wantDet || norm(got.address_detail) === norm(wantDet))
@@ -62,9 +64,12 @@ let m
 while ((m = re.exec(body))) items.push({ name: m[1], addr: m[3].trim() })
 const base = it => norm(it.name) === norm(wantName) && addrHas(it.addr, wantAddr)
 const exact = it => base(it) && (!wHo || !hoOf(it.addr) || norm(hoOf(it.addr)) === norm(wHo))
-// 정확 일치 우선, 없으면 호수만 다른 같은 주소 → 선택 후 상세주소를 args 로 덮어씀
+const addrOnly = it => addrHas(it.addr, wantAddr)
 let bi = items.findIndex(exact)
 if (bi < 0) bi = items.findIndex(base)
+// 이름만 다른 같은 주소(호수 일치 우선) → 선택 후 이름·상세주소를 args 로 덮어씀
+if (bi < 0) bi = items.findIndex(it => addrOnly(it) && (!wHo || norm(hoOf(it.addr)) === norm(wHo)))
+if (bi < 0) bi = items.findIndex(addrOnly)
 const closeBook = async () => { const c = await page.idOf('Close'); if (c >= 0) { await focus(); await page.click(c) } }
 if (bi < 0 || radios[bi] == null || items.length !== radios.length) {
   await closeBook()
@@ -77,5 +82,5 @@ const sel = await page.idOf('선택')
 if (sel < 0) { await closeBook(); return fail('선택 버튼 없음') }
 await focus(); await page.click(sel)
 let f = await fields()
-for (let i = 0; i < 15 && !(norm(f.name) === norm(wantName) && addrHas(f.addr.v, wantAddr)); i++) { await sleep(200); f = await fields() }
+for (let i = 0; i < 15 && !addrHas(f.addr.v, wantAddr); i++) { await sleep(200); f = await fields() }
 return await finish(f)

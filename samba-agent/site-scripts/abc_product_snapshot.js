@@ -34,7 +34,7 @@ const want = String(args.size || '').trim()
 for (const t of (await tabs.list()) || []) {
 if (!isOrderUrl(t.url)) continue
 if (profile && String(t.profile || '').toLowerCase() === profile) { await tabs.close(t.id).catch(nop); continue }
-try { await tabs.switch(t.id); const em = await Promise.race([emailOnForm(), sleep(3000).then(() => null)]); if (em === null || sameAccount(em)) await tabs.close(t.id) } catch (e) {}
+try { await tabs.switch(t.id); const em = await Promise.race([emailOnForm(), sleep(1500).then(() => null)]); if (em === null || sameAccount(em)) await tabs.close(t.id) } catch (e) {}
 }
 const url = /^https?:/.test(sku) ? sku : prdtNo ? `${HOST}/product?prdtNo=${prdtNo}` : `${HOST}/display/search-word/result?searchWord=${encodeURIComponent(sku)}`
 const tid = tabIdOf(await tabs.open(withProfile(url)))
@@ -98,12 +98,12 @@ const addr = ship.filter(x => /\] textbox value="/.test(x)).map(valOf)
 const shipping = { name: valOf(ship.find(x => /textbox "이름"/.test(x))).trim(), address: (addr[0] || '').trim(), address_detail: (addr[1] || '').trim() }
 let already_ordered = null, existing_order_no = null, dup_note = '중복 확인 못 함'
 const nameKey = (pn.match(/[A-Z]{1,3}\d{4,}/) || [((pn.match(/^[^A-Za-z]{4,}/) || [pn])[0]).trim().split(' ').slice(0, 4).join(' ')])[0]
-if (nameKey && selected && Date.now() - T0 < 35000) {
+if (nameKey && selected && Date.now() - T0 < 45000) {
 const hid = tabIdOf(await tabs.open(withProfile(`${HOST}/mypage/claim/claim-order-main`)))
 if (hid) {
 try {
 await tabs.switch(hid)
-await pg.waitFor(/주문일시|내역이 없습니다/, 8000).catch(nop)
+await pg.waitFor(/주문일시|내역이 없습니다/, 9000).catch(nop)
 const ot = await text()
 const loaded = /주문일시|내역이 없습니다/.test(ot)
 const part = ot.slice(Math.max(0, ot.indexOf('주문번호')), ot.indexOf('꼭 읽어') > 0 ? ot.indexOf('꼭 읽어') : undefined)

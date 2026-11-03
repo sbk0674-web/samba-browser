@@ -638,11 +638,14 @@
   {
     "name": "lotteon_confirm_shipping",
     "host": "lotteon.com",
-    "description": "롯데온 선물 주문서 새 배송지 저장·선택완료·빠른 선물, 주문서 되읽기",
+    "description": "실제 선택행과 주문서 주소를 대조하고 주소 미확인·불일치 시 중단",
     "params": [
       "name",
       "address",
-      "profile"
+      "address_detail",
+      "postal_code",
+      "profile",
+      "tab"
     ]
   },
   {
@@ -657,11 +660,11 @@
   {
     "name": "lotteon_order_detail",
     "host": "lotteon.com",
-    "description": "롯데온 주문 상세(2026-10-01, 로그인 실측): 계정 profile 로 주문/배송 내역에서 그 주문의 '상세보기'를 눌러 결제정보(결제액·L.POINT 사용)·구매적립예정을 읽고 탭을 닫는다.",
+    "description": "일반 주문 및 보낸 선물 상세를 읽기 전용 확인. 결제 정보 반환.",
     "params": [
-      "orderNo",
+      "source_order_no",
       "profile",
-      "source_order_no"
+      "search_keyword"
     ]
   },
   {
@@ -686,27 +689,47 @@
     ]
   },
   {
+    "name": "lotteon_save_edited",
+    "host": "lotteon.com",
+    "description": "덮어쓴 배송지를 저장하고 그 줄을 골라 주문서에 반영(선물은 빠른 선물까지)",
+    "params": [
+      "name",
+      "address",
+      "tab",
+      "gift"
+    ]
+  },
+  {
     "name": "lotteon_select_shipping",
     "host": "lotteon.com",
-    "description": "롯데온 선물 주문서에서 기존 배송지 선택·선택완료·빠른 선물",
+    "description": "실제 선택행과 주문서 주소를 대조하고 주소 미확인·불일치 시 중단",
     "params": [
       "name",
       "address",
       "address_detail",
-      "profile"
+      "postal_code",
+      "profile",
+      "tab"
     ]
   },
   {
     "name": "lotteon_set_shipping",
     "host": "lotteon.com",
-    "description": "열려 있는 롯데온 주문서(결제 페이지)에서 배송지 '변경'→'새 배송지 추가'로 이름/전화/주소를 입력하고(주소는 우편번호 찾기 팝업에서 검색→결과 선택→상세주소 입력), 필수 동의 체크 후 저장을 시도해 화면에서 되읽은 값을 반환한다. 결제는 하지 않음. {name,phone,address,saved} 반환 - saved:false면 검증오류(가짜 번호 등)로 실제 저장은 안 된 것.",
+    "description": "주문서 배송지: 둘째 항목을 덮어쓴다(저장·선택은 lotteon_save_edited)",
     "params": [
-      "name — 수령인 이름",
-      "address — 검색할 주소(도로명 등)",
-      "address_detail — 상세주소(호수 등, 필수)",
-      "memo — 선택, 배송 요청사항 텍스트",
-      "phone — 선택. 없으면 비워두고 phone_field_id(s) 반환"
+      "name",
+      "address",
+      "address_detail",
+      "postal_code",
+      "profile",
+      "tab"
     ]
+  },
+  {
+    "name": "lotteon_set_shipping_test",
+    "host": "lotteon.com",
+    "description": "둘째 배송지 덮어쓰기 시험",
+    "params": []
   },
   {
     "name": "lotteon_shopback_entry",
@@ -796,14 +819,9 @@
   },
   {
     "name": "musinsa_product_snapshot",
-    "host": "musinsa.com",
-    "description": "무신사 상품을 찾아 옵션 선택 후 구매하기→주문서까지 읽어 옵션/쿠폰/결제수단/예상 결제금액을 스냅샷한다(주문·결제 없음, 장바구니 자동정리, 사은품 권유 시트는 바로 구매하기). 컬러→사이즈 2단 옵션 상품은 컬러 먼저 골라(color 반환) 사이즈만 options에 담는다(도착예정 제외). size는 \"70(S)\" 또는 \"Black / 70(S)\" 조합, 매칭은 정확→괄호값→숫자 순.",
-    "params": [
-      "sku — 품번(숫자) 또는 http 로 시작하는 상품 URL",
-      "size — 선택, 사이즈 값(예: 265) 또는 \"컬러 사이즈\"·\"컬러 / 사이즈\" 조합",
-      "account — 선택, coupon 키로 쓸 계정명",
-      "profile — 선택, 계정별 탭 프로필 이름"
-    ]
+    "host": "",
+    "description": "상품 다이나핏 YMM25214Z1 캠핑티셔츠 라운드넥티셔츠 HIIT 히트 남성 폴로티 Black Z1 4869190 [Black 05(M) YMM25214Z1] 페이지에서 주문 옵션 \"Black 05(M) YMM25214Z1\" 을 골라 주문서(구매하기)까지 가서 원가(cost, 숫자)·선택지 목록(options, 고른 옵션 포함)·결제수단(methods)을 원래 키 그대로 돌려주고, 주문서에 실제로 담긴 상품 옵션 글자를 se",
+    "params": []
   },
   {
     "name": "musinsa_quick_price",
@@ -1088,7 +1106,7 @@
   {
     "name": "ssg_order_detail",
     "host": "ssg.com",
-    "description": "SSG 주문 상세(2026-09-27, 로그인 실측): 계정 profile 로 주문 상세(pay.ssg.com/myssg/orderInfoDetail.ssg?orordNo=)를 새 탭에서 열어 결제 값을 읽고 탭을 닫는다.",
+    "description": "SSG 주문 상세(2026-09-27, 로그인 실측): 계정 profile 로 주문 상세(pay.ssg.com/myssg/orderInfoDetail.ssg?orordNo=)를 새 탭에서 열어 결제 값을 읽고 탭을 닫는다. · 선물 수락 명시 상태만 별도 반환",
     "params": [
       "orderNo",
       "profile",
