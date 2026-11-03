@@ -226,7 +226,8 @@ def _bridge_ready(bridge: BridgeClient) -> bool:
 
 
 def main() -> None:
-    os.environ.setdefault('SAMBA_NO_AUTO_CANCEL', '1')
+    # 마진 미달·확정 품절은 가격X·재고X 태그와 취소중으로 바꾼다(사용자 지시 2026-09-25, 2026-11-03 되돌림).
+    # 사무실 안전 범위일 때만 아래에서 막는다
     settings = load_settings()
     from samba_agent.queue.singleton import acquire_harness_lock
 

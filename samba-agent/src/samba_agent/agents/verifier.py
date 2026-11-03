@@ -292,7 +292,13 @@ class VerifierAgent(AgentBase):
             self.note('주문 후 필수 대조', f'불일치 필드: {identity_mismatch}; 미확인 필드: {identity_missing}')
             return AgentResult(
                 status='fail' if identity_mismatch else 'needs_ai',
-                reason=f'주문 후 주소·옵션·수량 검증 미통과: 불일치 {identity_mismatch}, 미확인 {identity_missing}',
+                reason=f'주문 후 주소·옵션·수량 검증 미통과: 불일치 {identity_mismatch}, 미확인 {identity_missing}'
+                # 옵션은 개인정보가 아니다 — 무엇과 무엇이 달랐는지 남겨 비교 규칙을 고칠 수 있게 한다
+                + (
+                    f" (주문 {a.order.option!r} · 상세 {source.get('selected') or source.get('option')!r})"
+                    if 'option' in identity_mismatch
+                    else ''
+                ),
                 fail_reason=FailReason.VERIFY_MISMATCH,
                 payload={'mismatches': [{'field': f} for f in identity_mismatch],
                          'unverified': list(unverified), 'identity_unverified': identity_missing},
