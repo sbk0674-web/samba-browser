@@ -114,9 +114,14 @@ class VerifierAgent(AgentBase):
         else:
             # Some sites mask recipient names. Address text alone cannot prove the recipient.
             raw = str(source.get('shipping_text') or '')
+            # 롯데온 선물 상세는 'To. 이름' 만 보이고 주소가 없다(실기 2026-11-03 4101) — 읽은 받는 분 이름도 대조 글자에 넣는다
+            gift_name_only = isinstance(applied, dict) and applied.get('name') and not applied.get('address')
+            if kind == 'gift' and gift_name_only:
+                raw = f'{raw} {applied.get("name")}'
             flat = _identity_address_key(raw)
             # SSG 선물주문 상세는 받는 분 이름만 보이고 주소는 없다(고객이 카톡으로 입력, 실기 2026-11-03 4085) — 이름만 대조
-            keys = ('name',) if kind == 'gift' and source.get('gift_order') is True else ('name', 'address', 'address_detail')
+            name_only = kind == 'gift' and (source.get('gift_order') is True or bool(gift_name_only))
+            keys = ('name',) if name_only else ('name', 'address', 'address_detail')
             for key in keys:
                 value = str(expected.get(key) or '')
                 if not value:
