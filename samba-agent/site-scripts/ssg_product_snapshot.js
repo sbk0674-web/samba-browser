@@ -21,7 +21,7 @@ const findForm=async()=>{const forms=(await tabs.list()).filter(x=>/pay\.ssg\.co
 const loginTab=async()=>(await tabs.list()).find(x=>/member\.ssg\.com\/member\/(popup\/popupLogin|login)/.test(x.url)&&x.profile===args.profile&&/department|itemView|order/.test(decodeURIComponent(x.url)));
 let bs=await findBuy();if(!bs.length)bs=els(await get({query:'구매하기'})).filter(e=>/^(바로구매|구매하기)$/.test(e.s)&&/link|button/.test(e.role));if(!bs.length)return {...R,sold_out:/품절|입고알림/.test(t)};
 let form=null;
-await page.click(bs[0].id);for(let k=0;k<10&&!form;k++){await sleep(700);form=await findForm();if(!form&&await loginTab()){return {...R,error:'login_required',note:'프로필 '+(args.profile||'')+' 로그인 세션 없음 — 바로구매 시 로그인 팝업'}}}
+await page.click(bs[0].id);for(let k=0;k<10&&!form;k++){await sleep(700);form=await findForm();const lt=form?null:await loginTab();if(lt){return {...R,error:'login_required',login_popup:lt.id,note:'프로필 '+(args.profile||'')+' 로그인 세션 없음 — 바로구매 시 로그인 팝업'}}}
 if(!form)return {...R,error:'no_checkout'};
 await tabs.switch(form.id);R.order_tab=form.id;await wf(/판매가격|계속하기/);
 for(let k=0;k<3;k++){t=await txt();if(/판매가격\s*[\d,]+\s*원/.test(t))break;const c=els(await get({query:'계속하기'})).find(e=>/^계속하기$/.test(e.s)&&/button|link/.test(e.role));if(!c)break;await page.click(c.id);await wf('판매가격');await sleep(500)}

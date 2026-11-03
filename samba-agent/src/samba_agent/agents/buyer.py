@@ -2309,6 +2309,18 @@ class BuyerAgent(AgentBase):
                     source.snapshot_script, {**args, 'size': chosen}, goal=goal, check=base_check
                 )
                 snap = self._finish_orders_wizard(snap, {**args, 'size': chosen})
+        if snapshot_login_required(snap) and snap.get('login_popup'):
+            # 바로구매가 띄운 로그인 팝업에서 키마스터 계정으로 로그인하고 한 번만 다시 연다
+            # (실기 2026-11-03 4085 신세계백화점: 홈·도메인 로그인됨인데도 바로구매가 팝업을 띄움 — 선물 진입과 같은 처리)
+            self.note('로그인', f'{account}: 바로구매 로그인 팝업에서 로그인한다')
+            self.tool('switch_tab', id=str(snap.get('login_popup')))
+            out = self.tool('login', accountLabel=account).strip()
+            if out.startswith(LOGIN_SUBMITTED):
+                self.tool('wait', ms=_LOGIN_SETTLE_MS)
+            self.note('로그인', f'{account}: 팝업 로그인 결과 {mask_text(out[:60])}')
+            # 스냅샷은 상품 탭 id 를 돌려주지 않는다 — 주소로 닫고 새로 연다(선물 진입과 같음)
+            self._close_product_tabs(account, str(snap.get('product_url') or ''))
+            snap = self.script_json(source.snapshot_script, args, goal=goal, check=base_check)
         if snapshot_login_required(snap) and self._login_product_host(
             account, str(snap.get('product_url') or '')
         ):
