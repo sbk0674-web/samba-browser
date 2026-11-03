@@ -31,7 +31,7 @@ if(!generic(e.text)){n=nm(e.text);}else{for(let j=i+1;j<L.length;j++){const x=L[
 if(n===null)return;
 if(!generic(e.text)&&!L.slice(i+1,i+5).some(x=>x.role==='button'&&x.text==='수정'))return;
 out.push({id:e.id,text:n});});return out;};
-let r=null,found=0;
+let r=null,found=0,second=null;
 for(let k=0;k<8&&!r;k++){
 if(k)await sleep(1000);
 const L0=await dl();
@@ -41,9 +41,11 @@ const rows=parseRows(tx);
 const cands=[];
 for(let i=0;i<radios.length&&i<rows.length;i++){
 if(radios[i].text!==rows[i].name)continue;
-if(rows[i].name===norm){found++;if(okRow(rows[i].seg))cands.push(radios[i]);}
+if(rows[i].name===norm){found++;if(okRow(rows[i].seg))cands.push(radios[i]);else if(i===1&&!road)second=radios[i];}
 }
 if(cands.length)r=cands[0];
+// 지번 주소('…면 …리 123')는 롯데온이 도로명으로 바꿔 저장해 글자로 못 맞춘다(실기 2026-11-03 4101) — 방금 덮어쓴 둘째 줄이 이름까지 같으면 그 줄이다
+else if(second&&k>=2)r=second;
 }
 if(!found)return{ok:false,note:'저장한 배송지 줄 없음'};
 if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};

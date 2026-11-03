@@ -4198,6 +4198,16 @@ class BuyerAgent(AgentBase):
         # 실행 시점에만 받아 입력 도구 호출에 바로 쓰고 로컬 변수 밖으로 내보내지 않는다.
         self._set_shipping(a, snap, account)
 
+        if source_of(self.spec.name).payment_quotes and _as_float(snap.get('cost')) <= 0:
+            # 주문서 결제금액을 못 읽었다 — 원가 0 으로 수단을 고르면 '마진 0%' 로 엉뚱하게 멈춘다(실기 2026-11-03 롯데온 선물 4098)
+            raise AgentFailure(
+                'needs_ai',
+                mask_text(
+                    f'주문서 결제금액을 못 읽음(수단 {list(snap.get("methods") or [])[:4]}, '
+                    f'{str(snap.get("note") or snap.get("error") or "")[:100]})'
+                ),
+                FailReason.UNKNOWN,
+            )
         # 결제수단·카드 — 지시받은 카드가 목록에 없으면 여기서 거절한다
         methods = [str(m) for m in (snap.get('methods') or [])]
         allowed_now = self._allowed_providers(account)
