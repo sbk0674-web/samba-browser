@@ -17,7 +17,19 @@ def color_code_conflict(wanted: object, actual: object) -> bool:
 _SIZE_ONLY = re.compile(r'^(?:\d{2,3}(?:\([a-z0-9]+\))?|\d?x{0,3}[sml]|free|f)$', re.IGNORECASE)
 
 
+def _tokens(value: object) -> list[str]:
+    """옵션 글자를 낱말로 — 주문 옵션에만 붙는 수량('1개')은 뺀다."""
+    text = re.sub(r'(?<!\S)\d+\s*개(?!\S)', ' ', str(value or '').casefold())
+    return [t for t in re.split(r'[\s/:,·]+', text) if t]
+
+
 def paid_option_matches(wanted: object, actual: object) -> bool:
+    # 상세의 낱말이 모두 주문 옵션에 있고 그중 사이즈가 있으면 같다 — 주문에만 붙은 수량·품번은 무시한다
+    # (실기 2026-11-03 4073 'LYONS BLUE 1개 100' ↔ 'LYONS BLUE · 100', 4039 '… 095(L) NJ3NR86A')
+    got, want = _tokens(actual), _tokens(wanted)
+    want_set = set(want) | {t.split('(')[0] for t in want if '(' in t}
+    if got and all(t in want_set for t in got) and any(_SIZE_ONLY.fullmatch(t) for t in got):
+        return True
     # 색상이 상품에 묶인 사이트는 주문 상세에 사이즈만 보인다 — 사이즈뿐인 값은 주문 옵션 안에 그 사이즈가 있으면 같다.
     # 색상이 적혀 있는 값은 그대로 전체가 같아야 한다.
     if option_key(wanted) and option_key(wanted) == option_key(actual):
