@@ -83,11 +83,18 @@ def office_block_in(page: str) -> bool:
     인데 다른 곳의 이름과 합쳐 사무실로 봤다(실기 2026-09-25).
     """
     flat = re.sub(r'\s+', ' ', page)
+    # 무신사 주문서는 한 배송지 칸 안에 '이름 기본 배송지 배송지 변경 주소' 로 그린다 — 칸 안의 표시 글자는 경계로 보지 않는다
+    flat = re.sub(r'기본 배송지|최근 사용|배송지 변경', ' ', flat)
     # 사무실은 101호·102호 둘 다 같은 곳이다(사용자 2026-11-03) — 이미 저장된 사무실 배송지를 그대로 쓴다
     # 이름과 주소 사이에 다른 배송지 칸('배송지 김가명 …')이 끼면 다른 사람 배송지다
+    # 무신사는 이름 가운데와 상세주소를 '*' 로 가려 보여 준다('임*희 … 광중3길 58 *******', 실기 2026-11-03 4093) —
+    # 가린 꼴도 사무실로 본다(가려져 101·102호를 못 가르지만 둘 다 같은 사무실이다)
+    name = re.escape(OFFICE_NAME)
+    if len(OFFICE_NAME) >= 3:
+        name = rf'(?:{name}|{re.escape(OFFICE_NAME[0])}\*+{re.escape(OFFICE_NAME[-1])})'
     near = (
-        rf'{OFFICE_NAME}(?:(?!배송지|받는|수령).){{0,160}}?'
-        rf'{re.escape(OFFICE_ADDRESS_HINT)}\s*,?\s*{OFFICE_ROOM_RE}'
+        rf'{name}(?:(?!배송지|받는|수령).){{0,160}}?'
+        rf'{re.escape(OFFICE_ADDRESS_HINT)}\s*,?\s*(?:{OFFICE_ROOM_RE}|(?:1\s*층\s*)?101\s*호|\*{{3,}})'
     )
     return re.search(near, flat) is not None
 

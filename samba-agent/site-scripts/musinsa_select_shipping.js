@@ -70,7 +70,9 @@ async function search(q){
 let fb=false;
 let best=pick(rowsFrom(await G({interactive:true,query:nm})),true);
 if(!best){const key=toks.filter(t=>/[0-9]/.test(t)||t.length>=3).slice(-2).join(' ')||ad;
-  for(const q of [nm,key]){if(!q)continue;const g=await search(q);if(!g)break;
+  // 검색칸이 없으면 전체 목록에서 고른다(무신사는 이름을 '임*희' 로 가려 이름 검색이 안 걸린다, 실기 2026-11-03)
+  {const rs=rowsFrom(await G({interactive:true}));best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}}
+  if(!best)for(const q of [nm,key]){if(!q)continue;const g=await search(q);if(!g)break;
     const rs=rowsFrom(await G({interactive:true,query:q}));best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}if(best)break;}}
 if(!best){out.note='목록에 맞는 배송지 없음';return out;}
 out.found=true;
