@@ -2,22 +2,28 @@
 
 import {
   filterChannels,
+  parseKoreanTime,
   type DaangnAccountDto,
   type DaangnChannelDto
 } from '@shared/daangn'
 
-/** 이전 메인 프로세스의 원본순 IPC 목록도 새 화면에서 안전하게 표시한다. 날짜는 바꾸지 않는다. */
-export function withNativeListOrder(channels: readonly DaangnChannelDto[]): DaangnChannelDto[] {
+/** 당근 목록의 시간만 있는 표시는 오늘이다. 확인된 날짜는 보존하며 원본 객체는 바꾸지 않는다. */
+export function withNativeListOrder(channels: readonly DaangnChannelDto[], now = new Date()): DaangnChannelDto[] {
   const positions = new Map<number, number>()
   return channels.map(channel => {
     const position = positions.get(channel.accountId) ?? 0
     positions.set(channel.accountId, position + 1)
-    return Number.isInteger(channel.listOrder) && channel.listOrder! >= 0
-      ? channel : { ...channel, listOrder: position }
+    const listOrder = Number.isInteger(channel.listOrder) && channel.listOrder! >= 0
+      ? channel.listOrder : position
+    const clockOnly = /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(channel.lastAtText.trim())
+    const today = clockOnly && (!Number.isFinite(channel.lastAt) || channel.lastAt <= 0)
+      ? parseKoreanTime(`오늘 ${channel.lastAtText.trim()}`, now) : 0
+    if (today > 0) return { ...channel, listOrder, lastAt: today, lastAtSource: 'list', lastAtPrecise: true }
+    return listOrder === channel.listOrder ? channel : { ...channel, listOrder }
   })
 }
 
-/** 조회 시간이 아닌 원본 메시지 날짜로 표시한다. 날짜가 없으면 그 사실을 드러낸다. */
+/** 오늘은 시간만, 확인된 이전 날짜는 날짜와 시간을 표시한다. */
 export function lastAtLabel(text: string, lastAt: number, now = Date.now(), precise = false): string {
   // 본문에서 확인한 오늘 시각에 목록의 오래된 '2일 전'을 계속 붙이지 않는다.
   if (precise && Number.isFinite(lastAt) && lastAt > 0 &&
@@ -26,7 +32,7 @@ export function lastAtLabel(text: string, lastAt: number, now = Date.now(), prec
     text = `${String(stamp.getUTCHours()).padStart(2, '0')}:${String(stamp.getUTCMinutes()).padStart(2, '0')}`
   }
   if (!/^(?:(?:오전|오후)\s*)?\d{1,2}:\d{2}$/.test(text.trim())) return text
-  if (!Number.isFinite(lastAt) || lastAt <= 0) return `날짜 미확인 ${text}`
+  if (!Number.isFinite(lastAt) || lastAt <= 0) return text
   const kstDay = (at: number): number => Math.floor((at + 9 * 3_600_000) / 86_400_000)
   const days = kstDay(now) - kstDay(lastAt)
   if (days === 0) return text

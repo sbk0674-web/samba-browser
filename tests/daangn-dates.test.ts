@@ -173,8 +173,8 @@ describe('날짜 표시', () => {
     expect(fn, '화면 날짜 표시 함수를 직접 검증한다').toBeTypeOf('function')
     return fn(text, at, now.getTime())
   }
-  it('날짜 불명은 오늘처럼 표시하지 않는다', () => {
-    expect(label('오후 03:52', 0)).toBe('날짜 미확인 오후 03:52')
+  it('당근 목록의 오늘 시간은 시간만 표시한다', () => {
+    expect(label('오후 03:52', 0)).toBe('오후 03:52')
   })
   it('KST 어제와 오늘을 구분한다', () => {
     expect(label('오후 03:52', yesterday)).toBe('어제 오후 03:52')

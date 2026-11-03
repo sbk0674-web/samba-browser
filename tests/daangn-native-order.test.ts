@@ -43,15 +43,25 @@ describe('native chronology when list dates are absent', () => {
     expect(out.channels[0].lastAt).toBe(0)
   })
   it('supports an already-running old main process without changing message dates or the input', () => {
-    const old=[channel(1,'latest',1000),channel(2,'other',1200),channel(1,'clock',0),channel(1,'yesterday',500)]
-    const normalized=withNativeListOrder(old)
+    const old=[channel(1,'latest',Date.parse('2026-11-03T09:50:00+09:00')),channel(2,'other',Date.parse('2026-11-03T10:00:00+09:00')),channel(1,'clock',0),channel(1,'yesterday',Date.parse('2026-11-02T10:00:00+09:00'))]
+    const normalized=withNativeListOrder(old,new Date('2026-11-03T15:40:00+09:00'))
     expect(normalized.map(x=>x.listOrder)).toEqual([0,0,1,2])
     expect(filterChannels(normalized,all).map(x=>x.roomId)).toEqual(['other','latest','clock','yesterday'])
     expect(old.every(x=>x.listOrder===undefined)).toBe(true)
-    expect(normalized[2].lastAt).toBe(0)
+    expect(normalized[2].lastAt).toBe(Date.parse('2026-11-03T07:57:00+09:00'))
+    expect(old[2].lastAt).toBe(0)
   })
   it('preserves source positions supplied by the new main process', () => {
     const c=channel(1,'known',1000,7)
     expect(withNativeListOrder([c])[0]).toBe(c)
+  })
+  it('sorts today clock-only chats across accounts by actual KST clock time', () => {
+    const channels=[{...channel(1,'morning',0),lastAtText:'오전 07:57'}, {...channel(2,'noon',0),lastAtText:'오후 12:03'}, {...channel(3,'afternoon',0),lastAtText:'오후 03:36'}]
+    const normalized=withNativeListOrder(channels,new Date('2026-11-03T15:40:00+09:00'))
+    expect(filterChannels(normalized,all).map(x=>x.roomId)).toEqual(['afternoon','noon','morning'])
+  })
+  it('preserves a confirmed previous-day message date instead of assuming today', () => {
+    const channelWithProof={...channel(1,'dated',Date.parse('2026-11-02T07:57:00+09:00')),lastAtText:'오전 07:57',lastAtSource:'message' as const,lastAtPrecise:true}
+    expect(withNativeListOrder([channelWithProof],new Date('2026-11-03T15:40:00+09:00'))[0].lastAt).toBe(channelWithProof.lastAt)
   })
 })
