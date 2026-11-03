@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { JSDOM } from 'jsdom'
 import { runInNewContext } from 'node:vm'
 import { buildScanScript, parseScan } from '../src/main/daangn/selectors'
-import { parseKoreanTime } from '../src/shared/daangn'
+import { filterChannels, parseKoreanTime } from '../src/shared/daangn'
 import { findOrderCandidates } from '../src/main/daangn/order-watch'
 import * as view from '../src/renderer/src/components/daangn/daangn-view'
 
@@ -67,6 +67,46 @@ describe('당근 마지막 메시지 날짜 근거', () => {
     const next = parseScan({ rows: [row('flower')] }, 1, new Date('2026-10-31T00:01:00+09:00'), old)
     expect(next.channels[0].lastAt).toBe(yesterday)
   })
+  it('확인된 오늘 08:58을 대략적인 목록 날짜가 덮어 어제 09:24 아래로 보내지 않는다', () => {
+    const current = new Date('2026-11-03T09:30:00+09:00')
+    const latest = row('latest', '2일 전', { messageAt: '2026-11-03T08:58:00+09:00' })
+    const older = row('older', '오전 09:24', { messageAt: '2026-11-02T09:24:00+09:00' })
+    const old = parseScan({ rows: [latest, older] }, 1, current).channels
+    const channels = parseScan({ rows: [row('latest', '2일 전'), older] }, 1, current, old).channels
+    expect(channels[0]).toMatchObject({
+      lastAt: Date.parse('2026-11-03T08:58:00+09:00'), lastAtSource: 'message', lastAtPrecise: true
+    })
+    expect(filterChannels(channels, { accountId: null, unreadOnly: false }).map(c => c.roomId))
+      .toEqual(['latest', 'older'])
+  })
+  it.each(['2일 전', '1주 전', '6달 전', '2개월 전', '1년 전'])('같은 %s 메시지를 다시 읽어도 시각이 계속 앞으로 움직이지 않는다', timeText => {
+    const old = parseScan({ rows: [row('flower', timeText)] }, 1, now).channels
+    const later = new Date(now.getTime() + 30 * 60_000)
+    expect(parseScan({ rows: [row('flower', timeText)] }, 1, later, old).channels[0])
+      .toMatchObject({ lastAt: old[0].lastAt, lastAtSource: 'list', lastAtPrecise: false })
+  })
+  it.each([
+    { lastMessage: '새 메시지' }, { timeText: '1일 전' }, { unreadText: '2' }
+  ])('대략적인 날짜라도 본문/표시/안읽음이 바뀌면 이전 날짜를 고정하지 않는다: %j', extra => {
+    const old = parseScan({ rows: [row('flower', '2일 전', { messageAt: '2026-10-29T15:52:00+09:00' })] }, 1, now).channels
+    const later = new Date(now.getTime() + 30 * 60_000)
+    const next = parseScan({ rows: [row('flower', '2일 전', extra)] }, 1, later, old).channels[0]
+    expect(next.lastAt).toBe(parseKoreanTime('timeText' in extra ? extra.timeText : '2일 전', later))
+    expect(next.lastAtSource).toBe('list')
+  })
+  it('대략적인 목록 날짜 보존도 다른 계정에는 적용하지 않는다', () => {
+    const old = parseScan({ rows: [row('flower', '2일 전')] }, 1, now).channels
+    const later = new Date(now.getTime() + 30 * 60_000)
+    expect(parseScan({ rows: [row('flower', '2일 전')] }, 2, later, old).channels[0].lastAt)
+      .toBe(parseKoreanTime('2일 전', later))
+  })
+  it('새로 확인한 정밀 목록 날짜는 예전 본문 날짜를 갱신한다', () => {
+    const timeText = '오늘 오후 03:52'
+    const old = parseScan({ rows: [row('flower', timeText, { messageAt: '2026-10-29T15:52:00+09:00' })] }, 1, now).channels
+    expect(parseScan({ rows: [row('flower', timeText)] }, 1, now, old).channels[0]).toMatchObject({
+      lastAt: Date.parse('2026-10-30T15:52:00+09:00'), lastAtSource: 'list', lastAtPrecise: true
+    })
+  })
   it.each([
     { lastMessage: '새 메시지' }, { timeText: '오후 03:53' }, { unreadText: '2' }
   ])('새 메시지/시간/안읽음 증가에는 이전 본문 날짜를 재사용하지 않는다: %j', extra => {
@@ -122,6 +162,12 @@ describe('당근 마지막 메시지 날짜 근거', () => {
 })
 
 describe('날짜 표시', () => {
+  it('정밀하게 확인한 오늘 시각을 오래된 상대 날짜로 표시하지 않는다', () => {
+    expect(view.lastAtLabel('2일 전', Date.parse('2026-11-03T08:58:00+09:00'),
+      Date.parse('2026-11-03T09:30:00+09:00'), true)).toBe('08:58')
+    expect(view.lastAtLabel('2일 전', Date.parse('2026-11-03T00:00:00+09:00'),
+      Date.parse('2026-11-03T09:30:00+09:00'), false)).toBe('2일 전')
+  })
   const label = (text: string, at: number) => {
     const fn = (view as unknown as Record<string, (...args: unknown[]) => string>).lastAtLabel
     expect(fn, '화면 날짜 표시 함수를 직접 검증한다').toBeTypeOf('function')

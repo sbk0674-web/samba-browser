@@ -104,7 +104,7 @@ function ChannelRow({
         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--text)]">
           {channel.peerName}
         </span>
-        <span className="shrink-0 text-[11px] text-[var(--text2)]">{lastAtLabel(channel.lastAtText, channel.lastAt)}</span>
+        <span className="shrink-0 text-[11px] text-[var(--text2)]">{lastAtLabel(channel.lastAtText, channel.lastAt, Date.now(), channel.lastAtPrecise)}</span>
       </span>
       <span className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text2)]">

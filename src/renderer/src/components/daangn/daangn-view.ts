@@ -7,7 +7,13 @@ import {
 } from '@shared/daangn'
 
 /** 조회 시간이 아닌 원본 메시지 날짜로 표시한다. 날짜가 없으면 그 사실을 드러낸다. */
-export function lastAtLabel(text: string, lastAt: number, now = Date.now()): string {
+export function lastAtLabel(text: string, lastAt: number, now = Date.now(), precise = false): string {
+  // 본문에서 확인한 오늘 시각에 목록의 오래된 '2일 전'을 계속 붙이지 않는다.
+  if (precise && Number.isFinite(lastAt) && lastAt > 0 &&
+      !/^(?:(?:오전|오후)\s*)?\d{1,2}:\d{2}$/.test(text.trim())) {
+    const stamp = new Date(lastAt + 9 * 3_600_000)
+    text = `${String(stamp.getUTCHours()).padStart(2, '0')}:${String(stamp.getUTCMinutes()).padStart(2, '0')}`
+  }
   if (!/^(?:(?:오전|오후)\s*)?\d{1,2}:\d{2}$/.test(text.trim())) return text
   if (!Number.isFinite(lastAt) || lastAt <= 0) return `날짜 미확인 ${text}`
   const kstDay = (at: number): number => Math.floor((at + 9 * 3_600_000) / 86_400_000)

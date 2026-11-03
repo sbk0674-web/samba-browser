@@ -158,11 +158,18 @@ export function parseScan(
       c.lastMessage === lastMessage && c.lastAtText === timeText && c.unread >= unread)
     // 확인했던 같은 메시지의 날짜는 유지한다. 메시지가 바뀌면 예전 날짜를 새 글에 붙이지 않는다.
     const listAt = parseKoreanTime(timeText, now)
-    const lastAt = messageAt ? parseKoreanTime(messageAt, now) : listAt || known?.lastAt || 0
-    const sourceText = messageAt || timeText
-    const lastAtSource = lastAt > 0 ? (messageAt ? 'message' : listAt ? 'list' : known?.lastAtSource) : undefined
-    const lastAtPrecise = lastAt > 0 && (messageAt || listAt
-      ? /T\d{2}:\d{2}|(?:오전|오후)\s*\d{1,2}:\d{2}/.test(sourceText) : known?.lastAtPrecise === true)
+    const preciseClock = /T\d{2}:\d{2}|(?:오전|오후)\s*\d{1,2}:\d{2}/
+    const listPrecise = listAt > 0 && preciseClock.test(timeText)
+    // 본문에서 확인한 정밀 날짜를 대략적인 목록 날짜로 덮지 않는다.
+    // 같은 일·주·월·년 상대 표기도 처음 읽은 값을 유지해 조회마다 앞으로 밀리지 않게 한다.
+    const retained = !messageAt && known && (!listAt ||
+      known.lastAtSource === 'message' && known.lastAtPrecise === true && !listPrecise ||
+      known.lastAtSource === 'list' && /^\d+\s*(?:일|주|달|개월|년)\s*전$/.test(timeText.trim()))
+      ? known : undefined
+    const lastAt = messageAt ? parseKoreanTime(messageAt, now) : retained?.lastAt || listAt
+    const lastAtSource = lastAt > 0 ? (messageAt ? 'message' : retained?.lastAtSource ?? 'list') : undefined
+    const lastAtPrecise = lastAt > 0 && (messageAt ? preciseClock.test(messageAt)
+      : retained ? retained.lastAtPrecise === true : listPrecise)
     channels.push({
       accountId,
       roomId: m[1],
