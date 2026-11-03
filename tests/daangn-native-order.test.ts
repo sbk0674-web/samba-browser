@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { filterChannels, type DaangnChannelDto } from '../src/shared/daangn'
 import { parseScan } from '../src/main/daangn/selectors'
+import { withNativeListOrder } from '../src/renderer/src/components/daangn/daangn-view'
 
 const channel = (accountId: number, roomId: string, lastAt: number, listOrder?: number): DaangnChannelDto => ({
   accountId, roomId, peerName: roomId, lastAt, listOrder, lastAtText: lastAt ? '1일 전' : '오전 07:57',
@@ -40,5 +41,17 @@ describe('native chronology when list dates are absent', () => {
     const out=parseScan({me:null,rows:[{href:'/room/z',timeText:'오전 07:57'},{href:'/room/a',timeText:'1일 전'}]},1,new Date('2026-11-03T04:00:00Z'))
     expect(out.channels.map(x=>x.listOrder)).toEqual([0,1])
     expect(out.channels[0].lastAt).toBe(0)
+  })
+  it('supports an already-running old main process without changing message dates or the input', () => {
+    const old=[channel(1,'latest',1000),channel(2,'other',1200),channel(1,'clock',0),channel(1,'yesterday',500)]
+    const normalized=withNativeListOrder(old)
+    expect(normalized.map(x=>x.listOrder)).toEqual([0,0,1,2])
+    expect(filterChannels(normalized,all).map(x=>x.roomId)).toEqual(['other','latest','clock','yesterday'])
+    expect(old.every(x=>x.listOrder===undefined)).toBe(true)
+    expect(normalized[2].lastAt).toBe(0)
+  })
+  it('preserves source positions supplied by the new main process', () => {
+    const c=channel(1,'known',1000,7)
+    expect(withNativeListOrder([c])[0]).toBe(c)
   })
 })

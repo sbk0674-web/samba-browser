@@ -6,6 +6,17 @@ import {
   type DaangnChannelDto
 } from '@shared/daangn'
 
+/** 이전 메인 프로세스의 원본순 IPC 목록도 새 화면에서 안전하게 표시한다. 날짜는 바꾸지 않는다. */
+export function withNativeListOrder(channels: readonly DaangnChannelDto[]): DaangnChannelDto[] {
+  const positions = new Map<number, number>()
+  return channels.map(channel => {
+    const position = positions.get(channel.accountId) ?? 0
+    positions.set(channel.accountId, position + 1)
+    return Number.isInteger(channel.listOrder) && channel.listOrder! >= 0
+      ? channel : { ...channel, listOrder: position }
+  })
+}
+
 /** 조회 시간이 아닌 원본 메시지 날짜로 표시한다. 날짜가 없으면 그 사실을 드러낸다. */
 export function lastAtLabel(text: string, lastAt: number, now = Date.now(), precise = false): string {
   // 본문에서 확인한 오늘 시각에 목록의 오래된 '2일 전'을 계속 붙이지 않는다.

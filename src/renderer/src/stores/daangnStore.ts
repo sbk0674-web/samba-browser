@@ -6,7 +6,7 @@ import type {
   DaangnTemplateDto
 } from '@shared/daangn'
 import { useUiStore } from '@renderer/stores/uiStore'
-import { PANEL_WIDTHS, clampPanelWidth } from '@renderer/components/daangn/daangn-view'
+import { PANEL_WIDTHS, clampPanelWidth, withNativeListOrder } from '@renderer/components/daangn/daangn-view'
 
 const WIDTH_KEY = 'samba.daangn.panelWidths'
 
@@ -83,7 +83,7 @@ export const useDaangnStore = create<DaangnStoreState>((set, get) => ({
       window.samba.daangn.accountsList(),
       window.samba.daangn.channelsList()
     ])
-    if (a.ok && c.ok) set({ accounts: a.data, channels: c.data })
+    if (a.ok && c.ok) set({ accounts: a.data, channels: withNativeListOrder(c.data) })
     else set({ error: !a.ok ? a.error : !c.ok ? c.error : null })
     await get().loadTemplates()
   },
@@ -95,7 +95,7 @@ export const useDaangnStore = create<DaangnStoreState>((set, get) => ({
       const alive = selected === null || s.accounts.some((a) => a.id === selected)
       set({
         accounts: s.accounts,
-        channels: s.channels,
+        channels: withNativeListOrder(s.channels),
         selectedAccountId: alive ? selected : null
       })
     })
