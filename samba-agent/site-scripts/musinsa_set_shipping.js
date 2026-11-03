@@ -32,9 +32,13 @@ if(!pp){
 if(!pp){out.note='배송지 팝업 못 찾음';return out;}
 await tabs.switch(pp.id);await W('배송지',6000);
 let g=await G();
+// 직배는 목록 둘째 칸을 '수정'으로 덮어쓴다 — 새 배송지 추가 금지(사용자 규칙, 2026-11-04). 둘째 칸이 없을 때만 추가
+let edit=false;
 if(!/name=address1/.test(g.tree)){
-  let m=g.tree.match(/^\[(\d+)\] (?:link|button) "[^"]*배송지 추가[^"]*"/m);
+  const ed=[...g.tree.matchAll(/^\[(\d+)\] (?:button|clickable) "수정"/gm)];
+  let m=ed[1]?[0,ed[1][1]]:g.tree.match(/^\[(\d+)\] (?:link|button) "[^"]*배송지 추가[^"]*"/m);
   if(!m){out.note='배송지 추가하기 링크 없음';return out;}
+  edit=!!ed[1];out.edited=edit;
   await C(parseInt(m[1]));g=await P(/name=address1/,8000);
 }
 const nM=g.tree.match(/^\[(\d+)\] textbox name=name/m);
@@ -47,10 +51,11 @@ const at=toks(args.address);
 const qs=[at.slice(0,at.findIndex(t=>/^\d/.test(t))+1).join(' ')||args.address,args.address,args.postal_code].filter(q=>q&&(''+q).trim());
 const bad=/(취소|검색|영문보기|더보기|지도|확인|안내)/;
 const dbg=[];
+const A1=t=>{const m=t.match(/name=address1 value="([^"]+)"/);return !!m&&(!edit||at.filter(x=>nrm(m[1]).includes(x)).length>=2);};
 for(const q of [...qs,...qs]){
   if(Date.now()-D0>45000){dbg.push('시간초과');break;}
   g=await G();
-  if(/name=address1 value="[^"]+"/.test(g.tree))break;
+  if(A1(g.tree))break;
   let kM=g.tree.match(/\[(\d+)\] textbox "[^"]*" name=region_name/);
   if(!kM){
     let sM=g.tree.match(/^\[(\d+)\] button "[^"]*주소[^"]*(찾기|검색)[^"]*"/m);
@@ -72,7 +77,7 @@ for(const q of [...qs,...qs]){
   }
   if(best){await C(best.id);await sleep(500);await P(/name=address1 value="[^"]+"/,6000);}
   g=await G();
-  const hit=/name=address1 value="[^"]+"/.test(g.tree);
+  const hit=A1(g.tree);
   dbg.push('q'+dbg.length+(best?':점수'+best.sc:/결과가 없/.test(g.tree)?':결과없음':':후보없음')+(hit?':OK':''));
   if(hit)break;
 }
