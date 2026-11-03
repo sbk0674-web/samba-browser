@@ -22,6 +22,8 @@ def _tokens(value: object) -> list[str]:
     text = re.sub(r'(?<!\S)\d+\s*개(?!\S)', ' ', str(value or '').casefold())
     # 신발 사이즈 '250MM' 은 '250' 과 같다(실기 2026-11-04 롯데온 4127 'BLK(BLACK) 250 NS87R61A' ↔ '250MM')
     text = re.sub(r'(?<=\d)\s*mm\b', '', text)
+    # 옵션 이름표 '[SIZE]S'·'[COLOR]블랙' 의 이름표는 값이 아니다(실기 2026-11-04 29CM 4131 '그레이 S' ↔ '[SIZE]S')
+    text = re.sub(r'\[(?:size|color|colour|사이즈|색상|컬러|옵션)\]', ' ', text)
     return [t for t in re.split(r'[\s/:,·]+', text) if t]
 
 
