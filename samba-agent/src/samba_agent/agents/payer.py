@@ -267,6 +267,8 @@ PC_PAY_PROVIDERS = frozenset({'payco', 'naverpay'})
 # 결제창 로그인 화면에서 앱 login 뒤 결제창이 다시 그려질 때까지 기다리는 시간(ms)
 POPUP_LOGIN_SETTLE_MS = 5000
 POPUP_LOGIN_SETTLE_TRIES = 4
+# 네이버 비밀번호 뒤 결제창·주문 완료 화면을 기다리는 횟수(PAY_POPUP_WAIT_MS 간격)
+NAVER_AFTER_PASSWORD_TRIES = 8
 
 
 # 상품명에서 대조에 쓰지 않는 흔한 말(브랜드·계절·분류) — 이것만 겹쳐서는 같은 상품이라고 보지 않는다
@@ -1433,15 +1435,12 @@ class PayerAgent(AgentBase):
                     f'네이버페이 비밀번호를 앱이 넣지 못했다 — 결제하지 않음: {mask_text(out[:100])}',
                     FailReason.PERMISSION_DENIED,
                 )
-            self.tool('wait', ms=PAY_POPUP_WAIT_MS)
-            popups, _active = self._list_tabs_popups()
-            naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
-            if naver:
-                self.tool('switch_tab', id=str(naver[-1]['id']))
-            prepared = self._read_naver_card(amount)
-            if not isinstance(prepared, dict) or prepared.get('ok') is not True:
-                # 이상거래 확인 비밀번호는 그 자체로 결제를 끝내기도 한다(실기 2026-11-03 4062: 52,230원 현대카드 결제됨) —
-                # 주문 완료 화면이면 결제 확인으로 넘긴다
+            # 비밀번호 뒤 결제창으로 돌아오거나, 그 자체로 결제가 끝나 주문 완료 화면이 뜬다 — 완료 화면은 2초 안에
+            # 안 뜨기도 한다(실기 2026-11-03 4062·4071: 결제됐는데 결제창 미확인으로 멈춤). 어느 쪽인지 보일 때까지 본다
+            prepared = None
+            for _ in range(NAVER_AFTER_PASSWORD_TRIES):
+                self.tool('wait', ms=PAY_POPUP_WAIT_MS)
+                popups, _active = self._list_tabs_popups()
                 try:
                     listed = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
                 except ValueError:
@@ -1452,6 +1451,13 @@ class PayerAgent(AgentBase):
                     self.note('네이버 비밀번호 입력', '비밀번호 뒤 주문 완료 화면 — 결제 확인으로 간다')
                     self._naver_payment = {'paid_after_password': True}
                     return True
+                naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
+                if naver:
+                    self.tool('switch_tab', id=str(naver[-1]['id']))
+                prepared = self._read_naver_card(amount)
+                if isinstance(prepared, dict) and prepared.get('ok') is True:
+                    break
+            if not isinstance(prepared, dict) or prepared.get('ok') is not True:
                 # 비밀번호가 들어간 뒤라 결제가 끝났을 수 있다 — '결제하지 않음'으로 적으면 재구매로 이어진다
                 reason = prepared.get('error') if isinstance(prepared, dict) else '검증 응답 없음'
                 raise AgentFailure(

@@ -190,7 +190,7 @@ def test_naver_password_that_finishes_payment_goes_to_confirmation():
 
 
 def test_naver_password_then_unknown_screen_never_claims_unpaid():
-    payer, keypad = _naver_payer([NAVER_AUTH, {'ok': False, 'error': '네이버페이 결제창 미확인'}], 'filled')
+    payer, keypad = _naver_payer([NAVER_AUTH] + [{'ok': False, 'error': '네이버페이 결제창 미확인'}] * 8, 'filled')
     with pytest.raises(AgentFailure) as e:
         payer._prepare_naver_card(NAVER_ASSIGNMENT)
     assert len(keypad) == 1

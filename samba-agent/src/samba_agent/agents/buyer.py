@@ -1520,7 +1520,9 @@ def is_account_failure(e: AgentFailure) -> bool:
 
     그러면 같은 상품을 다른 계정으로는 살 수 있다 — 다음 계정으로 잇는다.
     """
-    return PURCHASE_LIMIT in e.reason or e.fail_reason in (
+    # 쿠폰이 이 계정 주문서에만 안 붙은 것도 계정 사유다 — 한 계정만 견적하게 된 뒤로 다음 계정으로 잇지 않고
+    # 멈췄다(2026-11-03 4080)
+    return PURCHASE_LIMIT in e.reason or '쿠폰 미적용 의심' in e.reason or e.fail_reason in (
         FailReason.PERMISSION_DENIED,
         FailReason.CARD_MISSING,
     )
