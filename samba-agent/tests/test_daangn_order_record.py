@@ -104,7 +104,8 @@ def test_submission_refuses_order_without_proven_payment_time():
 
 def test_date_only_submission_requires_cutoff_proof():
     order = {"payment_confirmed": True, "pickup_number": "056", "sales_account": "서병기",
-             "product_name": "상품", "sale_price": 69000, "paid_date": date(2026, 10, 29)}
+             "product_name": "상품", "sale_price": 69000, "paid_date": date(2026, 10, 29),
+             "product_image": "https://example.com/product.jpg"}
     with pytest.raises(ValueError, match="기준 이후"):
         module.build_submission(order)
     result = module.build_submission({**order, "payment_after_cutoff_verified": True})
@@ -116,11 +117,12 @@ def test_date_only_submit_checks_saved_date_without_assuming_time():
     from unittest.mock import Mock
     order = {"payment_confirmed": True, "pickup_number": "056", "sales_account": "서병기",
              "product_name": "상품", "sale_price": 69000, "paid_date": date(2026, 10, 29),
-             "payment_after_cutoff_verified": True}
+             "payment_after_cutoff_verified": True, "product_image": "https://example.com/product.jpg"}
     client = Mock()
     client._request.side_effect = [{"id": "ord_saved", "created": True},
         {"id": "ord_saved", "order_number": "당근 056", "sales_account": "서병기",
-         "product_name": "상품", "sale_price": 69000, "paid_at": "2026-10-28T15:00:00+00:00"}]
+         "product_name": "상품", "sale_price": 69000, "paid_at": "2026-10-28T15:00:00+00:00",
+         "product_image": order["product_image"]}]
     assert module.submit_collected_order(client, order)["id"] == "ord_saved"
 
 
@@ -129,10 +131,12 @@ def test_submit_uses_existing_internal_api_without_customer_details():
     client = Mock()
     client._request.side_effect = [{"id": "ord_existing", "created": False},
         {"id": "ord_existing", "order_number": "당근 136", "sales_account": "서병기",
-         "product_name": "상품", "sale_price": 34000, "paid_at": "2026-10-29T01:01:00+00:00"}]
+         "product_name": "상품", "sale_price": 34000, "paid_at": "2026-10-29T01:01:00+00:00",
+         "product_image": "https://example.com/product.jpg"}]
     item = {"payment_confirmed": True, "payment_time_verified": True,
             "pickup_number": "136", "sales_account": "서병기", "product_name": "상품",
-            "sale_price": 34000, "paid_at": datetime(2026, 10, 29, 1, 1, tzinfo=timezone.utc)}
+            "sale_price": 34000, "paid_at": datetime(2026, 10, 29, 1, 1, tzinfo=timezone.utc),
+            "product_image": "https://example.com/product.jpg"}
     assert module.submit_collected_order(client, item)["id"] == "ord_existing"
     args, kwargs = client._request.call_args_list[0]
     assert args == ("POST", "/daangn/collected-orders")
@@ -146,10 +150,67 @@ def test_unknown_submit_response_checks_saved_order_without_resubmitting():
         status = None
     item = {"payment_confirmed": True, "payment_time_verified": True,
             "pickup_number": "136", "sales_account": "서병기", "product_name": "상품",
-            "sale_price": 34000, "paid_at": datetime(2026, 10, 29, 1, 1, tzinfo=timezone.utc)}
+            "sale_price": 34000, "paid_at": datetime(2026, 10, 29, 1, 1, tzinfo=timezone.utc),
+            "product_image": "https://example.com/product.jpg"}
     client = Mock()
     client._request.side_effect = [Unknown(), {"id": "ord_existing", "order_number": "당근 136",
         "sales_account": "서병기", "product_name": "상품", "sale_price": 34000,
-        "paid_at": "2026-10-29T01:01:00+00:00"}]
+        "paid_at": "2026-10-29T01:01:00+00:00", "product_image": item["product_image"]}]
     assert module.submit_collected_order(client, item) == {"id": "ord_existing", "created": False}
+    assert [c.args[0] for c in client._request.call_args_list] == ["POST", "GET"]
+
+
+def verified_submission(**changes):
+    return {"payment_confirmed": True, "payment_time_verified": True,
+            "pickup_number": "136", "sales_account": "서병기", "product_name": "상품",
+            "sale_price": 34000, "paid_at": datetime.fromisoformat("2026-10-29T01:01:00+00:00"),
+            "product_image": "https://example.com/product.jpg", **changes}
+
+
+@pytest.mark.parametrize("image", [
+    None, "", "   ", "product.jpg", "/tmp/product.jpg", r"C:\photos\product.jpg",
+    "file:///C:/photos/product.jpg", "data:image/png;base64,AAAA", "javascript:alert(1)",
+    "//example.com/product.jpg", "https://", "https:///product.jpg",
+    "https://example.com:bad/product.jpg", "https://example.com/product\n.jpg",
+    "https://example.com/product\x00.jpg", "https://example.com/product\x7f.jpg",
+    " https://example.com/product.jpg", 123, ["https://example.com/product.jpg"],
+])
+def test_photo_is_required_and_invalid_urls_never_reach_post(image):
+    from unittest.mock import Mock
+    client = Mock()
+    with pytest.raises(ValueError, match="사진"):
+        module.submit_collected_order(client, verified_submission(product_image=image))
+    client._request.assert_not_called()
+
+
+def test_missing_photo_key_never_reaches_post():
+    from unittest.mock import Mock
+    item = verified_submission()
+    del item["product_image"]
+    client = Mock()
+    with pytest.raises(ValueError, match="사진"):
+        module.submit_collected_order(client, item)
+    client._request.assert_not_called()
+
+
+@pytest.mark.parametrize("image", [
+    "https://images.example.com/product.jpg?w=1000",
+    "http://images.example.com/render?product=136&signature=observed",
+])
+def test_observed_http_photo_url_is_preserved_without_guessing_file_type(image):
+    assert module.build_submission(verified_submission(product_image=image))["product_image"] == image
+
+
+@pytest.mark.parametrize("saved_image", [None, "", "https://example.com/other-product.jpg"])
+def test_missing_or_different_photo_in_get_echo_is_not_saved_success_or_reposted(saved_image):
+    from unittest.mock import Mock
+    item = verified_submission()
+    saved = {"id": "ord_saved", "order_number": "당근 136", "sales_account": "서병기",
+             "product_name": "상품", "sale_price": 34000, "paid_at": item["paid_at"].isoformat()}
+    if saved_image is not None:
+        saved["product_image"] = saved_image
+    client = Mock()
+    client._request.side_effect = [{"id": "ord_saved", "created": True}, saved]
+    with pytest.raises(ValueError, match="일치"):
+        module.submit_collected_order(client, item)
     assert [c.args[0] for c in client._request.call_args_list] == ["POST", "GET"]

@@ -98,7 +98,7 @@ def match_owned_order(xml: str, *, account: str, chat_title: str, chat_price: in
 
 
 def build_submission(order: dict) -> dict:
-    """결제 시각 또는 확인된 결제일과 기준 이후 증거가 있을 때 전송한다."""
+    """결제일 근거와 상품 사진 주소가 확인된 주문만 전송한다."""
     paid_at = order.get("paid_at")
     paid_date = order.get("paid_date")
     cutoff = datetime(2026, 10, 29, 10, tzinfo=timezone(timedelta(hours=9)))
@@ -122,8 +122,19 @@ def build_submission(order: dict) -> dict:
     if (isinstance(amount, bool) or not isinstance(amount, (int, float))
             or not math.isfinite(amount) or amount <= 0):
         raise ValueError("판매금액 확인 필요")
+    image = order.get("product_image")
+    if (not isinstance(image, str) or not image
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in image)):
+        raise ValueError("상품 사진 주소 확인 필요")
+    try:
+        image_url = urlparse(image)
+        if image_url.scheme not in ("http", "https") or not image_url.hostname:
+            raise ValueError("상품 사진 주소 확인 필요")
+        _ = image_url.port  # 잘못된 포트도 전송 전에 거부한다.
+    except ValueError:
+        raise ValueError("상품 사진 주소 확인 필요") from None
     data = {k: order[k] for k in ("pickup_number", "sales_account", "product_name",
-            "sale_price", "payment_confirmed")}
+            "sale_price", "payment_confirmed", "product_image")}
     if paid_at is not None:
         data["paid_at"] = paid_at.isoformat()
     else:
@@ -134,7 +145,7 @@ def build_submission(order: dict) -> dict:
         if not isinstance(pickup_date, date) or isinstance(pickup_date, datetime):
             raise ValueError("수거일 확인 필요")
         data["pickup_date"] = pickup_date.isoformat()
-    for key in ("product_option", "product_image", "source_url", "source_site"):
+    for key in ("product_option", "source_url", "source_site"):
         if order.get(key):
             data[key] = order[key]
     return data
