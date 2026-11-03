@@ -34,6 +34,10 @@ STATUS_SCRIPT = 'samba_set_status'
 # 이행 뒤 삼바웨이브 주문 행의 "업데이트"(소싱처 가격·재고 갱신 → 마켓 판매가 수정)를 누르는 앱 저장 스크립트
 WAVE_UPDATE_SCRIPT = 'samba_update_order'
 
+# 네이버페이 결제내역(최근 결제 맨 위)과 영수증을 찾아볼 최근 건수
+NAVER_HISTORY_URL = 'https://pay.naver.com/pc/history?page=1'
+NAVER_RECEIPT_LOOKUP = 5
+
 # 결제 전 견적 원가와 결제 뒤 실제 원가가 이만큼(원) 넘게 다르면 견적 오차로 올린다
 ESTIMATE_GAP_WON = 500
 
@@ -283,6 +287,42 @@ class RecorderAgent(AgentBase):
             FailReason.UNKNOWN,
         )
 
+    def _naver_receipt(self, a: Assignment, sourcing_no: str) -> dict[str, object] | None:
+        """네이버페이 결제내역에서 이 소싱주문번호의 영수증을 읽어 실제 결제수단·적립을 돌려준다. 못 읽으면 None."""
+        import re
+        import time
+
+        from samba_agent.agents.naverpay import parse_receipt
+
+        account = str(a.handoff.get('account') or a.order.account or '')
+        opened = ''
+        try:
+            out = self.tool('new_tab', url=NAVER_HISTORY_URL, **({'profile': account} if account else {}))
+            opened = (re.search(r'tab (\S+)', out) or [None, ''])[1]
+            time.sleep(4)
+            page = self.tool('get_page')
+            links = list(dict.fromkeys(re.findall(r'href=(https://orders\.pay\.naver\.com/instantPay/detail/\S+)', page)))
+            for link in links[:NAVER_RECEIPT_LOOKUP]:
+                self.tool('navigate', url=link)
+                time.sleep(3)
+                text = self.tool('get_page')
+                if sourcing_no not in text:
+                    continue
+                body = text[text.find('PAGE TEXT'):] if 'PAGE TEXT' in text else text
+                receipt = parse_receipt(body, sourcing_no)
+                self.note('네이버 영수증', f'{receipt["card"]} · 결제 {receipt["paid"]:,}원 · 적립 {receipt["naver_reward"]:,}원')
+                return {**receipt, 'reward': receipt['naver_reward']}
+            self.note('네이버 영수증', '결제내역에서 이 주문을 못 찾음')
+        except (AgentFailure, ValueError) as e:
+            self.note('네이버 영수증', mask_text(f'못 읽음: {e}'[:120]))
+        finally:
+            if opened:
+                try:
+                    self.tool('close_tab', id=opened)
+                except AgentFailure:
+                    pass
+        return None
+
     def _apply_actual_cost(
         self, a: Assignment, values: dict[str, object], sourcing_no: str
     ) -> None:
@@ -329,6 +369,14 @@ class RecorderAgent(AgentBase):
         # 애드픽·샵백 적립은 원가에 넣지 않는다(사용자 2026-09-27) — 주문 상세·견적의 사이트 적립만 쓴다
         detail = with_pay_card(detail, a.handoff)
         naver = '네이버' in f'{detail.get("card") or ""} {a.handoff.get("card") or ""}'
+        if naver and not detail.get('payment_verified'):
+            # 비밀번호 창이 먼저 떠 카드 확인 전에 결제가 끝난 경우 — 네이버 영수증에서 실제 수단·적립을 읽는다
+            # (실기 2026-11-03 4081·4086: 결제는 현대카드로 됐는데 확인값이 없어 기록이 멈췄다)
+            receipt = self._naver_receipt(a, sourcing_no)
+            if receipt is not None:
+                detail = {**detail, **receipt}
+                if site_of(a).upper() == 'LOTTEON':
+                    detail['reward_verified'] = True
         if site_of(a).upper() == 'LOTTEON' and naver and detail.get('reward_verified') is not True:
             raise AgentFailure('needs_ai', '롯데온 실제 적립 미확인 — 0원으로 추정하지 않고 원가 확정 보류, 재결제 금지', FailReason.VERIFY_MISMATCH)
         if naver and not detail.get('payment_verified'):

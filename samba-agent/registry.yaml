@@ -18,7 +18,7 @@ agents:
     kind: recorder
     match: {}
     tools: [get_page, find_elements, navigate, click, type, select, run_js, run_script, save_script,
-            switch_tab, new_tab, progress]
+            switch_tab, new_tab, progress, close_tab]
     rules: rules/recorder.md
     prompts: samba/recorder
     dataset: ds.recorder
