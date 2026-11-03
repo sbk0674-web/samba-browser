@@ -103,7 +103,7 @@ export interface VaultCaptureGateDeps {
   ) => void
   // 원인 파악용 로그 한 줄(호스트·단계·사유만 — 값·아이디는 절대 넣지 않는다). 없으면 남기지 않는다
   log?: (line: string) => void
-  // '묻지 않고 자동 저장'(설정, 기본 꺼짐). 없으면 꺼진 것으로 본다
+  // '묻지 않고 자동 저장'(설정). 새 계정은 반드시 확인 바를 띄우고, 기존 계정 갱신에만 쓴다
   autoSaveEnabled?: () => boolean
   // 자동 저장을 실행한다(잠금 해제 상태에서만 불린다). 같은 값이라 저장할 게 없으면 false,
   // 저장이 실패하면 'error' — 그때는 값을 버리지 않고 확인 바로 한 번 묻는다
@@ -235,7 +235,7 @@ export class VaultCaptureGate {
     // 같은 값이면 아무것도 묻지 않는다
     if (verdict.kind === 'same') return 'duplicate'
     const candidate = { ...c, isNew: verdict.kind === 'new', locked: false }
-    if (this.deps.autoSaveEnabled?.() && this.deps.autoSave) {
+    if (verdict.kind !== 'new' && this.deps.autoSaveEnabled?.() && this.deps.autoSave) {
       const saved = this.deps.autoSave(candidate)
       if (saved === true) return 'auto-saved'
       if (saved === false) return 'duplicate'

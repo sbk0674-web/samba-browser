@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeViewBounds } from '../src/main/browser/tab-manager'
+import { computeViewBounds, computeBehindBounds } from '../src/main/browser/tab-manager'
 import type { Layout } from '../src/shared/ipc'
 
 // 렌더러가 1440x900 뷰포트에서 잰 실측값(계산 로직 자체는 여백 수치에 의존하지 않으므로
@@ -12,6 +12,28 @@ const reported: Layout = {
   viewportWidth: 1440,
   viewportHeight: 900
 }
+
+describe('computeBehindBounds', () => {
+  const folded: Layout = { x: 0, y: 0, width: 0, height: 0, viewportWidth: 1440, viewportHeight: 900 }
+  it('keeps background work sized when the browser panel is folded', () => {
+    expect(computeBehindBounds(folded, 1440, 900, false, false)).toMatchObject({ width: 1440, height: 900 })
+    const behind = computeBehindBounds(folded, 1440, 900, false, false)
+    expect(behind.x + behind.width).toBeLessThanOrEqual(0)
+    expect(computeViewBounds(folded, 1440, 900).width).toBe(0)
+  })
+  it('never exposes a view through the login gate', () => {
+    expect(computeBehindBounds(reported, 1440, 900, false, true).width).toBe(0)
+  })
+  it('preserves normal bounds and mobile sizing', () => {
+    expect(computeBehindBounds(reported, 1440, 900, false, false)).toEqual(computeViewBounds(reported, 1440, 900))
+    expect(computeBehindBounds(folded, 1440, 900, true, false).width).toBe(412)
+    const mobile = computeBehindBounds(folded, 1440, 900, true, false)
+    expect(mobile.x + mobile.width).toBeLessThanOrEqual(0)
+  })
+  it('does not invent dimensions for a zero-sized host window', () => {
+    expect(computeBehindBounds(folded, 0, 0, false, false).width).toBe(0)
+  })
+})
 
 describe('computeViewBounds', () => {
   it('보고 시점과 창 크기가 같으면 좌표를 그대로 쓴다', () => {

@@ -37,7 +37,9 @@ class ChatEvidence:
 
 
 def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
-                      inspect_phone: Callable, submit: Callable) -> dict:
+                      inspect_phone: Callable, submit: Callable,
+                      already_paid: Callable | None = None,
+                      on_saved_payment: Callable | None = None) -> dict:
     """한 채팅을 처리한다. 폰 접근과 저장은 해당 증거가 모두 맞을 때만 한다."""
     if not candidate.account or not candidate.room_id or not candidate.product_title:
         raise ValueError('계정과 채팅 상품 확인 필요')
@@ -47,6 +49,8 @@ def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
     if (chat.product_title != candidate.product_title or isinstance(chat.sale_price, bool)
             or not isinstance(chat.sale_price, int) or chat.sale_price <= 0):
         return {'status': 'held', 'reason': '채팅 상품 확인 실패'}
+    if already_paid is not None and already_paid(candidate, chat):
+        return {'status': 'skipped', 'reason': '이미 저장한 결제 이벤트'}
 
     # inspect_phone 은 공유 잠금·연결·계정 확인 뒤에만 폰을 열고,
     # 수거일이 없을 때 무신사 상품은 가장 늦은 날, 보유 재고는 가장 빠른 날을 예약한다.
@@ -67,11 +71,15 @@ def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
     result = submit(phone)
     if not isinstance(result, dict) or not result.get('id'):
         raise ValueError('저장 결과 확인 필요')
+    if on_saved_payment is not None:
+        on_saved_payment(candidate, chat, {'id': result['id'], 'pickup_number': phone['pickup_number']})
     return {'status': 'saved', 'id': result['id'], 'pickup_number': phone['pickup_number']}
 
 
 def collect_round(*, chat, inspect_phone: Callable, submit: Callable,
-                  already_done: Callable, mark_done: Callable, limit: int = 15, offset: int = 0) -> list[dict]:
+                  already_done: Callable, mark_done: Callable, limit: int = 15, offset: int = 0,
+                  already_paid: Callable | None = None,
+                  on_saved_payment: Callable | None = None) -> list[dict]:
     """계정별 채팅을 확인한다. 실패한 건은 재전송하지 않고 다음 주기에 다시 확인한다."""
     if not 1 <= limit <= 50:
         raise ValueError('한 번에 확인할 채팅 수가 잘못됐습니다')
@@ -96,7 +104,8 @@ def collect_round(*, chat, inspect_phone: Callable, submit: Callable,
             continue
         try:
             result = collect_candidate(candidate, inspect_chat=chat.inspect,
-                                       inspect_phone=inspect_phone, submit=submit)
+                                       inspect_phone=inspect_phone, submit=submit,
+                                       already_paid=already_paid, on_saved_payment=on_saved_payment)
             if result['status'] == 'saved':
                 mark_done(candidate, result)
             results.append(result)

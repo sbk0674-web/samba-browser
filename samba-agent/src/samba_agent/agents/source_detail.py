@@ -6,6 +6,7 @@
 """
 
 from collections.abc import Callable
+from urllib.parse import urlsplit
 
 from samba_agent.agents.buyer import effective_cost
 from samba_agent.agents.contracts import Assignment
@@ -23,12 +24,25 @@ def detail_script(site: str) -> str:
 
 def site_of(a: Assignment) -> str:
     """실제로 산 사이트(교차 비교면 주문 소싱처와 다르다)."""
-    return str(a.handoff.get('buy_source') or a.order.source)
+    purchased = a.handoff.get('buy_source')
+    if purchased:
+        return str(purchased)
+    site = str(a.order.source)
+    if site.lower() in ('abcmart', 'grandstage'):
+        try:
+            host = urlsplit(a.order.product_url or '').hostname
+        except ValueError:
+            host = None
+        if host == 'grandstage.a-rt.com':
+            return 'GrandStage'
+        if host == 'abcmart.a-rt.com':
+            return 'ABCmart'
+    return site
 
 
 def detail_args(a: Assignment, source_order_no: object) -> dict[str, object]:
     """상세 스크립트 인자 — 삼바 주문번호·소싱처·소싱 주문번호·산 계정(프로필)."""
-    site = str(a.handoff.get('buy_source') or a.order.source)  # 실제로 산 사이트
+    site = site_of(a)
     args: dict[str, object] = {'orderNo': a.order.order_no, 'site': site}
     if source_order_no:
         args['source_order_no'] = source_order_no
@@ -44,7 +58,11 @@ def detail_goal(site: str) -> str:
         '{source_order_no, status, paid(결제 금액 숫자), points_used(사용한 적립금·포인트 숫자, 없으면 0), '
         'reward(후기 적립을 뺀 이번 주문 적립·포인트 합계 숫자 — 머니 결제 적립·등급 적립·구매 적립 포인트·네이버페이 적립 '
         '포인트 등, 없으면 0), card(결제 수단과 카드사 글자, 예: 무신사페이 - 롯데카드 / 네이버페이 - 현대카드)} 를 돌려준다. '
-        '카드사는 청구할인(현대 ×0.973, 롯데·KB ×0.98) 계산에 쓴다. 주문을 바꾸거나 취소하지 않는다.'
+        '카드사는 청구할인(현대 ×0.973, 롯데·KB ×0.98) 계산에 쓴다. '
+        '주문 후 검증을 위해 실제 주문 상품의 selected(색상과 사이즈 전체), qty(수량), '
+        'shipping{name,address,address_detail}(실제 수취인과 배송지)도 읽는다. '
+        '못 읽거나 가려진 값은 null로 남긴다. 구매 전 선택값으로 채우지 않는다. '
+        '주문을 바꾸거나 취소하지 않는다.'
     )
 
 
@@ -70,6 +88,16 @@ def with_pay_card(detail: dict[str, object], handoff: dict[str, object]) -> dict
     """
     from samba_agent.agents.buyer import billing_factor
 
+    if '네이버' in f'{detail.get("card") or ""} {handoff.get("card") or ""}':
+        if detail.get('payment_kind') == 'money' or detail.get('payment_verified') is True:
+            return detail
+        verified = handoff.get('naver_payment')
+        if isinstance(verified, dict) and verified.get('payment_verified') is True:
+            if verified.get('payment_kind') == 'card' and verified.get('card_issuer') == '현대카드':
+                return {**detail, **verified, 'card': '네이버페이 - 현대카드'}
+            if verified.get('payment_kind') == 'money':
+                return {**detail, **verified, 'card': '네이버페이 머니'}
+        return detail
     if billing_factor(str(detail.get('card') or '')) != 1.0:
         return detail
     issuer = str(handoff.get('card_issuer') or '').strip()
@@ -93,13 +121,21 @@ def actual_cost(detail: dict[str, object]) -> float | None:
         except (TypeError, ValueError):
             return None
         return used - reward if used > 0 else None
+    card_paid = detail.get('card_paid')
+    extra = 0.0
+    if isinstance(card_paid, int | float) and detail.get('payment_verified') is True:
+        if card_paid < 0 or card_paid > paid:
+            return None
+        extra = paid - float(card_paid)
+        paid = float(card_paid)
     return float(
         effective_cost(
             {
                 'cost': paid,
-                'reward': detail.get('reward') or 0,
-                'points_used': detail.get('points_used') or 0,
+                'reward': float(detail.get('reward') or 0) + float(detail.get('naver_reward') or 0),
+                'points_used': float(detail.get('points_used') or 0) + extra,
                 'card': str(detail.get('card') or ''),
+                'payment_kind': detail.get('payment_kind'),
             }
         )
     )

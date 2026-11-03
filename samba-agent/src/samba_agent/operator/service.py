@@ -8,6 +8,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from samba_agent.queue.db import Job, JobQueue
 log = logging.getLogger(__name__)
 
 OPERATOR_KEY = '_operator'
+# 주문 조회가 일시 오류(삼바웨이브 재배포 502 등)로 실패했을 때 판단을 미루는 시각(epoch) — 이 시각 전엔 drain 이 건너뛴다
+DEFER_KEY = '_operator_defer_until'
+DEFER_S = 300.0
 # AI 에게 맡기지 않는 오류 코드 — 돈·중복·로그인 문제는 사람이 본다
 _SKIP_FAILS = {'pay_interrupted', 'verify_mismatch', 'duplicate', 'permission_denied', 'margin'}
 # 결제가 됐을 수 있는 말 — 하나라도 있으면 맡기지 않는다(worker.PAID_RISK_MARKS 와 같은 뜻)
@@ -73,11 +77,13 @@ class OperatorService:
         describe: Callable[[Job], tuple[str, str]] | None = None,
         events_path: Path | None = None,
         run_async: bool = True,
+        cancel_confirmed: Callable[[str, str], bool] | None = None,
     ) -> None:
         self._agent = agent
         self._call = call
         self._queue = queue
         self._flag = flag_order
+        self._cancel_confirmed = cancel_confirmed
         self._report = report
         # 작업 → (소싱처, 상품 요약) — 없으면 작업의 주문번호만 알려 준다
         self._describe = describe
@@ -103,7 +109,10 @@ class OperatorService:
         """판단을 못 받고 남은 멈춤 한 건을 맡긴다 — 바빠서 건너뛴 건을 나중에라도 본다. 시작했으면 True."""
         if self._busy.locked():
             return False
+        now = time.time()
         for job in self._queue.needs_ai_unjudged(5):
+            if float(job.options.get(DEFER_KEY) or 0) > now:
+                continue  # 조회 일시 오류로 미룬 건 — 시간이 지나면 다시 본다
             tail = events_tail(self._events_path, job.id, 1) if self._events_path else ''
             reason = tail.split(': ', 1)[-1] if tail else ''
             if self.submit(job, 'unknown', reason):
@@ -112,7 +121,19 @@ class OperatorService:
 
     def _run(self, job: Job, reason: str) -> None:
         try:
-            source, summary = self._describe(job) if self._describe else ('', job.order_no)
+            try:
+                source, summary = self._describe(job) if self._describe else ('', job.order_no)
+            except Exception as e:  # noqa: BLE001 — 조회 실패 사유는 다양하다(삼바웨이브 502·브릿지)
+                # 주문 조회가 일시 오류로 실패 — 판단을 미룬다. error 로 고정하면 배포 때마다 사람이 풀어야 했다
+                # (실기 2026-10-19: 삼바웨이브 재배포 502 구간에 세 번 반복)
+                log.warning(
+                    'AI 대행: 주문 조회 실패 — %.0f초 뒤 다시 본다: %s (%s)',
+                    DEFER_S,
+                    job.order_no,
+                    mask_text(str(e))[:120],
+                )
+                self._queue.mark_option(job.id, DEFER_KEY, time.time() + DEFER_S)
+                return
             ctx = {
                 'order': summary,
                 'source': source,
@@ -149,11 +170,17 @@ class OperatorService:
         elif verdict.action == 'cancel' and self._flag is not None:
             key = job.wave_id or job.order_no
             done = self._flag(key, 'out_of_stock', f'[AI 대행 확인] {verdict.evidence}')
+            if done and self._cancel_confirmed is not None:
+                try:
+                    if self._cancel_confirmed(key, 'out_of_stock'):
+                        self._queue.finish(job.id, 'cancelled', error='out_of_stock')
+                except Exception:
+                    log.exception('AI 대행 취소 상태 확인 실패: %s', job.order_no)
             line += f' — 근거 "{mask_text(verdict.evidence)[:100]}" 로 취소중 정리({done or "표시 실패"})'
         else:
             # 사람 확인으로 남기는 판단도 한 번 본 것이다 — drain 이 같은 작업을 되풀이해 판단하지 않게 표시한다
             self._queue.mark_option(job.id, OPERATOR_KEY, 1)
-            line += ' — 사람 확인 필요'
+            line += ' — needs_ai: Codex 직접 확인·수리 필요'
         log.info(line)
         self._report(job, line)
         return line

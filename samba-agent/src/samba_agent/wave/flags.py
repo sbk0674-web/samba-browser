@@ -66,6 +66,17 @@ class FlagMarker:
         # 취소중으로 바뀐 주문을 외부 프로그램(샵마인·EMP)에도 알린다 — 없으면 하지 않는다
         self._on_cancelled = on_cancelled
 
+    def confirmed(self, key: str, error: str) -> bool:
+        flag = flag_for(error)
+        if flag is None:
+            return False
+        detail = self._wave.get_order(key)
+        return (
+            detail.status == 'cancelling'
+            and not detail.sourcing_order_number
+            and flag[0] in detail.flags
+        )
+
     def mark(self, key: str, error: str | None, evidence: str | None = None) -> str | None:
         """표시 + 취소요청. 결과 한 줄(해당 없으면 None). 실패해도 예외를 내지 않는다(작업 결과는 이미 정해졌다).
 
@@ -77,6 +88,11 @@ class FlagMarker:
             return None
         token, label = flag
         try:
+            if evidence:
+                before = self._wave.get_order(key)
+                if before.sourcing_order_number:
+                    return f'{label}·취소요청 보류: 소싱주문번호가 있어 구매 내역 확인 필요'
+                self._wave.add_memo(key, f'[취소근거] {evidence}')
             changed = self._wave.set_cancel_requested(key, evidence or str(error), flag=token)
             detail = self._wave.get_order(key)
             tagged = token in detail.flags

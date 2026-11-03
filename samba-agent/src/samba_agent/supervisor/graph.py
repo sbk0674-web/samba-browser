@@ -41,7 +41,7 @@ def _stop(state: RunState, name: str, result: AgentResult) -> RunState:
         **state,
         'results': results,
         'stage': 'done',
-        'outcome': 'needs_human',
+        'outcome': 'needs_ai',
         'fail_reason': result.fail_reason,
     }
 
@@ -68,7 +68,7 @@ def _run_stage(
             state,
             'supervisor',
             AgentResult(
-                status='needs_human',
+                status='needs_ai',
                 reason=f'unsupported: {state["order"].source} 를 맡을 {stage} 에이전트가 없다',
                 fail_reason=FailReason.UNKNOWN,
             ),
@@ -79,7 +79,7 @@ def _run_stage(
             state,
             spec.name,
             AgentResult(
-                status='needs_human',
+                status='needs_ai',
                 reason=f'등록부에 있으나 구현이 없다: {spec.name}',
                 fail_reason=FailReason.UNKNOWN,
             ),
@@ -254,7 +254,7 @@ def build_supervisor(
                     state,
                     'payer',
                     AgentResult(
-                        status='needs_human',
+                        status='needs_ai',
                         reason='결제 진행 중 재시작 — 결제 여부를 사람이 확인한다(재결제 금지)',
                         fail_reason=FailReason.PAY_INTERRUPTED,
                     ),
@@ -269,7 +269,7 @@ def build_supervisor(
                         state,
                         f'approval.{stage}',
                         AgentResult(
-                            status='needs_human',
+                            status='needs_ai',
                             reason=f'{stage} 단계를 사용자가 승인하지 않았다',
                             fail_reason=FailReason.PERMISSION_DENIED,
                         ),

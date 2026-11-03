@@ -3,6 +3,7 @@
 // v1 실패 원인: 이름·주소는 요소 줄이 아니라 본문 글자인데 요소 줄 앞뒤 3줄에서 찾았다 — 이제 라디오를 품은 항목 범위(selector)로 읽는다.
 // 인자 {name, address, address_detail?, profile?}  반환 {ok, name, address, note, dup}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
+const recipientName = nz(nz(args.name).replace(/\*/g, 'ㅇ').replace(/[^\p{L}\p{M}\p{N} ]/gu, ''))
 const OF = /pay\.ssg\.com\/(order|payment)|ssg\.com\/order\//
 const lines = t => String(t || '').split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
 const txt = t => nz(String(t || '').split('PAGE TEXT:')[1])
@@ -20,7 +21,7 @@ const hos = s => (String(s || '').match(/(\d+)\s*호/g) || []).map(x => x.replac
 const wantHo = hos(args.address_detail).pop()
 const inc = (a, b) => { for (let i = a.indexOf(b); i >= 0; i = a.indexOf(b, i + 1)) if (!/[\d-]/.test(a[i + b.length] || '')) return true; return false }
 const cnt = (a, b) => b ? a.split(b).length - 1 : 0
-const same = t => { const x = na(t); if (!x.includes(na(args.name)) || !inc(x, road)) return false; if (wantHo && !hos(t).includes(wantHo)) return false; return true }
+const same = t => { const x = na(t); if (!x.includes(na(recipientName)) || !inc(x, road)) return false; if (wantHo && !hos(t).includes(wantHo)) return false; return true }
 const W = /(배송지|기본|선택|수정|삭제|변경|추가|받는|분|주소|휴대폰|연락처|자택|회사|최근)/g
 const shape = s => { const k = []; s = nz(s).replace(W, m => { k.push(m); return '\u0001' }).replace(/[가-힣]/g, '가').replace(/[A-Za-z]/g, 'a').replace(/\d/g, '9'); let j = 0; return s.replace(/\u0001/g, () => k[j++]).slice(0, 70) }
 // 목록 팝업에서 항목 읽기 → [{text, pick}]
@@ -54,10 +55,10 @@ async function items() {
   return out.length ? { T: 'tree', out } : { T: '-', out: [] }
 }
 const R = { ok: false, name: null, address: null, note: null, dup: 0 }
-if (!nz(args.name) || !addr) return { ...R, note: 'name·address 필요' }
+if (!recipientName || !addr) return { ...R, note: 'name·address 필요' }
 const readBack = async () => {
   const t = na(txt(await get({})))
-  const n = na(args.name)
+  const n = na(recipientName)
   for (let i = t.indexOf(n); i >= 0; i = t.indexOf(n, i + 1)) { const w = t.slice(Math.max(0, i - 200), i + 300); if (inc(w, road)) return true }
   return false
 }
@@ -80,7 +81,7 @@ for (let i = 0; i < 12 && !lp; i++) { lp = await findPopup(/shpplocList/); if (!
 const back = async () => { if (tabId) await tabs.switch(tabId); let ok = false; for (let i = 0; i < 10 && !ok; i++) { await sleep(400); ok = await readBack() } return ok }
 if (!lp) {
   // 저장이 곧바로 주문서에 반영되고 팝업이 닫히는 경우
-  if (!(await findPopup(/shpplocForm/)) && tabId && await back()) return { ...R, ok: true, name: nz(args.name), address: nz(args.address), note: 'applied(목록 없이 반영)' }
+  if (!(await findPopup(/shpplocForm/)) && tabId && await back()) return { ...R, ok: true, name: recipientName, address: nz(args.address), note: 'applied(목록 없이 반영)' }
   return { ...R, note: '배송지 목록 팝업을 찾지 못함' }
 }
 await tabs.switch(lp.id)
@@ -99,4 +100,4 @@ if (c < 0) return { ...R, note: "목록 팝업 '배송지 변경' 버튼을 찾�
 tap(c)
 for (let i = 0; i < 15 && (await tabs.list()).some(t => t.id === lp.id); i++) await sleep(300)
 const ok = await back()
-return { ...R, ok, name: ok ? nz(args.name) : null, address: ok ? nz(args.address) : null, note: (ok ? 'applied' : '주문서 되읽기 불일치') + (hits.length > 1 ? ` (같은 배송지 ${hits.length}개 중복)` : '') }
+return { ...R, ok, name: ok ? recipientName : null, address: ok ? nz(args.address) : null, note: (ok ? 'applied' : '주문서 되읽기 불일치') + (hits.length > 1 ? ` (같은 배송지 ${hits.length}개 중복)` : '') }

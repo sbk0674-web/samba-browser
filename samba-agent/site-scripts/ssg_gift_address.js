@@ -1,18 +1,22 @@
 // SSG 선물 받는 분 지정(2026-09-29 수동 성공 이식): 선물 정보 화면 '배송지 대신 입력하기' → 주소록 팝업(selectShpplocPopup)에서
-// 고객 항목(도로명 조각+상세 앞 6자+이름 앞부분 — SSG 는 이름의 '*' 를 빼고 저장한다) 하나를 체크 → 선택완료 → 선물 화면 되읽기
+// 고객 항목(도로명 조각+상세 앞 6자+별표만 ㅇ 치환하고 다른 특수기호를 지운 이름) 하나를 체크 → 선택완료 → 선물 화면 되읽기
 // → 계속하기 → 주문서(ordPage). 주소록에 없으면 팝업의 '배송지 추가'로 목록 팝업(shpplocList)을 열어 두고 need_address 를 돌려준다
 // (하네스가 ssg_set_shipping{gift:true} → 전화 → ssg_gift_save_address 뒤 다시 부른다). 고객 글자는 결과에 싣지 않는다.
 // 인자 {name, address, address_detail}  반환 {ok, order_tab, amount, gift, need_address?, entries, matched, note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
+const recipientName = nz(nz(args.name).replace(/\*/g, 'ㅇ').replace(/[^\p{L}\p{M}\p{N} ]/gu, ''))
 const sq = s => String(s || '').replace(/\s+/g, '')
 const R = { ok: false, order_tab: null, amount: null, gift: false, entries: 0, matched: 0, note: null }
-if (!nz(args.name) || !nz(args.address)) return { ...R, note: 'name·address 필요' }
-const base = nz(args.name).replace(/\*/g, '').trim()
+if (!recipientName || !nz(args.address)) return { ...R, note: 'name·address 필요' }
+const base = recipientName
 // 도로명은 띄어쓴 주소에서 마지막 낱말만 — 공백을 먼저 빼면 '부산 …구 …로' 전체가 잡혀 SSG 의 '부산광역시 …' 항목과 안 맞는다(실기 2026-09-30)
 const rm = nz(args.address).match(/([가-힣A-Za-z0-9.]+(?:로|길))\s*(\d+(?:-\d+)?)/)
 const road = rm ? rm[1] + rm[2] : ''
-const det = sq(args.address_detail).slice(0, 6)
-const mine = b => { const x = sq(b); return (!road || x.includes(road)) && (!det || x.includes(det)) && b.includes(base) }
+// 상세는 '(' 앞까지 앞 6자 — 주문 상세 '수서1단지(SH빌리지) 102동' 은 주소록에 '수서1단지 102동' 으로 저장돼 '(' 가 키에 들면 영원히 안 맞는다(실기 2026-10-20 SSG 2706)
+const det = sq(nz(args.address_detail).split('(')[0]).slice(0, 6) || sq(args.address_detail).slice(0, 6)
+// 마스킹 이름 'ㅇ' 은 한 글자 아무거나 — 주문 '강*우' 는 주소록 '강지우' 와 같은 사람이다(도로명·상세가 함께 맞아야 통과)
+const nameRe = new RegExp(base.replace(/ㅇ/g, '[가-힣ㅇ]'))
+const mine = b => { const x = sq(b); return (!road || x.includes(road)) && (!det || x.includes(det)) && nameRe.test(b) }
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(400) } return '' }
 const idL = l => parseInt(l.slice(1))
 const findTab = async re => (await tabs.list()).find(t => re.test(t.url || ''))
@@ -90,8 +94,18 @@ if (!filled) return { ...R, note: '선물 화면에 받는 분이 안 들어감'
 const go = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] button "계속하기"/.test(l))
 if (!go) return { ...R, note: '계속하기 버튼 없음' }
 await page.click(idL(go))
-const od = await waitTab(/pay\.ssg\.com\/order\/ordPage/, 30)
-if (!od) return { ...R, note: '주문서가 안 뜸' }
+let od = await waitTab(/pay\.ssg\.com\/(?:order\/ordPage|nodcsnOrder\/ordShppInfo)/, 30)
+if (od && /\/nodcsnOrder\/ordShppInfo/.test(od.url || '')) {
+  await tabs.switch(od.id)
+  try { await page.waitFor('계속하기', 6000) } catch (e) {}
+  const mt = sq(await tree({}))
+  if (!mt.includes(base) || (road && !mt.includes(road)) || (det && !mt.includes(det))) return { ...R, note: '중간 배송정보의 받는 분 불일치' }
+  const next = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] (?:button|link) "계속하기"/.test(l))
+  if (!next) return { ...R, note: '중간 배송정보 계속하기 없음' }
+  await page.click(idL(next))
+  od = await waitTab(/pay\.ssg\.com\/order\/ordPage/, 30)
+}
+if (!od) return { ...R, note: '주문서가 안 뜸', observed_urls: (await tabs.list()).map(t => String(t.url || '').split('?')[0]) }
 await tabs.switch(od.id)
 try { await page.waitFor(/결제\s*예정금액/, 12000) } catch (e) {}
 await sleep(800)

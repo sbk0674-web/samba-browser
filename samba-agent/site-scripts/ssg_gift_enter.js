@@ -4,7 +4,7 @@
 // 인자 {product_url, option, profile}  반환 {ok, gift_tab, error?, note, options?}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const R = { ok: false, gift_tab: null, note: null }
-if (!args.product_url || !nz(args.option)) return { ...R, note: 'product_url·option 필요' }
+if (!args.product_url) return { ...R, note: 'product_url 필요' }  // 옵션 없는 상품(선글라스 등)은 option 이 비어도 된다(2026-10-16)
 const lines = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l)) } catch (e) {} await sleep(400) } return [] }
 const idL = l => parseInt(l.slice(1))
 const lab = l => nz((l.match(/^\[\d+\] \w+ "([^"]*)"/) || [])[1])
@@ -18,7 +18,11 @@ const opt = nz(args.option).replace(/\s*\(남은수량[^)]*\)\s*$/, '')
 // 선택 칸이 둘(색·사이즈)이면 주문서 옵션 '색/사이즈'를 칸 순서대로 하나씩 고른다(2026-10-02 다이나핏 '라이트 블루(B1)/L')
 // '쇼핑백 신청'·추가옵션 칸은 상품 옵션이 아니다 — 세면 '색/사이즈'를 둘로 쪼개 'Z1' 만 찾다 실패한다(2026-10-05 다이나핏 조끼)
 const selN = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l)).length
-const parts = selN > 1 && opt.includes('/') ? opt.split('/').map(nz).filter(Boolean) : [opt]
+let parts = opt ? [opt] : []
+if (selN > 1 && opt.includes('/')) {
+  const raw = opt.split('/').map(nz).filter(Boolean)
+  parts = raw.length > 2 ? [raw.slice(0, -1).join('/'), raw[raw.length - 1]] : raw
+}
 for (const opt of parts) {
   const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l))
   const sel = selAll.find(l => !/ link "선택하세요\."/.test(l)) || selAll[0]

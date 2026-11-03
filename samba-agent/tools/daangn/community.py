@@ -69,6 +69,9 @@ def attach_photo():
     if (find(nodes, desc='첨부한 이미지') or find(nodes, text='첨부한 이미지', exact=True)): return True
     pb = find(nodes, desc='사진 첨부') or find(nodes, text='사진 첨부', exact=True)
     if not pb: sh('input', 'keyevent', '4'); time.sleep(1.2); continue   # 키보드가 가리면 내림
+    if pb['cy'] > H * 0.93:                                              # 키보드가 없으면 도구줄이 내비게이션 바에 깔려 탭이 안 먹는다(S23, 10/28) → 제목 칸을 눌러 키보드를 올린다
+      tap(sx(400), sy(470), 2)
+      nodes = dump(); pb = find(nodes, desc='사진 첨부') or find(nodes, text='사진 첨부', exact=True) or pb
     tap(pb['cx'], pb['cy'], 3)
     for _ in range(6):
       if 'MediaPicker' in focused(): break
@@ -90,7 +93,8 @@ def select_button_y():
   try:
     png = subprocess.run([ADB, '-s', DEV, 'exec-out', 'screencap', '-p'], capture_output=True, creationflags=0x08000000).stdout
     im = Image.open(_io.BytesIO(png)).convert('RGB'); w, h = im.size; x = w // 2
-    ys = [y for y in range(int(h * 0.55), int(h * 0.97)) if (lambda p: p[0] > 220 and 80 < p[1] < 150 and p[2] < 70)(im.getpixel((x, y)))]
+    # 지도 위 주황 핀이 섞이면 중간값이 어긋난다(S23 경주박물관, 10/28) → 버튼 영역(아래 20%)만 본다
+    ys = [y for y in range(int(h * 0.80), int(h * 0.97)) if (lambda p: p[0] > 220 and 80 < p[1] < 150 and p[2] < 70)(im.getpixel((x, y)))]
     if len(ys) > 20: return round((ys[0] + ys[-1]) / 2 * H / h)
   except Exception as e:
     print('선택 버튼 탐색 실패:', e)
@@ -236,6 +240,9 @@ def write_post(title, body, place=None, tag='생활/편의', photo=None, match=N
         nodes = dump()
         pb = find(nodes, desc='장소 첨부') or find(nodes, text='장소 첨부', exact=True)
         if pb is None: sh('input', 'keyevent', '4'); time.sleep(1.2); nodes = dump(); pb = find(nodes, desc='장소 첨부')
+        if pb['cy'] > H * 0.93:                                          # 키보드가 없으면 도구줄이 내비게이션 바에 깔린다(S23) → 제목 칸을 눌러 키보드를 올림
+          tap(sx(400), sy(470), 2)
+          nodes = dump(); pb = find(nodes, desc='장소 첨부') or find(nodes, text='장소 첨부', exact=True) or pb
         tap(pb['cx'], pb['cy'], 2.5)
         nodes = dump(); e = next(n for n in nodes if n['cls'] == 'EditText')
         x = find(nodes, desc='텍스트 지우기') or find(nodes, text='텍스트 지우기', exact=True)   # 구형 폰은 text

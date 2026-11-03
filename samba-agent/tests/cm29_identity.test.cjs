@@ -1,0 +1,20 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const norm = s => String(s || '').toLowerCase().replace(/[\s\-_/:().,[\]·]/g, '');
+const root = path.join(__dirname, '../site-scripts');
+const snapshot = fs.readFileSync(path.join(root, 'cm29_product_snapshot.js'), 'utf8');
+const pickCode = snapshot.slice(snapshot.indexOf('function pick('), snapshot.indexOf('const mk='));
+const pick = new Function('norm','canon','lets','CODE', pickCode + ';return pick')(
+  norm, x => x, () => '', /\d[A-Za-z]+\d|[A-Za-z]+\d+[A-Za-z]+\d/);
+const wanted = 'DK/NAVY(M04) / 100';
+assert.equal(pick([{v:'PEACH PINK(H24):100'}], wanted, 1), null);
+assert.equal(pick([{v:'DK/NAVY(M04):100'}], wanted, 1).v, 'DK/NAVY(M04):100');
+const enter = fs.readFileSync(path.join(root, 'checkout_enter_29cm.js'), 'utf8');
+const mismatchCode = enter.slice(enter.indexOf('function mismatch('), enter.indexOf('async function radios('));
+const mismatch = new Function(mismatchCode + ';return mismatch')();
+const e = {product_no:'2408292',option:wanted,selected:'PEACH PINK(H24):100'};
+assert.ok(mismatch({nos:['2408292'],opt:'PEACH PINK(H24):100'},e));
+assert.ok(mismatch({nos:['2408292'],opt:'100'},e));
+assert.equal(mismatch({nos:['2408292'],opt:'DK/NAVY(M04):100'},e),null);
+console.log('29CM identity: 5 checks passed');

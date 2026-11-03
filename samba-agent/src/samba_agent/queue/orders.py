@@ -121,13 +121,16 @@ def parse_order_fn(wave: 'WaveClient | None', bridge: BridgeClient) -> Callable[
 
 
 # 작업 옵션으로 덮어쓸 수 있는 주문 필드 — 등록 상품이 다른 색상이거나 사이즈 표기가 달라 사람이
-# 상품 링크·옵션을 정해 준 경우(실기 2026-09-30 라코스테: 연결 상품은 베이지, 블랙은 다른 상품)
-OVERRIDE_FIELDS = ('option', 'product_url')
+# 상품 링크·옵션을 정해 준 경우(실기 2026-09-30 라코스테: 연결 상품은 베이지, 블랙은 다른 상품).
+# source 는 samba_order.source_site 가 판매처(KREAM)이고 수집상품의 실제 소싱처가 따로 확인된 경우에만 쓴다.
+OVERRIDE_FIELDS = ('source', 'option', 'product_url')
 
 
 def with_overrides(ref: OrderRef, options: Mapping[str, object]) -> OrderRef:
     """작업 옵션의 option·product_url 이 있으면 주문 참조의 그 필드를 바꾼다."""
     update = {k: str(options[k]) for k in OVERRIDE_FIELDS if options.get(k)}
+    if update.get('source'):
+        update['source'] = str(default_sources().normalize(str(update['source'])))
     return ref.model_copy(update=update) if update else ref
 
 

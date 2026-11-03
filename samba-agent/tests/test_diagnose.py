@@ -42,7 +42,7 @@ def events(tmp_path) -> EventLog:
         payload={
             'ok': False,
             'duration_ms': 3000,
-            'status': 'needs_human',
+            'status': 'needs_ai',
             'fail_reason': 'captcha',
         },
     )

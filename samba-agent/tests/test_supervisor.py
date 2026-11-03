@@ -1,4 +1,4 @@
-# 감독자 — 배정 / 결과 검사 / 재시도 1회 / needs_human / 결제 무재시도 / 미지원 / 권한 부족
+# 감독자 — 배정 / 결과 검사 / 재시도 1회 / needs_ai / 결제 무재시도 / 미지원 / 권한 부족
 import pytest
 
 from samba_agent.agents.contracts import AgentResult, OrderRef
@@ -62,7 +62,7 @@ def test_구매_실패는_한_번_재시도하고_그래도_실패면_사람에�
 
     out = run(reg, agents(**{'buyer.musinsa': flaky}))
     assert calls['n'] == 2  # 최초 1 + 재시도 1
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert out['fail_reason'] is FailReason.OUT_OF_STOCK
     assert 'payer' not in out['results']  # 결제까지 가지 않는다
 
@@ -92,15 +92,15 @@ def test_결제_에이전트는_재시도하지_않는다(reg):
 
     out = run(reg, agents(payer=failing_payer))
     assert calls['n'] == 1  # 재결제 위험 — 한 번뿐
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
 
 
-def test_needs_human_은_재시도_없이_바로_멈춘다(reg):
+def test_needs_ai_은_재시도_없이_바로_멈춘다(reg):
     calls = {'n': 0}
 
     def captcha(_a):
         calls['n'] += 1
-        return AgentResult(status='needs_human', reason='캡차', fail_reason=FailReason.CAPTCHA)
+        return AgentResult(status='needs_ai', reason='캡차', fail_reason=FailReason.CAPTCHA)
 
     out = run(reg, agents(**{'buyer.musinsa': captcha}))
     assert calls['n'] == 1
@@ -112,7 +112,7 @@ def test_카드가_없으면_감독자가_결제로_넘기지_않는다(reg):
         return ok('buyer', account='a***@x.com', cost=89000, margin_pct=12.5)
 
     out = run(reg, agents(**{'buyer.musinsa': no_card}))
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert out['fail_reason'] is FailReason.CARD_MISSING
     assert 'payer' not in out['results']
 
@@ -141,7 +141,7 @@ def test_마진이_미달이면_결제로_넘기지_않는다(reg):
 
 def test_모르는_소싱처는_바로_사람에게(reg):
     out = run(reg, agents(), order=ORDER.model_copy(update={'source': '쿠팡'}))
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert 'unsupported' in out['results']['supervisor'].reason
 
 
@@ -150,7 +150,7 @@ def test_허용_목록_밖_도구를_부르면_권한_부족으로_끝난다(reg
         raise BridgeError(FailReason.PERMISSION_DENIED, '허용 목록 밖 도구: phone_approve_payment')
 
     out = run(reg, agents(**{'buyer.musinsa': sneaky}))
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert out['fail_reason'] is FailReason.PERMISSION_DENIED
     assert out['attempts']['buyer.musinsa'] == 1  # 권한 부족은 재시도하지 않는다(스펙 §6)
 
@@ -182,7 +182,7 @@ def test_되읽기_불일치는_재시도하지_않고_바로_사람에게(reg):
 
     out = run(reg, agents(recorder=mismatched))
     assert calls['n'] == 1  # 재시도 없이 바로 사람에게
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert out['fail_reason'] is FailReason.VERIFY_MISMATCH
 
 
@@ -205,7 +205,7 @@ def test_결제_마커가_있으면_payer를_다시_부르지_않는다(reg):
 
     out = run(reg, agents(payer=counting_payer), state_over={'pay_started': True})
     assert calls['n'] == 0
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert out['fail_reason'] is FailReason.PAY_INTERRUPTED
 
 

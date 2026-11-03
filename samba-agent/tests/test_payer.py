@@ -54,7 +54,9 @@ def agent(reg) -> PayerAgent:
     def never(_p, _m):
         raise AssertionError('결제 에이전트는 LLM 판단을 하지 않는다')
 
-    return PayerAgent(spec, BridgeClient(URL, 'a' * 64, allowed=spec.tools, busy_wait_s=0.0), never)
+    payer = PayerAgent(spec, BridgeClient(URL, 'a' * 64, allowed=spec.tools, busy_wait_s=0.0), never)
+    payer._prepare_naver_card = lambda assignment: None
+    return payer
 
 
 def page(text: str) -> httpx.Response:
@@ -930,7 +932,8 @@ def test_결제_직전_재조회에서_상태가_바뀌었으면_사람에게_�
     respx.post(f'{URL}/tool/wait').mock(return_value=page('ok'))
     out = agent_with_wave(reg)(assignment(reg, dry_run=True))
     assert out.status == 'needs_ai'
-    assert out.reason == '상태 변경: cancelled'
+    # 화면 저장에 성공하면 사유 뒤에 [화면: …] 이 붙는다
+    assert out.reason.startswith('상태 변경: cancelled')
     assert not enter.called
 
 

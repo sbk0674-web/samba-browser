@@ -409,6 +409,23 @@ describe('installCaptureListener — 2단계 로그인·Enter 제출', () => {
     )
   })
 
+  it('Google처럼 문서가 바뀐 비밀번호 단계는 화면의 이메일 힌트로 저장 제안을 보낸다', () => {
+    document.body.innerHTML = `
+      <div data-email="shown">roasterydg@gmail.com</div>
+      <form id="f">
+        <input type="hidden" name="identifier" value="roasterydg@gmail.com">
+        <input type="password" name="Passwd" value="google-pw">
+        <button id="next" type="button">다음</button>
+      </form>
+    `
+    const send = vi.fn()
+    installCaptureListener(send, { allowUntrusted: true })
+    document.getElementById('next')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'roasterydg@gmail.com', password: 'google-pw' })
+    )
+  })
+
   it('폼 없는 비밀번호 칸에서 Enter 로 제출해도 잡는다', () => {
     document.body.innerHTML = `
       <input type="text" id="u" placeholder="아이디">
@@ -591,5 +608,16 @@ describe('isLoginSubmitClick', () => {
     `
     const pw = document.getElementById('p') as HTMLInputElement
     expect(isLoginSubmitClick(document.getElementById('a')!, pw)).toBe(false)
+  })
+
+  it('Google 같은 2단계 로그인의 다음 버튼도 비밀번호 제출로 본다', () => {
+    document.body.innerHTML = `
+      <input type="password" id="p" value="pw">
+      <button id="next" type="button">다음</button>
+      <button id="next-en" type="button">Next</button>
+    `
+    const pw = document.getElementById('p') as HTMLInputElement
+    expect(isLoginSubmitClick(document.getElementById('next')!, pw)).toBe(true)
+    expect(isLoginSubmitClick(document.getElementById('next-en')!, pw)).toBe(true)
   })
 })

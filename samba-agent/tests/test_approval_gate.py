@@ -73,7 +73,7 @@ def test_거부하면_외부를_바꾸지_않고_사람에게_넘긴다(reg):
     g.invoke({'order': ORDER, 'options': {}, 'job_id': 1, 'dry_run': True}, CFG)
     out = g.invoke(Command(resume={'approved': False, 'by': 'U1'}), CFG)
     assert log == ['buy']
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert out['fail_reason'] is FailReason.PERMISSION_DENIED
 
 

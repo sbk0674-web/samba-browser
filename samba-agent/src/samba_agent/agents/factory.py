@@ -25,11 +25,13 @@ def build_agents(
     decide: DecideFn,
     wave: WaveClient | None = None,
     compare_accounts_max: int = 5,
+    *,
+    gift_only: bool = False,
 ) -> dict[str, AgentFn]:
     """이름 → 호출 가능한 에이전트. 새 소싱처는 sources.yaml 1행이면 여기 자동으로 생긴다.
 
     저장 스크립트가 없는 소싱처(status: scripts_pending)도 만들어 둔다 — 부르면 곧바로
-    needs_human('스크립트 미작성: <id>') 이다.
+    needs_ai('스크립트 미작성: <id>') 이다.
 
     ``wave`` 를 주면 구매는 배송지를, 결제는 결제 직전 재조회를, 기록·검증은 삼바웨이브 행을
     앱 화면 대신 내부 API 로 본다. ``compare_accounts_max`` 는 구매가 원가를 비교할 계정 수 상한이다.
@@ -43,10 +45,14 @@ def build_agents(
             continue
         agent = _CLASSES[spec.kind](spec, bridge, decide)
         if isinstance(agent, BuyerAgent):
+            agent.office_shipping_blocked = gift_only
             agent.set_shipping_provider(shipping_fn)
             agent.compare_accounts_max = compare_accounts_max
+            agent.order_lookup = wave.get_order if wave is not None else None
         elif isinstance(agent, PayerAgent | RecorderAgent | VerifierAgent):
             agent.set_wave(wave)
+            if isinstance(agent, PayerAgent):
+                agent.gift_only = gift_only
         agents[spec.name] = agent
     # 교차 비교 짝(무신사 ↔ 29CM) — 소싱처 표의 cross_with 로 잇는다
     by_source = {
@@ -60,6 +66,7 @@ def build_agents(
         if src is None or src.id in by_source:
             continue
         only = BuyerAgent(spec, bridge, decide)
+        only.office_shipping_blocked = gift_only
         only.set_shipping_provider(shipping_fn)
         only.compare_accounts_max = compare_accounts_max
         by_source[src.id] = only
@@ -88,7 +95,7 @@ def _shipping_provider(wave: WaveClient | None) -> ShippingFn | None:
         detail = wave.get_order(order_no, order_type=order_type)  # type: ignore[arg-type]
         if order_type == 'kkadaegi' and detail.order_type != 'kkadaegi':
             raise AgentFailure(
-                'needs_human',
+                'needs_ai',
                 '사무실 배송지를 받지 못했다 — 삼바웨이브 상세 API 가 order_type 요청을 지원해야 한다',
                 FailReason.UNKNOWN,
             )

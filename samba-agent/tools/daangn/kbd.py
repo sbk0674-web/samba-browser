@@ -19,7 +19,7 @@ class Kbd:
       'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server', VER,
       f'scid={SCID}', 'log_level=info', 'video=false', 'audio=false', 'control=true',
       'tunnel_forward=true', 'send_device_meta=false', 'send_dummy_byte=true', 'clipboard_autosync=false', 'cleanup=false'],
-      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=0x08000000)
+      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=0x08000000)
     for i in range(50):
       try:
         s = socket.create_connection(('127.0.0.1', PORT), timeout=1)

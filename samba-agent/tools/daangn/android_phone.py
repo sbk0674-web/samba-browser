@@ -12,11 +12,17 @@ import re
 import subprocess
 import time
 import xml.etree.ElementTree as ET
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from tools.daangn.order_record import match_owned_order, read_pickup_date
-from tools.daangn.pickup_dates import choose_pickup_date
+from tools.daangn.pickup_dates import (
+    MissingDateBounds,
+    calendar_dates,
+    choose_pickup_date,
+    detect_radio_rows,
+    map_radio_rows,
+)
 
 
 class AndroidPhone:
@@ -148,7 +154,7 @@ class AndroidPhone:
 
     def source_for(self, candidate, sale_price: int) -> dict:
         found = []
-        for path in glob.iglob(str(self.attachments / 'musinsa-*' / 'listing.json')):
+        for path in glob.iglob(str(self.attachments / '*' / 'listing.json')):
             try:
                 with open(path, encoding='utf8') as f:
                     item = json.load(f)
@@ -157,17 +163,44 @@ class AndroidPhone:
                     found.append(item)
             except (OSError, ValueError, TypeError):
                 continue
-        if found and any(x.get('price') != sale_price or not x.get('source_url') for x in found):
+        if found and any(x.get('price') != sale_price or (
+                not x.get('source_url') and x.get('source_site') != '보유재고') for x in found):
             raise ValueError('원본 상품 가격 또는 링크 확인 필요')
+        owned = [x for x in found if x.get('source_site') == '보유재고' and not x.get('source_url')]
+        if owned:
+            if len(owned) != len(found):
+                raise ValueError('소싱과 보유재고 근거가 충돌합니다')
+            return {'source_site': '보유재고', 'source_verified': True}
         urls = {x.get('source_url') for x in found if x.get('source_url')}
         if len(urls) > 1:
             raise ValueError('원본 상품이 여러 개입니다')
         return {'source_url': next(iter(urls))} if urls else {}
 
-    def progress(self, account: str, title: str, price: int, today: date) -> dict | None:
+    def progress(self, account: str, title: str, price: int, today: date,
+                 payment_event_at: datetime | None = None) -> dict | None:
         xml, root = self._screen()
         texts = [n.get('text', '').strip() for n in root.iter('node')]
         desc = [n.get('content-desc', '').strip() for n in root.iter('node')]
+        if '날짜 선택하기' in texts + desc and '수거 번호' not in texts:
+            if (texts.count(title) != 1 or f'{price:,}원' not in texts
+                    or any(re.search(r'판매\s*취소\s*완료|거래\s*취소\s*완료|환불\s*완료', t)
+                           for t in texts)):
+                raise ValueError('예약 전 채팅카드 상품 또는 취소 상태 확인 실패')
+            paid_date = None
+            if isinstance(payment_event_at, datetime) and payment_event_at.utcoffset() is not None:
+                paid_date = payment_event_at.astimezone(timezone(timedelta(hours=9))).date()
+            else:
+                paid = [t for t in texts if re.fullmatch(r'결제완료\s*\d{1,2}월\s*\d{1,2}일\s*결제완료', t)]
+                if len(paid) == 1:
+                    match = re.search(r'(\d{1,2})월\s*(\d{1,2})일', paid[0])
+                    month, day = map(int, match.groups())
+                    paid_date = date(today.year, month, day)
+                    if paid_date > today:
+                        paid_date = date(today.year - 1, month, day)
+            if paid_date is None or paid_date > today:
+                raise ValueError('예약 전 채팅카드 결제일 확인 필요')
+            return {'awaiting_pickup': True, 'payment_confirmed': True, 'sales_account': account,
+                    'product_name': title, 'sale_price': price, 'paid_date': paid_date}
         if '바로구매 진행 현황' not in texts:
             if '진행 현황 보기' in texts or '진행 현황 보기' in desc:
                 self._tap_unique(root, '진행 현황 보기')
@@ -200,6 +233,60 @@ class AndroidPhone:
         out['paid_date'] = paid
         return out
 
+    def _visual_pickup_date(self, xml: str, *, is_musinsa: bool, today: date) -> date:
+        dates = calendar_dates(xml, today=today)
+        target = len(dates) - 1 if is_musinsa else 0
+        chosen = dates[target][0]
+        if is_musinsa and chosen <= today + timedelta(days=1):
+            raise ValueError('무신사 수거 최후일 확인 필요 — 오늘/내일은 예약하지 않습니다')
+        known, previous = None, None
+        for _attempt in range(6):
+            image = self._run('exec-out', 'screencap', '-p')
+            if image == previous:
+                raise ValueError('수거일 스크롤 이동 확인 실패')
+            rows, known = map_radio_rows(detect_radio_rows(image), len(dates), known)
+            row = next((r for r in rows if r['index'] == target), None)
+            if row is not None:
+                # 원의 실제 경계 중앙을 누른다. XML의 0 좌표나 기기 비율을 쓰지 않는다.
+                x1, y1, x2, y2 = row['bounds']
+                self._tap_bounds(f'[{x1},{y1}][{x2},{y2}]')
+                selected, _ = map_radio_rows(
+                    detect_radio_rows(self._run('exec-out', 'screencap', '-p')), len(dates), known)
+                if [r['index'] for r in selected if r['selected']] != [target]:
+                    raise ValueError('수거 최후일 실제 선택 표시 확인 실패')
+                return chosen
+            if target < rows[0]['index']:
+                raise ValueError('수거일 첫 화면 위치 확인 필요')
+            # 실제 보이는 카드들의 공통 내부에서 위로 스크롤한다(고정 좌표 없음).
+            left, right = max(r['card'][0] for r in rows), min(r['card'][2] for r in rows)
+            x = (left + right) // 2
+            start = (rows[-1]['bounds'][1] + rows[-1]['bounds'][3]) // 2
+            end = (rows[0]['bounds'][1] + rows[0]['bounds'][3]) // 2
+            if right <= left or start <= end:
+                raise ValueError('수거일 스크롤 영역 확인 실패')
+            self._run('shell', 'input', 'swipe', str(x), str(start), str(x), str(end), '500')
+            time.sleep(0.7)
+            after, _root = self._screen()
+            if calendar_dates(after, today=today) != dates:
+                raise ValueError('스크롤 후 수거일 목록 불일치')
+            previous = image
+        raise ValueError('수거 최후일 스크롤 확인 필요')
+
+    def _visual_pickup_location(self):
+        rows = detect_radio_rows(self._run('exec-out', 'screencap', '-p'))
+        if len(rows) != 3:
+            raise ValueError('수거 장소 시각 행 확인 필요')
+        # 호출부에서 XML의 문 앞/경비실/직접 입력 순서를 먼저 검증한다.
+        if [i for i, r in enumerate(rows) if r['selected']] == [0]:
+            return
+        x1, y1, x2, y2 = rows[0]['bounds']
+        self._tap_bounds(f'[{x1},{y1}][{x2},{y2}]')
+        selected = detect_radio_rows(self._run('exec-out', 'screencap', '-p'))
+        if (len(selected) != 3
+                or [r['fingerprint'] for r in rows] != [r['fingerprint'] for r in selected]
+                or [i for i, r in enumerate(selected) if r['selected']] != [0]):
+            raise ValueError('문 앞 실제 선택 표시 확인 실패')
+
     def reserve_pickup(self, *, is_musinsa: bool, today: date, location: str) -> date:
         if location != '문 앞' or self.journal is None or not self.room_id:
             raise ValueError('수거 장소 또는 중복 방지 기록 확인 필요')
@@ -211,11 +298,15 @@ class AndroidPhone:
             _xml, root = self._screen()
         self._tap_unique(root, '날짜 선택하기')
         xml, root = self._screen()
-        chosen, bounds = choose_pickup_date(xml, today=today, is_musinsa=is_musinsa)
-        xy = [int(x) for x in re.findall(r'\d+', bounds)]
-        self._tap_bounds(bounds)
-        if not self._selected_ring((xy[1] + xy[3]) // 2):
-            raise ValueError('수거일 선택 확인 실패')
+        try:
+            chosen, bounds = choose_pickup_date(xml, today=today, is_musinsa=is_musinsa)
+        except MissingDateBounds:
+            chosen = self._visual_pickup_date(xml, today=today, is_musinsa=is_musinsa)
+        else:
+            xy = [int(x) for x in re.findall(r'\d+', bounds)]
+            self._tap_bounds(bounds)
+            if not self._selected_ring((xy[1] + xy[3]) // 2):
+                raise ValueError('수거일 선택 확인 실패')
         _xml, root = self._screen()
         self._tap_unique(root, '다음')
         _xml, root = self._screen()
@@ -232,15 +323,14 @@ class AndroidPhone:
         valid = [[int(x) for x in re.findall(r'\d+', n.get('bounds', ''))] for n in doors]
         valid = [b for b in valid if len(b) == 4 and b[2] > b[0] and b[3] > b[1]]
         if not valid:
-            raise ValueError('문 앞 위치 확인 실패')
-        xy = min(valid, key=lambda b: (b[2]-b[0])*(b[3]-b[1]))
-        if len(xy) != 4 or xy[2] <= xy[0] or xy[3] <= xy[1]:
-            raise ValueError('문 앞 위치 확인 실패')
-        y = (xy[1] + xy[3]) // 2
-        self._tap_unique(root, '문 앞')
-        time.sleep(1)
-        if not self._selected_ring(y):
-            raise ValueError('문 앞 선택 확인 실패')
+            self._visual_pickup_location()
+        else:
+            xy = min(valid, key=lambda b: (b[2]-b[0])*(b[3]-b[1]))
+            y = (xy[1] + xy[3]) // 2
+            self._tap_unique(root, '문 앞')
+            time.sleep(1)
+            if not self._selected_ring(y):
+                raise ValueError('문 앞 선택 확인 실패')
         _xml, root = self._screen()
         if not self.journal.begin(self.owner, self.room_id):
             raise ValueError('이미 시도한 수거 예약입니다. 진행 현황 확인 필요')

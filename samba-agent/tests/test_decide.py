@@ -176,6 +176,22 @@ def test_auth_error_falls_back_to_next_account_token(monkeypatch):
     assert result.choice == "ok"
 
 
+def test_auth_error_drains_stream_before_fallback(monkeypatch):
+    monkeypatch.setenv('SAMBA_CLAUDE_OAUTH_TOKENS', 'tok-a, tok-b')
+    drained = []
+
+    async def _query(*, prompt: str, options):
+        token = options.env.get('CLAUDE_CODE_OAUTH_TOKEN')
+        if token == 'tok-a':
+            yield _auth_error_result()
+            drained.append(token)
+            return
+        assert drained == ['tok-a']
+        yield assistant_text('{"choice":"ok","reason":"r"}')
+
+    assert make_decide(query_fn=_query)('p', Decision).choice == 'ok'
+
+
 def test_auth_error_on_every_account_raises_value_error(monkeypatch):
     monkeypatch.delenv('SAMBA_CLAUDE_OAUTH_TOKENS', raising=False)
 

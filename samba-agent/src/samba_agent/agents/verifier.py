@@ -1,9 +1,12 @@
 """검증 에이전트 — 소싱처 주문 상세 · SAMBA 행 · 감독자 기대값 셋을 대조한다."""
 
 import json
+import re
 
 from samba_agent.agents.base import AgentBase, AgentFailure, Decision, run_agent
+from samba_agent.agents.buyer import _norm_address
 from samba_agent.agents.contracts import AgentResult, Assignment
+from samba_agent.agents.order_identity import paid_option_matches
 from samba_agent.agents.source_detail import (
     actual_cost,
     detail_args,
@@ -18,6 +21,46 @@ from samba_agent.ops.masking import mask_value
 from samba_agent.wave.client import WaveClient, WaveError, wave_fields
 
 SAMBA_READ_SCRIPT = 'samba_read_order'
+
+_PROVINCE_SHORT_NAMES = {
+    '경기도': '경기', '강원도': '강원',
+    '경상북도': '경북', '경상남도': '경남',
+    '충청북도': '충북', '충청남도': '충남',
+    '전라북도': '전북', '전라남도': '전남',
+}
+_PROVINCE_WORD = re.compile(
+    r'(?<![가-힣A-Za-z])(' + '|'.join(_PROVINCE_SHORT_NAMES) + r')(?=\s+[가-힣])'
+)
+
+
+def _identity_address_key(value: object) -> str:
+    # Preserve separate numeric components when a site gives one combined address.
+    # Removing all spaces turns "47 401동" into "47401동" and breaks digit boundaries.
+    raw = re.sub(r'\([^)]*\)', ' ', str(value or ''))
+    # A province's full name and abbreviation describe the same visible address.
+    # Match complete province words; room, road and city checks remain unchanged.
+    raw = _PROVINCE_WORD.sub(lambda m: _PROVINCE_SHORT_NAMES[m[1]], raw)
+    return _norm_address(re.sub(r'(?<=\d)[,\s]+(?=\d)', '|', raw))
+
+
+OFFICE_ROOMS = ('101호', '102호')
+
+
+def _address_contains(actual: str, value: str) -> bool:
+    # Digit boundaries protect 703 from matching 1703; a complete word ending in
+    # 호/층 may legitimately be followed by another visible numeric field.
+    left = r'(?<!\d)' if value[:1].isdigit() else ''
+    right = r'(?!\d)' if value[-1:].isdigit() else ''
+    return bool(re.search(left + re.escape(value) + right, actual))
+
+
+def _detail_found(actual: str, value: str, kind: str) -> bool:
+    """상세주소가 보이는가. 사무실은 101호·102호가 같은 곳이다(사용자 2026-11-03) — 까대기 배송만 서로 인정한다."""
+    if _address_contains(actual, value):
+        return True
+    if kind != 'kkadaegi' or not value.endswith(OFFICE_ROOMS):
+        return False
+    return any(_address_contains(actual, room) for room in OFFICE_ROOMS)
 
 
 def _same(field: str, got: object, want: object) -> bool:
@@ -34,9 +77,76 @@ class VerifierAgent(AgentBase):
     # 삼바웨이브 내부 API 클라이언트. factory 가 꽂는다(없으면 앱 저장 스크립트로 읽는다)
     _wave: 'WaveClient | None' = None
 
+    def _identity_check(self, a: Assignment, source: dict[str, object]) -> tuple[list[str], list[str]]:
+        """Read actual option and shipping independently; never emit personal values."""
+        mismatch, missing = [], []
+        actual = source.get('selected') or source.get('option')
+        if not a.order.option or not actual:
+            missing.append('option')
+        elif not paid_option_matches(a.order.option, actual):
+            mismatch.append('option')
+        qty = source.get('qty')
+        if qty is None:
+            missing.append('qty')
+        elif str(qty) != str(a.order.qty):
+            mismatch.append('qty')
+        kind = str(a.handoff.get('order_type') or a.order.order_type)
+        if self._wave is None or kind not in ('direct', 'kkadaegi', 'gift'):
+            missing.append('shipping')
+            return mismatch, missing
+        order = self._wave.get_order(a.order.wave_key, order_type=kind)
+        expected = order.shipping.to_script_args()
+        if order.order_type != kind or not all(expected.get(k) for k in ('name', 'address')):
+            missing.append('shipping')
+            return mismatch, missing
+        applied = source.get('shipping')
+        if isinstance(applied, dict) and all(applied.get(k) for k in ('name', 'address')):
+            actual_full = '|'.join(_identity_address_key(applied.get(k)) for k in ('address', 'address_detail'))
+            if str(expected['name']).replace(' ', '') != str(applied['name']).replace(' ', ''):
+                if '*' in str(applied['name']):
+                    missing.append('recipient')
+                else:
+                    mismatch.append('recipient')
+            for key in ('address', 'address_detail'):
+                value = _identity_address_key(expected.get(key))
+                if value and not _detail_found(actual_full, value, kind):
+                    mismatch.append(key)
+        else:
+            # Some sites mask recipient names. Address text alone cannot prove the recipient.
+            raw = str(source.get('shipping_text') or '')
+            flat = _identity_address_key(raw)
+            for key in ('name', 'address', 'address_detail'):
+                value = str(expected.get(key) or '')
+                if not value:
+                    continue
+                if key == 'name':
+                    if not re.search(r'(?<![가-힣A-Za-z])' + re.escape(value) + r'(?![가-힣A-Za-z])', raw):
+                        missing.append('recipient')
+                elif not _detail_found(flat, _identity_address_key(value), kind):
+                    missing.append(key)
+        return mismatch, missing
+
     def set_wave(self, wave: 'WaveClient | None') -> None:
         """삼바웨이브 클라이언트를 꽂는다. 배선은 factory 가 한다."""
         self._wave = wave
+
+    def _detail_validator(self, a: Assignment, want_no: object):
+        """Missing identity must invoke repair; real mismatches remain evidence, not repair targets."""
+        financial = detail_check(want_no)
+
+        def check(source: dict[str, object]) -> str | None:
+            problem = financial(source)
+            if problem:
+                return problem
+            mismatch, missing = self._identity_check(a, source)
+            if mismatch:
+                return None  # Preserve the actual mismatch for the verifier's hard stop.
+            if missing:
+                return ('실제 소싱 주문 상세에서 읽지 못한 항목: ' + ', '.join(missing)
+                        + ' — 화면에서 읽어라. 주문 원본 값을 결과에 복사하거나 주문을 변경하지 마라.')
+            return None
+
+        return check
 
     def _read_samba(self, a: Assignment) -> tuple[dict[str, object], tuple[str, ...]]:
         """SAMBA 쪽 값과 '대조할 수 없는 기대값 키'. API 가 있으면 API, 없으면 앱 스크립트.
@@ -96,7 +206,7 @@ class VerifierAgent(AgentBase):
                 detail_script(site_of(a)),
                 detail_args(a, want_no),
                 goal=detail_goal(str(a.handoff.get('buy_source') or a.order.source)),
-                check=detail_check(want_no),
+                check=self._detail_validator(a, want_no),
             )
         except AgentFailure as e:
             if 'no saved script' not in e.reason:
@@ -172,6 +282,20 @@ class VerifierAgent(AgentBase):
                 reason='삼바웨이브에서 대조할 수 있는 값이 없다 — 사람이 확인해야 한다',
                 fail_reason=FailReason.VERIFY_MISMATCH,
                 payload={'mismatches': [], 'unverified': list(unverified)},
+                evidence=tuple(self.evidence),
+            )
+        try:
+            identity_mismatch, identity_missing = self._identity_check(a, source)
+        except WaveError:
+            identity_mismatch, identity_missing = [], ['shipping']
+        if identity_mismatch or identity_missing:
+            self.note('주문 후 필수 대조', f'불일치 필드: {identity_mismatch}; 미확인 필드: {identity_missing}')
+            return AgentResult(
+                status='fail' if identity_mismatch else 'needs_ai',
+                reason=f'주문 후 주소·옵션·수량 검증 미통과: 불일치 {identity_mismatch}, 미확인 {identity_missing}',
+                fail_reason=FailReason.VERIFY_MISMATCH,
+                payload={'mismatches': [{'field': f} for f in identity_mismatch],
+                         'unverified': list(unverified), 'identity_unverified': identity_missing},
                 evidence=tuple(self.evidence),
             )
         return AgentResult(

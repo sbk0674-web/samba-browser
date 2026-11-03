@@ -318,6 +318,7 @@ class RecorderAgent(AgentBase):
         quoted_reward = a.handoff.get('reward')
         if (
             not detail.get('reward')
+            and '네이버' not in f'{detail.get("card") or ""} {a.handoff.get("card") or ""}'
             and isinstance(quoted_reward, int | float)
             and not isinstance(quoted_reward, bool)
             and quoted_reward > 0
@@ -327,6 +328,11 @@ class RecorderAgent(AgentBase):
             detail = {**detail, 'reward': float(quoted_reward)}
         # 애드픽·샵백 적립은 원가에 넣지 않는다(사용자 2026-09-27) — 주문 상세·견적의 사이트 적립만 쓴다
         detail = with_pay_card(detail, a.handoff)
+        naver = '네이버' in f'{detail.get("card") or ""} {a.handoff.get("card") or ""}'
+        if site_of(a).upper() == 'LOTTEON' and naver and detail.get('reward_verified') is not True:
+            raise AgentFailure('needs_ai', '롯데온 실제 적립 미확인 — 0원으로 추정하지 않고 원가 확정 보류, 재결제 금지', FailReason.VERIFY_MISMATCH)
+        if naver and not detail.get('payment_verified'):
+            raise AgentFailure('needs_ai', '네이버 실제 결제수단·적립 미확인 — 원가 확정 보류, 재결제 금지', FailReason.VERIFY_MISMATCH)
         cost = actual_cost(detail)
         if cost is None:
             self.note('실제 원가', '결제액을 못 읽어 견적 원가로 기록')

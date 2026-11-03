@@ -155,11 +155,13 @@ class ScriptRepairer:
         max_turns: int = DEFAULT_MAX_TURNS,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         query_fn: Any = None,
+        api_provider: str | None = None,
     ) -> None:
         self.model = model
         self.max_turns = max_turns
         self.timeout_s = timeout_s
         self._query_fn = query_fn
+        self.api_provider = api_provider
 
     def repair(
         self,
@@ -278,6 +280,16 @@ class ScriptRepairer:
             state.genuine = str(inp.get('reason', '')).strip()[:300] or '불가(근거 없음)'
             return text('기록했다. 끝내라.')
 
+        if self.api_provider:
+            from samba_agent.repair.api import run_api_loop
+
+            await run_api_loop(
+                self.api_provider, self.model, prompt, SYSTEM_PROMPT,
+                [run_js, test_script, report_genuine], self.max_turns,
+                lambda: state.passed_code is not None or state.genuine is not None,
+            )
+            return
+
         server = create_sdk_mcp_server(
             name='repair', version='1.0.0', tools=[run_js, test_script, report_genuine]
         )
@@ -343,7 +355,8 @@ SYSTEM_PROMPT = """너는 SAMBA 브라우저의 저장 스크립트 수리공이
    report_genuine 을 부른다. 추측으로 부르지 마라 — 옵션 표기 차이·드롭다운을 안 연 것·다른 탭을 읽은 것은 스크립트 문제다.
 금지: 결제하기·입력완료 같은 결제 확정 버튼, 결제창, 비밀번호, 삭제·취소 버튼. 주문서까지만 다룬다.
 옵션 매칭 요령: 주문 옵션 문자열(예: '상아색 S', 'EU 그린 EU 44 · KR 285')은 사이트 표기와 다를 수 있다 —
-색상·사이즈를 나눠 각각 가장 가까운 선택지를 고르고, 선택 후 화면에 담긴 옵션을 되읽어 돌려준다."""
+색상·사이즈를 나눠 정확히 일치하는 선택지만 고른다. 비슷한 색상 대체는 금지한다.
+선택 후 화면에 담긴 실제 옵션을 되읽어 돌려준다. 주문 원본의 값을 실제 결과로 복사하지 않는다."""
 
 
 def _run_sync(coro: Any) -> Any:

@@ -3,6 +3,7 @@
 // 항목 = 라디오를 품은 가장 안쪽 li/tr/dl/div(이름·주소는 요소 줄이 아니라 본문 글자라 항목 범위로 읽는다). 같은 항목이 여럿이면 개수를 note 에 남긴다.
 // 인자 {name, address, address_detail?, profile?, tab?}  반환 {ok, name, address, note, dup}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
+const recipientName = nz(nz(args.name).replace(/\*/g, 'ㅇ').replace(/[^\p{L}\p{M}\p{N} ]/gu, ''))
 const OF = /pay\.ssg\.com\/(order|payment)|ssg\.com\/order\//
 const lines = t => String(t || '').split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d+\]/.test(l))
 const txt = t => nz(String(t || '').split('PAGE TEXT:')[1])
@@ -20,7 +21,7 @@ const hos = s => (String(s || '').match(/(\d+)\s*호/g) || []).map(x => x.replac
 const wantHo = hos(args.address_detail).pop()
 const inc = (a, b) => { for (let i = a.indexOf(b); i >= 0; i = a.indexOf(b, i + 1)) if (!/[\d-]/.test(a[i + b.length] || '')) return true; return false }
 const cnt = (a, b) => b ? a.split(b).length - 1 : 0
-const same = t => { const x = na(t); if (!x.includes(na(args.name)) || !inc(x, road)) return false; if (wantHo && !hos(t).includes(wantHo)) return false; return true }
+const same = t => { const x = na(t); if (!x.includes(na(recipientName)) || !inc(x, road)) return false; if (wantHo && !hos(t).includes(wantHo)) return false; return true }
 const W = /(배송지|기본|선택|수정|삭제|변경|추가|받는|분|주소|휴대폰|연락처|자택|회사|최근)/g
 const shape = s => { const k = []; s = nz(s).replace(W, m => { k.push(m); return '\u0001' }).replace(/[가-힣]/g, '가').replace(/[A-Za-z]/g, 'a').replace(/\d/g, '9'); let j = 0; return s.replace(/\u0001/g, () => k[j++]).slice(0, 70) }
 // 목록 팝업에서 항목 읽기 → [{text, pick}]
@@ -54,10 +55,10 @@ async function items() {
   return out.length ? { T: 'tree', out } : { T: '-', out: [] }
 }
 const R = { ok: false, name: null, address: null, note: null, dup: 0 }
-if (!nz(args.name) || !addr) return { ...R, note: 'name·address 필요' }
+if (!recipientName || !addr) return { ...R, note: 'name·address 필요' }
 const readBack = async () => {
   const t = na(txt(await get({})))
-  const n = na(args.name)
+  const n = na(recipientName)
   for (let i = t.indexOf(n); i >= 0; i = t.indexOf(n, i + 1)) { const w = t.slice(Math.max(0, i - 200), i + 300); if (inc(w, road)) return true }
   return false
 }
@@ -65,7 +66,7 @@ const ofs = (await tabs.list()).filter(t => t.kind === 'tab' && OF.test(t.url ||
 const tab = args.tab ? ofs.find(t => t.id === String(args.tab)) : ofs.length === 1 ? ofs[0] : null
 if (!tab) return { ...R, note: ofs.length ? '주문서 ' + ofs.length + '개 — args.tab 필요' : '주문서 없음' }
 await tabs.switch(tab.id)
-if (await readBack()) return { ...R, ok: true, name: nz(args.name), address: nz(args.address), note: 'already selected' }
+if (await readBack()) return { ...R, ok: true, name: recipientName, address: nz(args.address), note: 'already selected' }
 let b = -1
 const bl = lines(await get({ selector: '[id^="btnChangeShpploc"], [name="btnChangeShpploc"]', interactive: true }))
 if (bl.length) b = idOf(bl[0])
@@ -99,4 +100,4 @@ for (let i = 0; i < 15 && (await tabs.list()).some(t => t.id === lp.id); i++) aw
 await tabs.switch(tab.id)
 let ok = false
 for (let i = 0; i < 10 && !ok; i++) { await sleep(400); ok = await readBack() }
-return { ...R, ok, name: ok ? nz(args.name) : null, address: ok ? nz(args.address) : null, note: (ok ? 'applied' : '선택 후 주문서 되읽기 불일치') + (hits.length > 1 ? ` (같은 배송지 ${hits.length}개 중복)` : '') }
+return { ...R, ok, name: ok ? recipientName : null, address: ok ? nz(args.address) : null, note: (ok ? 'applied' : '선택 후 주문서 되읽기 불일치') + (hits.length > 1 ? ` (같은 배송지 ${hits.length}개 중복)` : '') }

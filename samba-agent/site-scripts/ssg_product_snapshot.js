@@ -1,128 +1,21 @@
-const nz=s=>String(s||'').replace(/\s+/g,' ').trim()
-const num=s=>parseInt(String(s||'').replace(/[^\d]/g,''),10)||0
-const pf=args.profile?{profile:args.profile}:{}
-const acct=args.account||args.profile||'me'
-const AD=args.allow_department===true
-const R={options:[],selected:null,cost:null,pay_amount:null,methods:[],coupons:{},product_url:null,product_name:null,product_no:null,order_tab:null,route:args.route||'direct',ckwhere:null,account:args.account||null,note:null}
-const tree=async o=>{for(let i=0;i<4;i++){try{const g=await page.get(o||{});if(g&&g.tree)return g.tree}catch(e){}await sleep(500)}return ''}
-const text=async()=>nz((await tree()).split('PAGE TEXT:')[1])
-const els=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\] (\S+)(?: "([^"]*)")?(.*)$/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',rest:m[4]}))
-const want=nz(String(args.size||'').replace(/^\s*(옵션|사이즈|size)\s*[:：]\s*/i,''))
-const nm=s=>nz(s).toLowerCase().replace(/[\s()·\-/,:]/g,'')
-const score=o=>{
-if(!want)return 0
-if(nm(o)===nm(want))return 100
-const toks=want.split(/[\s/·,]+/).filter(Boolean)
-if(toks.some(k=>nm(k)===nm(o)))return 90
-const on=o.match(/(?<![\d.])\d{2,3}(?:\.5)?(?![\d.])/g)||[]
-if(on.length&&toks.some(k=>on.includes(k)))return 70
-if(toks.some(k=>k.length>1&&nm(o).includes(nm(k))))return 50
-return 0
-}
-const PI=/pay\.ssg\.com\/item\/itemView/
-const fixHost=u=>PI.test(u)?u.replace('pay.ssg.com',/siteNo=6004(?!\d)/.test(u)?'shinsegaemall.ssg.com':/siteNo=6009(?!\d)/.test(u)?'department.ssg.com':'www.ssg.com'):u
-const url0=fixHost(args.entry_url||args.sku)
-if(!/^https:\/\//.test(String(url0||'')))return{...R,error:'bad-sku'}
-const RDY=/바로구매|품절|입고알림|원하셨던 페이지/
-const op=async u=>(String(await tabs.open({...pf,url:u})).match(/tab (\S+)/)||[])[1]
-let tabId=await op(url0)
-const E=o=>({...R,...o,product_tab:tabId})
-const z=()=>{R.coupons[acct]=0}
-if(tabId)await tabs.switch(tabId)
-try{await page.waitFor(RDY,25000)}catch(e){}
-const cu=await page.url()
-if(PI.test(cu)||/원하셨던 페이지가 아닌가요/.test(await text())){
-const old=tabId
-tabId=await op(fixHost(PI.test(cu)?cu:args.sku))
-if(tabId)await tabs.switch(tabId)
-try{await tabs.close(old)}catch(e){}
-try{await page.waitFor(RDY,25000)}catch(e){}
-}
-R.product_url=await page.url()
-R.product_no=(R.product_url.match(/itemId=(\d+)/)||[])[1]||null
-R.ckwhere=(R.product_url.match(/[?&]ckwhere=([^&]+)/)||[])[1]||null
-const mallOk=u=>/shinsegaemall\.ssg\.com|siteNo=6004(?!\d)/.test(u)||(AD&&/department\.ssg\.com|siteNo=6009(?!\d)/.test(u))
-let t=await text()
-R.mall_ok=mallOk(R.product_url)||(!/siteNo=/.test(R.product_url)&&(/판매자스토어 신세계몰/.test(t)||(AD&&/판매자스토어 신세계 ?백화점/.test(t))))
-if(!R.mall_ok&&AD&&!/siteNo=/.test(R.product_url)&&/브랜드 매장\s*:/.test(t)){const o2=tabId;tabId=await op(R.product_url+(R.product_url.includes('?')?'&':'?')+'siteNo=6009');if(tabId)await tabs.switch(tabId);try{await tabs.close(o2)}catch(e){}try{await page.waitFor(RDY,25000)}catch(e){}R.product_url=await page.url();t=await text();R.mall_ok=mallOk(R.product_url)}
-R.product_name=nz(String(await page.title()).replace(/\s*-\s*(SSG\.COM|신세계백화점|신세계몰|이마트몰)\s*$/,''))||null
-if(/접속이 잠시 제한|자동화된 환경/.test(t))return{...R,error:'blocked',note:'SSG 봇 차단'}
-if(/member\.ssg\.com/.test(R.product_url))return{...R,error:'login_required'}
-if(!R.mall_ok){z();return E({error:'not_shinsegaemall'})}
-if(args.coupon!==false){const cb=await page.idOf('쿠폰받기',0);if(cb>=0){await page.click(cb);await sleep(1200)}}
-if((await page.idOf('바로구매',0))<0&&((await page.idOf('입고알림',0))>=0||(await page.idOf('품절',0))>=0)){
-z()
-return E({sold_out:true,options:[],note:'item sold out'})
-}
-const picked=[]
-for(let step=0;step<3;step++){
-const before=new Set(els(await tree({interactive:true})).map(e=>e.id))
-const oc=els(await tree({query:'선택하세요'})).filter(e=>e.role==='link'&&/선택하세요\.?$/.test(e.text)&&!picked.includes(e.text))
-const opener=(oc.find(e=>e.text!=='선택하세요.')||oc[0]||{id:-1}).id
-if(opener<0)break
-await page.click(opener)
-await sleep(700)
-const after=els(await tree({interactive:true}))
-const live=after.filter(e=>!before.has(e.id)&&e.role==='link'&&/href=#/.test(e.rest)&&e.text&&e.text.length<=40&&!/배너|이전|다음|닫기|선택하세요|매진|품절|Q&A|추천 상품|교환\/반품|상품상세정보|고객리뷰|바로구매|장바구니|선물하기/.test(e.text))
-R.options=[...R.options,...live.map(e=>e.text)]
-if(!live.length){R.note='no live option';break}
-let best=null,top=0
-for(const o of live){const s=score(o.text);if(s>top){top=s;best=o}}
-const COLOR=/black|white|red|blue|navy|gr[ae]y|green|beige|pink|블랙|화이트|레드|블루|네이비|그레이|그린|베이지|핑크/i
-if(!best&&live.length===1&&(/^(free|f|one ?size|os|프리)$/i.test(live[0].text)||!COLOR.test(want)||COLOR.test(live[0].text)&&COLOR.test(want)))best=live[0]
-if(!best&&picked.length&&want&&picked.some(p=>score(p)>0)){best=live[0];R.note='step2 defaulted'}
-if(!best){R.note=want?'size not available':'option needs choice';z();return E({})}
-await page.click(best.id)
-picked.push(best.text)
-await sleep(800)
-}
-t=await text()
-const sec=t.slice(0,t.indexOf('바로구매')>0?t.indexOf('바로구매'):t.length)
-const chosen=[...sec.matchAll(/(색상|사이즈|옵션|용량|타입)\s*:\s*([^/]+?)(?=\s*\/|\s*삭제|\s*빼기)/g)].map(m=>nz(m[2]))
-if(!picked.length&&chosen.length)R.options=chosen
-if(!chosen.length&&!picked.length&&/선택하세요\./.test(sec)){z();return E({note:'option not chosen'})}
-R.selected=chosen.join(' / ')||picked.join(' / ')||null
-const beforeTabs=new Set((await tabs.list()).map(x=>x.id))
-let buy=await page.idOf('바로구매',0)
-for(let i=0;i<10&&buy<0;i++){await sleep(1000);buy=await page.idOf('바로구매',0)}
-if(buy<0)return E({error:'buy-button-not-found'})
-await page.click(buy)
-let form=null,cont=false,retried=false
-for(let i=0;i<40&&!form;i++){
-await sleep(500)
-const list=await tabs.list()
-const login=list.find(x=>(!beforeTabs.has(x.id)||x.openerId===tabId)&&/member\.ssg\.com/.test(x.url||''))
-if(login){for(const x of list)if(x.kind==='popup'&&/member\.ssg\.com/.test(x.url||'')){try{await tabs.close(x.id)}catch(e){}}z();return E({error:'login_required'})}
-const mine=x=>x.id===tabId||!beforeTabs.has(x.id)
-form=list.find(x=>mine(x)&&/pay\.ssg\.com\/(order|payment)\//.test(x.url||''))
-const mid=!form&&!cont&&list.find(x=>mine(x)&&/pay\.ssg\.com\/nodcsnOrder\/ordShppInfo/.test(x.url||''))
-if(mid){
-await tabs.switch(mid.id)
-try{await page.waitFor('계속하기',6000)}catch(e){}
-const cb=await page.idOf('계속하기',0)
-if(cb>=0){await page.click(cb);cont=true}
-}
-if(!form&&!mid&&!cont&&!retried&&i===5){
-retried=true
-const ch=els(await tree({interactive:true})).find(e=>e.text==='바로구매'&&e.role==='clickable')
-if(ch)await page.click(ch.id)
-}
-}
-if(!form)return E({error:'no_checkout'})
-await tabs.switch(form.id)
-R.order_tab=form.id
-try{await page.waitFor(/결제\s*(수단|예정)/,12000)}catch(e){}
-t=await text()
-const total=num((t.match(/(최종\s*결제\s*금액|총\s*결제\s*금액|결제\s*예정\s*금액)\s*([\d,]{3,})\s*원/)||[])[2])
-R.pay_amount=total||null
-R.cost=total||null
-R.adpick_rate=R.route==='adpick'?(parseFloat(args.adpick_percent)||0):0
-R.adpick_reward=Math.round((total||0)*R.adpick_rate/100)
-R.methods=['SSGPAY','SSG MONEY','신용카드','페이코','카카오페이','네이버페이','토스페이'].filter(m=>t.toUpperCase().includes(m.toUpperCase()))
-const cp=t.match(/쿠폰\s*(?:할인|사용)?\s*-?\s*([\d,]{3,})\s*원/)
-R.coupons[acct]=cp?num(cp[1]):0
-const oi=t.indexOf('주문상품 목록')
-const om=(oi>=0?t.slice(oi):'').match(/옵션\s*:\s*(.+?)\s*판매가격/)
-R.selected=om?nz(om[1]):(picked.join(' / ')||chosen.join(' / ')||null)
-if(!R.cost)R.note='no total'
-return R
+const nz=s=>String(s||'').replace(/\s+/g,' ').trim(),num=s=>+String(s||'').replace(/\D/g,'')||0;
+const R={options:[],selected:null,cost:null,pay_amount:null,methods:[],coupons:{},product_url:null,product_name:null,product_no:null,order_tab:null,route:args.route||'direct',ckwhere:null,account:args.account||null,note:null};
+const get=async o=>(await page.get(o||{})).tree||'',txt=async()=>nz((await get()).split('PAGE TEXT:')[1]),wf=async s=>{try{await page.waitFor(s,8000)}catch(e){}},els=t=>[...t.matchAll(/^\[(\d+)\] (\S+)(?: "([^"]*)")?/gm)].map(m=>({id:+m[1],role:m[2],s:m[3]||''}));
+const norm=s=>nz(s).toLowerCase().replace(/\b(ff|free|one ?size|os)\b|프리/g,'free').replace(/\b0+(\d+)/g,'$1').replace(/[\s()·\-/,：:]/g,'');
+const want=nz(args.size).replace(/^(옵션|사이즈|size)\s*[:：]\s*/i,''),tokens=want.split(/[\s/·,()]+/).filter(Boolean);
+const wsp=' '+nz(want).toLowerCase().replace(/[()·\/,：:]/g,' ').replace(/\s+/g,' ').replace(/\b0+(\d+)/g,'$1')+' ';
+const match=s=>{const n=nz(s).toLowerCase().replace(/[()·\/,：:]/g,' ').replace(/\s+/g,' ').replace(/\b0+(\d+)/g,'$1');return norm(s)===norm(want)||tokens.some(k=>norm(k)===norm(s))||(n.length>1&&wsp.includes(' '+n+' '))};
+let u=String(args.sku||'');if(/^\d+$/.test(u))u='https://www.ssg.com/item/itemView.ssg?itemId='+u;if(!/^https:\/\//.test(u))return {...R,error:'bad-sku'};u=u.replace('pay.ssg.com',/siteNo=6009/.test(u)?'department.ssg.com':/siteNo=6004/.test(u)?'shinsegaemall.ssg.com':'www.ssg.com');
+let tab=(await tabs.list()).find(x=>x.url===u&&(!args.profile||x.profile===args.profile))?.id;if(!tab)tab=(String(await tabs.open({url:u,profile:args.profile})).match(/tab (\S+)/)||[])[1];await tabs.switch(tab);await wf(/바로구매|구매하기|품절|입고알림/);
+R.product_url=await page.url();R.product_no=(u.match(/itemId=(\d+)/)||[])[1]||null;R.product_name=nz(await page.title()).replace(/\s*-\s*(SSG\.COM|신세계백화점|신세계몰|이마트몰)$/,'');R.mall_ok=/shinsegaemall\.ssg|siteNo=6004/.test(u)||args.allow_department===true&&/department\.ssg|siteNo=6009/.test(u);const acct=args.account||args.profile||'me';R.coupons[acct]=0;if(!R.mall_ok)return {...R,error:'not_shinsegaemall'};
+let t=await txt(),picked=[];const chosen=()=>[...t.matchAll(/(?:사이즈|색상|컬러|옵션)\s*:\s*(.+?)(?=\s*삭제|\s*\/)/g)].map(m=>nz(m[1]));
+for(let i=0;i<4;i++){t=await txt();if(chosen().length&&/총 금액\s*[1-9]/.test(t))break;const cs=els(await get({query:'선택하세요'})).filter(e=>/선택하세요\.?$/.test(e.s)&&/link|button|combobox/.test(e.role)).sort((a,b)=>(/(색상|컬러|사이즈|옵션|모델)/.test(b.s)?1:0)-(/(색상|컬러|사이즈|옵션|모델)/.test(a.s)?1:0));if(!cs.length)break;await page.click(cs[0].id);await wf(/남은수량|사이즈|색상|컬러|매진/);const es=els(await get({selector:'[class*=opt]'})).filter(e=>/link|button|option/.test(e.role)&&e.s&&e.s.length<80&&!/선택하세요|삭제|닫기|장바구니|바로구매|구매하기|안내|선물|쿠폰|가격|대량구매|입고알림/.test(e.s)&&!picked.includes(e.s));R.options=[...new Set([...R.options,...es.map(e=>e.s)])];let b=es.find(e=>match(e.s.replace(/\s*\((?:남은수량|품절|매진).*$/,'')));if(!b&&/모델|색상|컬러|옵션/.test(cs[0].s)&&! /사이즈/.test(cs[0].s)&&new Set(es.map(e=>e.s)).size===1&&tokens.some(k=>norm(R.product_name).includes(norm(k))))b=es[0];if(!b)return {...R,note:'option not chosen'};if(/품절|매진/.test(b.s))return {...R,sold_out:true};await page.click(b.id);picked.push(b.s);await wf('총 금액');await sleep(500);}
+t=await txt();R.options=[...new Set([...R.options,...chosen()])];if(/선택하세요/.test(t)&&!/총 금액\s*[1-9]/.test(t)||!picked.length&&!chosen().length&&/사이즈|색상 선택/.test(t.slice(0,1500)))return {...R,note:'option not chosen'};
+const findBuy=async()=>els(await get({query:'바로구매'})).filter(e=>/^(바로구매|구매하기)$/.test(e.s)&&/link|button/.test(e.role));
+const findForm=async()=>{const forms=(await tabs.list()).filter(x=>/pay\.ssg\.com\/order\//.test(x.url)&&(!args.profile||x.profile===args.profile));return forms.find(x=>x.id===tab)||forms[forms.length-1]};
+const loginTab=async()=>(await tabs.list()).find(x=>/member\.ssg\.com\/member\/(popup\/popupLogin|login)/.test(x.url)&&x.profile===args.profile&&/department|itemView|order/.test(decodeURIComponent(x.url)));
+let bs=await findBuy();if(!bs.length)bs=els(await get({query:'구매하기'})).filter(e=>/^(바로구매|구매하기)$/.test(e.s)&&/link|button/.test(e.role));if(!bs.length)return {...R,sold_out:/품절|입고알림/.test(t)};
+let form=null;
+await page.click(bs[0].id);for(let k=0;k<10&&!form;k++){await sleep(700);form=await findForm();if(!form&&await loginTab()){return {...R,error:'login_required',note:'프로필 '+(args.profile||'')+' 로그인 세션 없음 — 바로구매 시 로그인 팝업'}}}
+if(!form)return {...R,error:'no_checkout'};
+await tabs.switch(form.id);await wf('판매가격');R.order_tab=form.id;t=await txt();R.selected=nz((t.match(/주문상품 목록\s*(.+?)(?=판매가격|상품금액|수량)/)||[])[1])||nz((t.match(/옵션\s*:\s*(.+?)(?=\s*(?:판매가격|수량|배송)|$)/)||[])[1])||null;R.order_text=t.slice(t.indexOf('주문상품'),t.indexOf('주문상품')+300);R.cost=num((t.match(/판매가격\s*([\d,]+)\s*원/)||[])[1])||null;R.pay_amount=num((t.match(/(?:최종\s*결제\s*금액|총\s*결제\s*금액|결제\s*예정금액)\s*([\d,]+)\s*원/)||[])[1]);if(R.selected)R.options.push(R.selected);R.methods=['SSGPAY','SSG MONEY','신용카드','일반결제','페이코','카카오페이','네이버페이','토스페이'].filter(s=>t.includes(s));R.coupons[acct]=num((t.match(/쿠폰할인\s*-?\s*([\d,]+)원/)||[])[1]);R.adpick_rate=R.route==='adpick'?+args.adpick_percent||0:0;R.adpick_reward=Math.round(R.cost*R.adpick_rate/100);return R;

@@ -116,7 +116,7 @@ def test_스크립트_미작성_소싱처는_만들어두되_사람에게_넘긴
             dry_run=True,
         )
     )
-    assert result.status == 'needs_human'
+    assert result.status == 'needs_ai'
     assert result.reason == '스크립트 미작성: REXMONDE'
     # 스크립트가 다 있는 소싱처는 진짜 구매 에이전트다
     assert not isinstance(agents['buyer.musinsa'], ScriptsPendingBuyer)

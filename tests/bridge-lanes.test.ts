@@ -70,6 +70,35 @@ describe('브릿지 레인', () => {
 })
 
 describe('레인 탭 보기', () => {
+  it('작업 탭의 자식과 손자 탭을 추적하고 사용자 탭은 보존한다', () => {
+    const tabs = [
+      { id: 'root', openerId: undefined },
+      { id: 'child', openerId: 'root' },
+      { id: 'grandchild', openerId: 'child' },
+      { id: 'user', openerId: undefined }
+    ]
+    const real = {
+      list: () => tabs,
+      listTargets: () => tabs.map((t) => ({ ...t, kind: 'tab', title: '', url: '', active: false })),
+      get: (id: string) => tabs.find((t) => t.id === id) ?? null,
+      targetTab: (id: string) => tabs.find((t) => t.id === id) ?? null,
+      close: (id: string) => {
+        const index = tabs.findIndex((t) => t.id === id)
+        if (index >= 0) tabs.splice(index, 1)
+      }
+    } as unknown as TabManager
+    const state = newLaneState()
+    state.owned.add('root')
+    const lane = laneTabs(real, state)
+    expect(lane.list().map((t) => t.id)).toEqual(['root', 'child', 'grandchild'])
+    lane.focusTarget('child')
+    expect(lane.active()?.id).toBe('child')
+    lane.close('root')
+    expect(lane.list().map((t) => t.id)).toEqual(['child', 'grandchild'])
+    lane.close('user')
+    expect(real.get('user')).not.toBeNull()
+  })
+
   it('레인은 자기가 연 탭만 보고 작업 창도 따로 쥔다', () => {
     const tabs: Array<{ id: string; url: string }> = []
     let n = 0

@@ -6,7 +6,9 @@
 """
 
 import json
+import logging
 import re
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse, urlsplit
 
@@ -20,6 +22,7 @@ from samba_agent.agents.buyer import (
     size_letters,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment
+from samba_agent.agents.order_identity import color_code_conflict
 from samba_agent.export.desktop import toast
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
@@ -263,6 +266,7 @@ PC_PAY_PROVIDERS = frozenset({'payco', 'naverpay'})
 
 # 결제창 로그인 화면에서 앱 login 뒤 결제창이 다시 그려질 때까지 기다리는 시간(ms)
 POPUP_LOGIN_SETTLE_MS = 5000
+POPUP_LOGIN_SETTLE_TRIES = 4
 
 
 # 상품명에서 대조에 쓰지 않는 흔한 말(브랜드·계절·분류) — 이것만 겹쳐서는 같은 상품이라고 보지 않는다
@@ -344,6 +348,8 @@ def order_form_mismatch(
     site_name = site_name.replace('스트리트톡', '스트릿톡')
     text = re.sub(r'\s+', ' ', page or '').replace('스트리트톡', '스트릿톡')
     low = text.lower()
+    if color_code_conflict(option, selected):
+        return '주문 옵션과 선택된 색상 코드가 다르다 — 결제하지 않음'
     sizes = _sizes(option, selected)
     if sizes and not any(re.search(rf'(?<![\d.]){re.escape(x)}(?![\d.])', text) for x in sizes):
         return f'옵션 {sorted(set(sizes))} 이 주문서에 없다'
@@ -828,19 +834,56 @@ class PayerAgent(AgentBase):
     """모든 소싱처의 결제를 맡는다. 등록부에서 retry: 0 이다 — 여기서도 다시 부르지 않는다."""
 
     _dry_run: bool = True
+    gift_only: bool = False
     # 삼바웨이브 내부 API 클라이언트. factory 가 꽂는다(없으면 결제 직전 재조회를 건너뛴다)
     _wave: 'WaveClient | None' = None
+    money_balance_alert: Callable[[str, list[object]], object] | None = None
 
     def set_wave(self, wave: 'WaveClient | None') -> None:
         """삼바웨이브 클라이언트를 꽂는다. 배선은 factory 가 한다."""
         self._wave = wave
+        import hashlib
+        from samba_agent.agents.naverpay import NAVER_PREPARE_JS
+
+        logging.getLogger(__name__).info(
+            '네이버 결제 검사판 로드: %s',
+            hashlib.sha256(NAVER_PREPARE_JS.encode()).hexdigest()[:12],
+        )
 
     def __call__(self, assignment: Assignment) -> AgentResult:
         self._dry_run = assignment.dry_run
+        self._naver_payment = None
+        self._popup_login_tried = False
         self.reset_repairs()
-        return run_agent(
+        result = run_agent(
             lambda: self._pay(assignment), lambda: self.evidence, self.failure_shot(assignment)
         )
+        self._notify_money_balance(assignment, result)
+        return result
+
+    def _notify_money_balance(self, a: Assignment, result: AgentResult) -> None:
+        from samba_agent.ops.money_alerts import ACCOUNTS, MUSINSA_BALANCE_JS, money_value
+
+        source = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source))
+        account = str(a.handoff.get('account') or a.order.account or '')
+        if (
+            a.dry_run or result.status != 'ok' or result.payload.get('paid') is not True
+            or str(result.payload.get('card') or '').strip() != '무신사머니'
+            or source is None or source.id != 'MUSINSA' or account not in ACCOUNTS
+            or self.money_balance_alert is None
+        ):
+            return
+        try:
+            raw = self.tool('run_js', code='const PROFILE=' + json.dumps(account) + ';\n' + MUSINSA_BALANCE_JS)
+            value = json.loads(split_page_dialogs(raw)[0])
+            if not isinstance(value, dict) or value.get('verified') is not True:
+                return
+            balance = money_value(value.get('balance'))
+            if balance is not None:
+                self.money_balance_alert(account, [{'method': '무신사머니', 'balance': balance}])
+        except Exception as exc:
+            # 이미 결제 성공. 알림 장애가 성공 결과를 실패로 바꾸거나 재결제를 유발하면 안 된다.
+            logging.getLogger(__name__).warning('결제 후 무신사머니 알림 확인 실패: %s', type(exc).__name__)
 
     def _recheck_wave(self, a: Assignment) -> None:
         """결제창 진입 전 SAMBA 재조회(플레이북 §5-1) — 그사이 누가 샀거나 상태가 바뀌었는지 본다.
@@ -1217,7 +1260,11 @@ class PayerAgent(AgentBase):
         지금 화면의 키패드를 바로 찾는다. 비밀번호 값은 어디서도 다루지 않는다.
         """
         # 결제창 로그인 시도는 주문(작업)마다 한 번 — 에이전트 객체는 작업을 넘어 재사용되므로 여기서 초기화한다
-        self._popup_login_tried = False
+        if (
+            web_pay_provider(str(a.handoff.get('card') or a.options.get('card') or '')) == 'naver'
+            and not getattr(self, '_naver_payment', None)
+        ):
+            self._prepare_naver_card(a)
         # 결제창은 중간 창(money.musinsapayments.com/bridge)이 닫히고 /payment 창이 새로 뜬다 — 그 사이엔
         # '결제하기'가 없고, 처음 본 창은 사라진다. 매번 결제창 목록을 다시 읽어 가장 최근 창에서 버튼을 찾는다
         # (실기 2026-09-25: 첫 창만 보다 버튼을 못 눌러 결제 미완료 3건)
@@ -1318,24 +1365,118 @@ class PayerAgent(AgentBase):
                         out = f'error: {e.reason}'
                     self.note('결제창 로그인', mask_text(out[:80]))
                     if out.lower().startswith(('submitted', 'ok', 'filled')):
-                        self.tool('wait', ms=POPUP_LOGIN_SETTLE_MS)
-                        popups_now, _active = self._list_tabs_popups()
-                        try:
-                            now = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
-                        except ValueError:
-                            now = []
-                        tab_login = any(
-                            isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
-                            for t in (now if isinstance(now, list) else [])
-                        )
-                        if not tab_login and not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
-                            return
+                        # 로그인 뒤 결제창으로 돌아오는 데 5초를 넘기는 결제 앱이 있다 — 한 번 보고 포기하지 않는다
+                        for _ in range(POPUP_LOGIN_SETTLE_TRIES):
+                            self.tool('wait', ms=POPUP_LOGIN_SETTLE_MS)
+                            popups_now, _active = self._list_tabs_popups()
+                            try:
+                                now = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
+                            except ValueError:
+                                now = []
+                            tab_login = any(
+                                isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                                for t in (now if isinstance(now, list) else [])
+                            )
+                            if not tab_login and not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
+                                return
+                            if any('/certificate/' in str(q.get('url') or '') for q in popups_now):
+                                # 로그인은 됐고 결제 앱이 새 기기 휴대폰 인증을 요구한다 — 사람이 그 프로필에서 한 번 인증한다
+                                raise AgentFailure(
+                                    'needs_ai',
+                                    f'결제 앱 새 기기 인증 필요({_host_of(url)}) — 프로필 {profile or "-"} 에서 휴대폰 인증을 '
+                                    '한 번 해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)',
+                                    FailReason.PERMISSION_DENIED,
+                                )
                 raise AgentFailure(
                     'needs_ai',
                     f'결제창이 로그인 화면이다({_host_of(url)}) — 프로필 {profile or "-"} 에서 결제 앱(네이버 등)에 '
                     '먼저 로그인해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)',
                     FailReason.PERMISSION_DENIED,
                 )
+
+    def _read_naver_card(self, amount: int) -> dict[str, object] | None:
+        """네이버 결제창의 카드·금액·적립을 읽는다. 읽기만 하고 동의 버튼은 누르지 않는다."""
+        from samba_agent.agents.naverpay import NAVER_PREPARE_JS
+
+        raw = self.tool('run_js', code=f'const EXPECTED_AMOUNT={amount};\n' + NAVER_PREPARE_JS)
+        try:
+            parsed = json.loads(split_page_dialogs(raw)[0])
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _prepare_naver_card(self, a: Assignment) -> bool:
+        """네이버 결제창에서 현대카드를 확인하고 동의 버튼을 누른다. 비밀번호만으로 결제가 끝났으면 True."""
+        import hashlib
+        from samba_agent.agents.naverpay import NAVER_PREPARE_JS
+
+        self.note('네이버 카드 검사판', hashlib.sha256(NAVER_PREPARE_JS.encode()).hexdigest()[:12])
+
+        amount = _amount_krw(a.handoff.get('paid'))
+        if amount is None:
+            raise AgentFailure('needs_ai', '네이버 결제액 미확인 — 결제하지 않음', FailReason.VERIFY_MISMATCH)
+        popups, _active = self._list_tabs_popups()
+        self._stop_if_login_popup(popups, a)
+        naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
+        if naver:
+            self.tool('switch_tab', id=str(naver[-1]['id']))
+        prepared = self._read_naver_card(amount)
+        if isinstance(prepared, dict) and prepared.get('auth_required'):
+            # 결제창 앞에 네이버페이 비밀번호 창이 먼저 뜬다 — 앱이 키마스터 값을 한 번만 넣고 결제창을 다시 본다
+            account = str(a.handoff.get('account') or a.order.account or '')
+            self.step('payer: 네이버페이 비밀번호(앱 입력)')
+            out = self._press_keypad(a, 'naver', account)
+            self.note('네이버 비밀번호 입력', mask_text(out[:200]))
+            if out.lstrip().lower().startswith(('handoff', 'refused')) or naverpay_mismatch(out) is not None:
+                raise AgentFailure(
+                    'needs_ai',
+                    f'네이버페이 비밀번호를 앱이 넣지 못했다 — 결제하지 않음: {mask_text(out[:100])}',
+                    FailReason.PERMISSION_DENIED,
+                )
+            self.tool('wait', ms=PAY_POPUP_WAIT_MS)
+            popups, _active = self._list_tabs_popups()
+            naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
+            if naver:
+                self.tool('switch_tab', id=str(naver[-1]['id']))
+            prepared = self._read_naver_card(amount)
+            if not isinstance(prepared, dict) or prepared.get('ok') is not True:
+                # 이상거래 확인 비밀번호는 그 자체로 결제를 끝내기도 한다(실기 2026-11-03 4062: 52,230원 현대카드 결제됨) —
+                # 주문 완료 화면이면 결제 확인으로 넘긴다
+                try:
+                    listed = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
+                except ValueError:
+                    listed = []
+                if isinstance(listed, list) and any(
+                    isinstance(t, dict) and ORDER_DONE_URL_RE.search(str(t.get('url') or '')) for t in listed
+                ):
+                    self.note('네이버 비밀번호 입력', '비밀번호 뒤 주문 완료 화면 — 결제 확인으로 간다')
+                    self._naver_payment = {'paid_after_password': True}
+                    return True
+                # 비밀번호가 들어간 뒤라 결제가 끝났을 수 있다 — '결제하지 않음'으로 적으면 재구매로 이어진다
+                reason = prepared.get('error') if isinstance(prepared, dict) else '검증 응답 없음'
+                raise AgentFailure(
+                    'needs_ai',
+                    f'네이버페이 비밀번호 입력 뒤 결제창 미확인: {reason} — 결제 여부 미확정·주문내역 확인 전 재결제 금지',
+                    FailReason.PAY_INTERRUPTED,
+                )
+        if (
+            not isinstance(prepared, dict) or prepared.get('ok') is not True
+            or prepared.get('card_issuer') != '현대카드'
+            or prepared.get('payment_kind') != 'card'
+            or prepared.get('payment_verified') is not True
+            or not isinstance(prepared.get('agree'), int)
+            or isinstance(prepared.get('agree'), bool)
+            or prepared['agree'] <= 0
+            or not isinstance(prepared.get('naver_reward'), int | float)
+            or prepared['naver_reward'] < 0
+        ):
+            reason = prepared.get('error') if isinstance(prepared, dict) else '검증 응답 없음'
+            raise AgentFailure('needs_ai', f'네이버 현대카드 검증 실패: {reason} — 결제하지 않음', FailReason.VERIFY_MISMATCH)
+        self._naver_payment = {k: prepared[k] for k in ('card_issuer', 'payment_kind', 'naver_reward', 'payment_verified')}
+        self.note('네이버 결제수단 검증', '현대카드 선택·금액·네이버 적립 확인, 머니 결제 차단')
+        self.tool('click', id=int(prepared['agree']), label='동의하고 결제하기')
+        self.tool('wait', ms=PAY_POPUP_WAIT_MS)
+        return False
 
     def _press_keypad(
         self, a: Assignment, provider: str | None, account: str, dry_run_digits: int | None = None
@@ -1484,6 +1625,8 @@ class PayerAgent(AgentBase):
         }
         if getattr(self, '_arrival_memo', None):
             payload['arrival_memo'] = self._arrival_memo
+        if getattr(self, '_naver_payment', None):
+            payload['naver_payment'] = self._naver_payment
         try:
             tabs_now = self.tool('list_tabs')
         except AgentFailure:
@@ -1712,6 +1855,8 @@ class PayerAgent(AgentBase):
 
     def _pay(self, a: Assignment) -> AgentResult:
         self.evidence = []
+        if self.gift_only and a.handoff.get('order_type') != 'gift':
+            raise AgentFailure('needs_ai', '사무실 확인 대기 범위 — 실제 선물 배송이 아닌 결제 차단', FailReason.UNKNOWN)
         # 요청자가 지정한 카드가 먼저, 없으면 구매 에이전트가 고른 카드다(리뷰 지적 — C3)
         card = a.options.get('card') or a.handoff.get('card')
         card = str(card) if card else None
@@ -1760,7 +1905,8 @@ class PayerAgent(AgentBase):
             # 삼바 상품명과의 연결은 바로 위 _check_order_form 이 따로 본다
             'name': str(a.handoff.get('product_name') or '') or expect_name(a),
             'option': a.order.option or '',
-            'selected': str(a.handoff.get('selected') or ''),
+            # 신세계백화점 상품은 되읽은 옵션 앞에 상품명이 붙는다('… 옵션 : 245') — 옵션 값만 대조한다(실기 2026-11-03 SSG 4059)
+            'selected': re.sub(r'^.*옵션\s*[:：]\s*', '', str(a.handoff.get('selected') or '')).strip(),
             # 구매가 스냅샷에서 읽은 번호 우선 — 교차 비교로 다른 사이트에서 사면 주문 URL 번호는 다른 사이트 것이다
             'product_no': str(a.handoff.get('product_no') or '') or product_no_of(a.order.product_url),
             # 구매 스냅샷이 도착한 상품 주소(SSG 처럼 지정 몰 상품으로 바꿔 사는 소싱처만 준다)
@@ -1807,6 +1953,10 @@ class PayerAgent(AgentBase):
             else {'ok': False, 'note': raw_enter[:120]}
         )
         self.note('결제창', mask_text(json.dumps(entered, ensure_ascii=False)[:400]))
+        if entered.get('naver_card_required') and not a.dry_run:
+            if self._prepare_naver_card(a):
+                return self._confirm_paid(a, card)
+            entered['ok'] = True
         if not entered.get('ok'):
             # 결제하기를 못 눌렀다 — 비밀번호 단계로 가지 않는다(실기: 수단을 못 찾고도 키패드를 찾다 거절)
             raise AgentFailure(

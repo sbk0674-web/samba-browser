@@ -124,6 +124,12 @@ class Worker:
             return None
         job = self.d.queue.claim()
         if job is None:
+            drain = getattr(self.d.after_done, 'drain', None)
+            if not self.d.dry_run and callable(drain):
+                try:
+                    drain()
+                except Exception:  # noqa: BLE001 — 구매 큐를 다시 실행하지 않는다
+                    _log.exception('선물 별도 재검증 실패 — 대기 유지')
             if self.d.operator_drain is not None:
                 try:
                     self.d.operator_drain()
@@ -521,8 +527,13 @@ class Worker:
             return self.d.queue.get_by_id(job.id)  # type: ignore[return-value]
         outcome = out['outcome']
         fail = out.get('fail_reason')
+        prepare = getattr(self.d.after_done, 'prepare', None)
+        followup = prepare(job, out) if outcome == 'done' and not self.d.dry_run and callable(prepare) else None
+        if followup is not None:
+            self.d.queue.finish(job.id, outcome, error=str(fail) if fail else None, gift_followup=followup)
+        else:
+            self.d.queue.finish(job.id, outcome, error=str(fail) if fail else None)
         self.d.queue.progress(job.id, agent=None, step=None)
-        self.d.queue.finish(job.id, outcome, error=str(fail) if fail else None)
         self.d.report(
             job,
             f'{job.order_no} {outcome}' + (f' — 사유 {fail}' if fail else ' — 완료'),

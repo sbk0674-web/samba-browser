@@ -8,7 +8,7 @@ from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_value
 
 Stage = Literal['buy', 'pay', 'record', 'verify', 'done']
-Outcome = Literal['done', 'failed', 'needs_human', 'cancelled']
+Outcome = Literal['done', 'failed', 'needs_ai', 'cancelled']
 
 # 애초에 state/체크포인트/승인 요약에 담기면 안 되는 키 — 있으면 저장을 거부한다
 # 단어 경계로 본다 — 'pin' 을 부분 문자열로 찾으면 'shipping_set' 이 걸려 정상 구매 결과가 거부됐다(실기)

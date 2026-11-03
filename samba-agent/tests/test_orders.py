@@ -9,7 +9,13 @@ from pydantic import ValidationError
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.bridge.client import BridgeClient, BridgeError
 from samba_agent.failures import FailReason
-from samba_agent.queue.orders import LOOKUP_TOOLS, ORDERS_URL, focus_orders_page, lookup_order
+from samba_agent.queue.orders import (
+    LOOKUP_TOOLS,
+    ORDERS_URL,
+    focus_orders_page,
+    lookup_order,
+    with_overrides,
+)
 
 URL = 'http://127.0.0.1:47811'
 
@@ -55,6 +61,12 @@ def test_누락_필드는_options_로_보완한다():
     )
     ref = lookup_order(client(), '1001', {'seller': '포이즌'})
     assert ref.seller == '포이즌'
+
+
+def test_source_override는_실제_수집상품_소싱처로_보정한다():
+    ref = OrderRef(order_no='A1', source='KREAM', seller='포이즌', sku='SKU1', qty=1)
+    out = with_overrides(ref, {'source': '스니커덩크'})
+    assert out.source == 'SNKRDUNK'
 
 
 @respx.mock

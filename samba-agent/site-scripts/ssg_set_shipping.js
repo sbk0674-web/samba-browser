@@ -1,12 +1,13 @@
 // SSG 배송지: 목록→추가 폼→우편번호→받는분. gift 는 열린 목록 팝업. 전화는 칸 번호만(fill_secret), 저장은 별도.
 // 인자 {name,address,address_detail?,gift?,tab?} 반환 {ok,name,address(_detail),phone_field_ids,form_popup,note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
+const recipientName = nz(nz(args.name).replace(/\*/g, 'ㅇ').replace(/[^\p{L}\p{M}\p{N} ]/gu, ''))
 const cl = async id => { try { await tabs.close(id) } catch (e) {} }
 const OF = /pay\.ssg\.com\/(order|payment)|ssg\.com\/order\//
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(500) } return '' }
 const first = async sel => { const l = (await tree({ selector: sel })).split('\n').find(x => /^\[\d+\]/.test(x)); return l ? parseInt(l.slice(1)) : -1 }
 const R = { ok: false, name: null, address: null, address_detail: null, phone_field_ids: [], phone_formats: ['phone-rest'], form_popup: null, note: null }
-if (!args.name || !args.address) return { ...R, note: 'name·address 필요' }
+if (!recipientName || !args.address) return { ...R, note: 'name·address 필요' }
 const waitPopup = async (re, ms) => { for (let i = 0; i < ms / 400; i++) { const p = (await tabs.list()).find(t => t.kind === 'popup' && re.test(t.url || '')); if (p) return p; await sleep(400) } return null }
 let list = args.gift ? (await tabs.list()).find(t => t.kind === 'popup' && /shpplocList/.test(t.url || '')) : null
 if (!list) {
@@ -91,7 +92,7 @@ await sleep(500)
   if (dl && V(dl).length > 40) await page.type(parseInt(dl.slice(1)), nz(V(dl).replace(/\([^)]*\)?/g, ' ')).slice(0, 40).trim(), false) }
 const nmId = await first('#rcptpeNm, input[name="rcptpeNm"]')
 if (nmId < 0) return { ...R, note: '받는분 이름칸 없음' }
-await page.type(nmId, nz(args.name), false)
+await page.type(nmId, recipientName, false)
 let h1 = await first('#hpno1')
 if (h1 < 0) h1 = parseInt((((await tree({ interactive: true })).split('\n').find(l => /combobox "010 011/.test(l))) || '[-1]').slice(1))
 if (h1 >= 0) await page.select(h1, '010')

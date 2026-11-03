@@ -128,6 +128,7 @@ async def _ask(
         env=env or {},
     )
     text = ''
+    auth_error = False
     try:
         async for message in query_fn(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
@@ -139,7 +140,9 @@ async def _ask(
                     message.api_error_status in (401, 403)
                     or _AUTH_ERROR_RE.search(str(message.result or ''))
                 ):
-                    raise _AuthError()
+                    auth_error = True
+                    # SDK 스트림을 끝까지 비워 종료 중 재진입 오류를 막는다.
+                    continue
                 if message.result:
                     text += message.result
     except _AuthError:
@@ -148,6 +151,8 @@ async def _ask(
         if _AUTH_ERROR_RE.search(str(e)):
             raise _AuthError() from None
         raise
+    if auth_error:
+        raise _AuthError()
 
     raw = _extract_first_json_object(text)
     if raw is None:

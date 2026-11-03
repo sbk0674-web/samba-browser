@@ -13,7 +13,7 @@ import threading
 import time
 from collections.abc import Callable
 
-from samba_agent.ops.ssg_gift_accept import PHONE_BUSY, Node, Phone, find_text, phone_on_hold
+from samba_agent.ops.ssg_gift_accept import PHONE_BUSY, Node, Phone, find_text
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ _TRK = re.compile(
     + r')\s*[|｜:：]?\s*(?:运单号|快递单号)?\s*[:：]?\s*([A-Z]{0,3}\d{8,24})'
 )
 SEARCH_HINT = '品牌名/商品名/订单号'
-INTERVAL_S = 30 * 60
+INTERVAL_S = 3 * 60 * 60
 
 
 def tracking_of(nodes: list[Node]) -> tuple[str, str] | None:
@@ -102,12 +102,15 @@ def read_dewu_tracking(
 
 
 def collect_dewu_tracking(
-    wave: object, phone: Phone, *, sleep: Callable[[float], None] = time.sleep
+    wave: object, phone: Phone, *, sleep: Callable[[float], None] = time.sleep,
+    idle: Callable[[], bool] | None = None,
 ) -> dict[str, int]:
     """대상 주문들의 송장을 읽어 삼바에 넣는다. 결과 {'checked', 'updated'}."""
     targets = wave.dewu_tracking_targets()  # type: ignore[attr-defined]
     out = {'checked': 0, 'updated': 0}
     for t in targets:
+        if idle is not None and not idle():
+            break
         out['checked'] += 1
         got = read_dewu_tracking(phone, t['sourcing_order_number'], sleep=sleep)
         if not got:
@@ -127,7 +130,7 @@ def start_dewu_tracking_loop(
     adb: str | None = None,
     phone_serial: str | None = None,
 ) -> threading.Thread:
-    """30분마다(하네스 작업이 없을 때만) 得物 송장을 모은다. 폰이 없으면 그 바퀴는 건너뛴다."""
+    """3시간마다(하네스 작업이 없을 때만) 得物 송장을 모은다."""
     import os
 
     from samba_agent.ops.ssg_gift_accept import DEFAULT_ADB, DEFAULT_PHONE, find_phone_serial
@@ -139,7 +142,7 @@ def start_dewu_tracking_loop(
         while True:
             time.sleep(INTERVAL_S)
             try:
-                if not idle() or phone_on_hold():
+                if not idle():
                     continue
                 if not wave.dewu_tracking_targets():  # type: ignore[attr-defined]
                     continue
@@ -147,7 +150,9 @@ def start_dewu_tracking_loop(
                 if serial is None:
                     continue
                 with PHONE_BUSY:
-                    res = collect_dewu_tracking(wave, Phone(adb_path, serial))
+                    if not idle():
+                        continue
+                    res = collect_dewu_tracking(wave, Phone(adb_path, serial), idle=idle)
                 log.info('[得物 송장] 조회 %d · 기입 %d', res['checked'], res['updated'])
             except Exception:
                 log.exception('[得物 송장] 수집 실패 — 다음 바퀴에 다시')

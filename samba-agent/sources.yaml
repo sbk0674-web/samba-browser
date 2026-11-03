@@ -173,6 +173,7 @@ sources:
   - id: SHOEMAKER
     key: shoemaker
     payment_quotes: true  # 2026-09-23 shoemaker_payment_quotes
+    pay_provider: site  # 슈마커 PAY 고정 — 다른 간편결제로 자동 전환하지 않는다
     label: 슈마커
     home: https://www.shoemarker.co.kr/
     login_host: shoemarker.co.kr
@@ -234,9 +235,22 @@ sources:
     login_host: shihuo.cn
     status: scripts_pending
 
+  - id: SNKRDUNK
+    key: snkrdunk
+    label: 스니커덩크
+    home: https://snkrdunk.com/
+    login_host: snkrdunk.com
+    status: scripts_pending
+
   - id: KREAM
     key: kream
     label: 크림
     home: https://kream.co.kr/
     login_host: kream.co.kr
     status: hold
+  - id: ABCMART_JP
+    key: abcmart_jp
+    label: ABC마트 일본
+    home: https://www.abc-mart.net/
+    login_host: abc-mart.net
+    status: scripts_pending

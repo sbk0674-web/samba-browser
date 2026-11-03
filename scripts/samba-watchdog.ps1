@@ -54,8 +54,16 @@ while ($true) {
     Say "하네스 시작 → $hlog"
     # 앱이 막 떠서 바쁘면(409) 레인 확인이 실패해 계정 비교가 순서대로 돈다 — 잠깐 기다린다
     Start-Sleep -Seconds 10
-    Start-Process -FilePath 'cmd.exe' -WindowStyle Hidden -WorkingDirectory $agent `
-      -ArgumentList '/c', "set PYTHONIOENCODING=utf-8&& set PYTHONUNBUFFERED=1&& .venv\Scripts\python.exe -m samba_agent > `"$hlog`" 2>&1"
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $env:ComSpec
+    $startInfo.Arguments = '/d /s /c ""' + (Join-Path $agent '.venv\Scripts\python.exe') + '" -m samba_agent > "' + $hlog + '" 2>&1"'
+    $startInfo.WorkingDirectory = $agent
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
+    $startInfo.EnvironmentVariables['PYTHONUNBUFFERED'] = '1'
+    $startedProcess = [System.Diagnostics.Process]::Start($startInfo)
+    $startedProcess.Dispose()
   }
   # 7일 지난 로그 정리
   Get-ChildItem -Path $env:TEMP -Filter 'samba-app-*.log' -ErrorAction SilentlyContinue |

@@ -100,7 +100,7 @@ def test_검증이_실패하면_export_는_돌지_않는다(reg):
         return AgentResult(status='fail', reason='불일치', fail_reason=FailReason.VERIFY_MISMATCH)
 
     out = run(reg, agents(verifier=bad_verifier), exporter)
-    assert out['outcome'] == 'needs_human'
+    assert out['outcome'] == 'needs_ai'
     assert calls['n'] == 0
     assert 'exporter' not in out['results']
 

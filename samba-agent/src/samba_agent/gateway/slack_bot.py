@@ -252,7 +252,7 @@ class SambaBot:
             log.info('미등록 사용자 승인 무시: %s', user)
             return '권한이 없습니다'
         pending = self.queue.get(order_no)
-        if pending is None or pending.state != 'needs_human':
+        if pending is None or pending.state != 'needs_ai':
             return f'{order_no} 는 승인 대기 상태가 아닙니다'
         if stage is not None and pending.step != f'승인 대기: {stage}':
             return '이미 처리된 승인입니다'

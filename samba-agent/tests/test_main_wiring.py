@@ -2,6 +2,64 @@
 from samba_agent.__main__ import make_reporters
 
 
+def test_startup_constructor_keyword_arguments_match_supported_parameters():
+    import ast
+    import inspect
+    import samba_agent.__main__ as main
+    from samba_agent.operator.service import OperatorService
+    from samba_agent.queue.worker import WorkerDeps
+
+    constructors = {'OperatorService': OperatorService, 'WorkerDeps': WorkerDeps}
+    source = ast.parse(inspect.getsource(main))
+    for call in ast.walk(source):
+        if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name):
+            continue
+        if call.func.id not in ('OperatorService', 'WorkerDeps'):
+            continue
+        parameters = inspect.signature(constructors[call.func.id]).parameters
+        for keyword in call.keywords:
+            if keyword.arg:
+                assert keyword.arg in parameters, (call.func.id, keyword.arg)
+
+
+def test_cancel_export_does_not_wait_for_external_program(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import samba_agent.__main__ as main
+
+    seen = {}
+    monkeypatch.setattr(main, 'ExportQueue', lambda path: object())
+    monkeypatch.setattr(main.ExportRouting, 'load', lambda path: object())
+
+    def capture(*args, **kwargs):
+        seen.update(kwargs)
+        return lambda order_no: None
+
+    monkeypatch.setattr(main, 'make_cancel_exporter', capture)
+    settings = SimpleNamespace(
+        export_enabled=True, export_db_path=tmp_path / 'exports.sqlite',
+        export_routing_file=tmp_path / 'routing.yaml', export_wait_s=240.0,
+    )
+    assert main.make_cancel_export(settings, object()) is not None
+    assert seen['wait_s'] == 0.0
+    assert seen['deferred'] == main.EXPORT_DEFERRED
+
+
+def test_harness_lane_survives_agent_tool_scoping():
+    from samba_agent.agents.factory import build_agents
+    from samba_agent.agents.registry import Registry
+    from samba_agent.bridge.client import BridgeClient
+    from samba_agent.settings import DEFAULT_ROOT
+
+    bridge = BridgeClient('http://127.0.0.1:47811', 'test-token', allowed=['run_js'])
+    try:
+        agents = build_agents(Registry.load(DEFAULT_ROOT), bridge.with_lane('harness'), lambda *_: None)
+        scoped = [agent.bridge for agent in agents.values() if hasattr(agent, 'bridge')]
+        assert scoped
+        assert all(b._headers()['X-Samba-Lane'] == 'harness' for b in scoped)
+    finally:
+        bridge.close()
+
+
 class _FakeBot:
     """SambaBot 의 발신 두 메서드만 흉내 낸다."""
 

@@ -51,7 +51,8 @@ def test_ambiguous_chat_target_is_never_tapped(tmp_path):
     device._run.assert_not_called()
 
 
-def test_inventory_reservation_uses_tomorrow_and_door_then_checks_receipt(tmp_path, monkeypatch):
+@pytest.mark.parametrize('zero_door_bounds', [False, True])
+def test_inventory_reservation_uses_tomorrow_and_door_then_checks_receipt(tmp_path, monkeypatch, zero_door_bounds):
     from tools.daangn.reservation_journal import ReservationJournal
     device = phone(tmp_path)
     device.journal = ReservationJournal(str(tmp_path / 'attempts.sqlite'))
@@ -67,6 +68,9 @@ def test_inventory_reservation_uses_tomorrow_and_door_then_checks_receipt(tmp_pa
     receipt = ('<hierarchy><node text="택배 접수가 완료됐어요"/>'
                '<node text="기사님이 10월 30일(금)에 방문 예정이에요."/>'
                '<node text="진행 현황 보기" bounds="[42,2055][1039,2194]"/></hierarchy>')
+    if zero_door_bounds:
+        place = place.replace('[91,670][341,730]', '[0,0][0,0]').replace('</hierarchy>',
+            '<node class="android.widget.RadioButton"/>' * 3 + '</hierarchy>')
     screens = iter([chat, dates, dates, place, place, receipt])
     device._screen = lambda: (lambda x: (x, ET.fromstring(x)))(next(screens))
     actions = []
@@ -74,9 +78,13 @@ def test_inventory_reservation_uses_tomorrow_and_door_then_checks_receipt(tmp_pa
     device._tap_bounds = lambda bounds: actions.append(bounds)
     device._run = lambda *args, **kwargs: actions.append(args) or b''
     device._selected_ring = lambda y: y in (509, 700)
+    if zero_door_bounds:
+        # 이 테스트는 기존 1080 흐름을 검증한다. 실제 720 시각 판정은 별도 PNG 회귀로 검증한다.
+        device._visual_pickup_location = lambda: None
     monkeypatch.setattr('tools.daangn.android_phone.time.sleep', lambda _: None)
     result = device.reserve_pickup(is_musinsa=False, today=date(2026, 10, 29), location='문 앞')
     assert result == date(2026, 10, 30)
-    assert actions == ['날짜 선택하기', '[91,483][341,535]', '다음',
-                       '문 앞', '완료', '진행 현황 보기']
+    assert actions == (['날짜 선택하기', '[91,483][341,535]', '다음']
+                       + ([] if zero_door_bounds else ['문 앞'])
+                       + ['완료', '진행 현황 보기'])
     assert not device.journal.begin('서병기', 'room')

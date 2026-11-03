@@ -32,6 +32,7 @@ def test_existing_pickup_is_not_booked_again():
 
 def test_new_inventory_uses_earliest_door_and_rereads_progress():
     phone = Mock(unsafe=True)
+    phone.source_for.return_value = {'source_site': '보유재고', 'source_verified': True}
     phone.verify_account.return_value = True
     phone.open_chat.return_value = True
     phone.reserve_pickup.return_value = date(2026, 10, 30)
@@ -61,6 +62,7 @@ def test_cutoff_proof_requires_event_and_matching_paid_day():
 
 def test_new_pickup_before_or_without_cutoff_proof_is_not_reserved():
     phone = Mock(unsafe=True)
+    phone.source_for.return_value = {'source_site': '보유재고', 'source_verified': True}
     phone.verify_account.return_value = True
     phone.open_chat.return_value = True
     phone.progress.return_value = {'awaiting_pickup': True, 'payment_confirmed': True,

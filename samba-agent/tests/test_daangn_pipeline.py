@@ -29,7 +29,7 @@ def test_chat_payment_to_pickup_to_idempotent_saved_order(tmp_path, monkeypatch)
     phone = Mock(unsafe=True)
     phone.verify_account.return_value = True
     phone.open_chat.return_value = True
-    phone.source_for.return_value = {}
+    phone.source_for.return_value = {'source_site': '보유재고', 'source_verified': True}
     phone.reserve_pickup.return_value = date(2026, 10, 30)
     phone.progress.side_effect = [
         {'awaiting_pickup': True, 'payment_confirmed': True, 'sales_account': '서병기',

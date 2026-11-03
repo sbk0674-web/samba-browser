@@ -20,6 +20,34 @@ def test_접수하면_queued_다(q):
     assert job.attempts == 0
 
 
+def test_daangn_single_stock_precedes_older_queue_without_interrupting_running(q):
+    first, _ = q.enqueue('normal', 'U1', {}, 'ts1')
+    assert q.claim().id == first.id
+    q.enqueue('older', 'U1', {}, 'ts2')
+    urgent, _ = q.enqueue('당근 123', 'U1', {'_daangn_single_stock': True}, 'ts3')
+    assert q.claim() is None
+    q.finish(first.id, 'done')
+    assert q.claim().id == urgent.id
+
+
+def test_늦게_복구한_옛주문도_원래_접수시각으로_먼저_처리한다(q):
+    q.enqueue('new', 'U1', {'_order_received_at': '2026-10-12T08:00:00+09:00'}, 'ts1')
+    q.enqueue('old', 'U1', {'_order_received_at': '2026-10-10T18:00:00+09:00'}, 'ts2')
+    assert q.claim().order_no == 'old'
+
+
+def test_기존_사람대기_상태를_AI판단_상태로_옮긴다(tmp_path):
+    import sqlite3
+    path = tmp_path / 'jobs.sqlite'
+    queue = JobQueue(path)
+    job, _ = queue.enqueue('old', 'U1', {}, 'ts1')
+    db = sqlite3.connect(path)
+    db.execute("update jobs set state='needs_human',error='pay_interrupted' where id=?", (job.id,))
+    db.commit()
+    restored = JobQueue(path).get('old')
+    assert restored.state == 'needs_ai' and restored.error == 'pay_interrupted'
+
+
 def test_같은_주문_재요청은_거절하고_기존_건을_준다(q):
     first, _ = q.enqueue('A1', 'U1', {}, 'ts1')
     again, created = q.enqueue('A1', 'U2', {}, 'ts2')
@@ -70,11 +98,11 @@ def test_진행_상태를_기록한다(q):
 def test_재시도는_상한을_넘지_못한다(q):
     job, _ = q.enqueue('A1', 'U1', {}, 'ts1')
     q.claim()
-    q.finish(job.id, 'needs_human', error='bridge_down')
+    q.finish(job.id, 'needs_ai', error='bridge_down')
     again = q.retry(job.id)
     assert (again.state, again.attempts) == ('queued', 1)
     q.claim()
-    q.finish(job.id, 'needs_human', error='bridge_down')
+    q.finish(job.id, 'needs_ai', error='bridge_down')
     with pytest.raises(ValueError, match='재시도 상한'):
         q.retry(job.id)
 
@@ -144,7 +172,7 @@ def test_결제_진행_중_재시작은_큐로_돌리지_않고_사람에게_넘
 
     restarted = JobQueue(path)  # 프로세스 재시작
     recovered = restarted.get('A1')
-    assert recovered.state == 'needs_human'
+    assert recovered.state == 'needs_ai'
     assert recovered.error == FailReason.PAY_INTERRUPTED.value
     assert restarted.claim() is None  # 실행기가 다시 집지 않는다
 
@@ -206,7 +234,7 @@ def test_같은_주문번호라도_행_id_가_다르면_따로_접수한다(q):
 def test_행_id_없는_옛_행은_done_이_아니면_같은_주문번호를_막는다(q):
     legacy, _ = q.enqueue('X', 'U1', {}, 'ts1')  # 슬랙 수동 접수 — wave_id 없음
     q.claim()
-    q.finish(legacy.id, 'needs_human', error='margin')
+    q.finish(legacy.id, 'needs_ai', error='margin')
     assert q.find('X', 'ord_A').id == legacy.id  # 사람이 정리하기 전까지 막는다
     q.finish(legacy.id, 'done')
     assert q.find('X', 'ord_A') is None  # 기입이 끝난 옛 행은 다른 행(다른 사이즈)을 막지 않는다
@@ -255,10 +283,10 @@ def test_승인_재개는_행_id_로_그_행만(q):
     b, _ = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
     for job in (a, b):
         q.progress(job.id, agent='approval.pay', step='승인 대기: pay')
-        q.finish(job.id, 'needs_human')
+        q.finish(job.id, 'needs_ai')
     resumed = q.try_start_resume('ord_B', stage='pay')
     assert resumed is not None and resumed.id == b.id and resumed.state == 'running'
-    assert q.get_by_id(a.id).state == 'needs_human'
+    assert q.get_by_id(a.id).state == 'needs_ai'
     # 주문번호로 부르면 먼저 접수된 대기 행
     resumed = q.try_start_resume('X', stage='pay')
     assert resumed is not None and resumed.id == a.id
@@ -286,7 +314,7 @@ def test_옛_표_order_no_UNIQUE_는_행_id_표로_옮기고_행과_id_를_지�
         INSERT INTO jobs(id, order_no, requester, options, state, step, thread_ts, attempts, created_at, updated_at)
           VALUES (7, 'X', 'intake', '{"card":"현대"}', 'done', NULL, 'ts7', 1, 't', 't');
         INSERT INTO jobs(id, order_no, requester, state, created_at, updated_at)
-          VALUES (9, 'Y', 'U1', 'needs_human', 't', 't');
+          VALUES (9, 'Y', 'U1', 'needs_ai', 't', 't');
         """
     )
     db.commit()
@@ -303,7 +331,7 @@ def test_옛_표_order_no_UNIQUE_는_행_id_표로_옮기고_행과_id_를_지�
         'ts7',
         1,
     )
-    assert q.get_by_id(9).state == 'needs_human'
+    assert q.get_by_id(9).state == 'needs_ai'
     # 옮긴 뒤에는 같은 주문번호의 둘째 행이 들어간다(옛 행은 done)
     b, created = q.enqueue('X', 'intake', {}, 'ts2', wave_id='ord_B')
     assert created is True and b.id > 9
@@ -311,13 +339,3 @@ def test_옛_표_order_no_UNIQUE_는_행_id_표로_옮기고_행과_id_를_지�
     q2 = JobQueue(path)
     assert q2.get_by_id(b.id).wave_id == 'ord_B'
     assert q2.find('X', 'ord_B').id == b.id
-
-
-def test_daangn_single_stock_precedes_older_queue_without_interrupting_running(q):
-    first, _ = q.enqueue('normal', 'U1', {}, 'ts1')
-    assert q.claim().id == first.id
-    q.enqueue('older', 'U1', {}, 'ts2')
-    urgent, _ = q.enqueue('당근 123', 'U1', {'_daangn_single_stock': True}, 'ts3')
-    assert q.claim() is None
-    q.finish(first.id, 'done')
-    assert q.claim().id == urgent.id

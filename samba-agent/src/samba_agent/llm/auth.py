@@ -98,34 +98,70 @@ def _counts_as_started(message: Any) -> bool:
     return not AUTH_ERROR_RE.search(' '.join(texts))
 
 
+def _message_text(message: Any) -> str:
+    """SDK 메시지에 담긴 텍스트만 모은다."""
+    parts: list[str] = []
+    for attr in ('result', 'error', 'message'):
+        value = getattr(message, attr, None)
+        if value:
+            parts.append(str(value))
+    for block in getattr(message, 'content', None) or []:
+        text = getattr(block, 'text', None)
+        if text:
+            parts.append(str(text))
+    return ' '.join(parts)
+
+
+def _is_auth_result(message: Any) -> bool:
+    """Claude SDK 가 예외 대신 ResultMessage 로 인증·한도 오류를 돌려준 경우."""
+    if type(message).__name__ != 'ResultMessage' or not getattr(message, 'is_error', False):
+        return False
+    status = getattr(message, 'api_error_status', None)
+    return status in (401, 403) or AUTH_ERROR_RE.search(_message_text(message)) is not None
+
+
 def with_fallback(query_fn: QueryFn) -> QueryFn:
     """query_fn 을 감싼다. 응답이 한 줄도 오기 전에 인증 오류가 나면 다음 계정으로 같은 요청을 다시 보낸다."""
 
     async def run(*, prompt: Any, options: Any) -> AsyncIterator[Any]:
         global _preferred
         tokens = fallback_tokens()
+        keys = fallback_api_keys()
         # 슬롯: 0 = 기본 로그인, 1..n = 예비 구독 토큰, 마지막 = API 키(있을 때만)
         # 예비 구독 토큰이 있으면 그것만 쓴다 — 기본 로그인(~/.claude)은 로그아웃돼 있어 매번 실패하는 죽은 칸이다(사용자 2026-10-10 "기본 없애").
         # 토큰이 하나도 없을 때만 기본 로그인을 쓴다
         slots = list(range(1, len(tokens) + 1)) if tokens else [0]
+        slots += list(range(len(tokens) + 1, len(tokens) + len(keys) + 1))
         start = _preferred if _preferred in slots else slots[0]
         order = slots[slots.index(start) :] + slots[: slots.index(start)]
         last: BaseException | None = None
         for slot in order:
+            slot_error: BaseException | None = None
             env = dict(getattr(options, 'env', None) or {})
             env.pop(TOKEN_ENV, None)
             env.pop(API_KEY_ENV, None)
             env.pop(HEADERS_ENV, None)
-            if slot > 0:
+            if 0 < slot <= len(tokens):
                 env[TOKEN_ENV] = tokens[slot - 1]
+            elif slot > len(tokens):
+                key_index = slot - len(tokens) - 1
+                env.update(api_key_env(keys[key_index], key_index))
             tried = dataclasses.replace(options, env=env)
             started = False
             try:
                 async for message in query_fn(prompt=prompt, options=tried):
+                    if not started and _is_auth_result(message):
+                        slot_error = RuntimeError(_message_text(message) or 'Claude 인증 실패')
+                        continue
                     # 시작 알림(SystemMessage)은 도구가 실행됐다는 뜻이 아니다 — 모델 응답·도구 결과가 온 뒤부터 '시작'으로 본다
                     if _counts_as_started(message):
                         started = True
                     yield message
+                if slot_error is not None and slot != order[-1] and is_auth_error(slot_error):
+                    last = slot_error
+                    continue
+                if slot_error is not None and is_auth_error(slot_error):
+                    raise slot_error
                 _preferred = slot
                 return
             except Exception as e:

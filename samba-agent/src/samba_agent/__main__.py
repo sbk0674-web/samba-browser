@@ -44,8 +44,10 @@ from samba_agent.ops.diagnose import diagnose
 from samba_agent.ops.events import EventLog
 from samba_agent.ops.lotteon_gift_tracking import start_lotteon_gift_tracking_loop
 from samba_agent.ops.masking import mask_text
+from samba_agent.ops.money_alerts import MoneyBalanceAlerts
 from samba_agent.ops.releases import ReleaseStore
 from samba_agent.ops.site_scripts import install_missing
+from samba_agent.ops.sms_alerts import SambaSmsSender
 from samba_agent.ops.source_audit import (
     DETAIL_JS,
     LIST_JS,
@@ -56,6 +58,14 @@ from samba_agent.ops.source_audit import (
     run_js_json,
 )
 from samba_agent.ops.ssg_gift_accept import make_after_done
+from samba_agent.ops.ssg_gift_followup import (
+    GiftFollowup,
+    detail_reader,
+    make_phone_session,
+    make_verify_only,
+    source_of_followup,
+)
+from samba_agent.ops.ssg_gift_repair import GiftScreenRepairer
 from samba_agent.ops.tracing import configure_tracing
 from samba_agent.queue.db import Job, JobQueue
 from samba_agent.queue.intake import Intake
@@ -216,7 +226,14 @@ def _bridge_ready(bridge: BridgeClient) -> bool:
 
 
 def main() -> None:
+    os.environ.setdefault('SAMBA_NO_AUTO_CANCEL', '1')
     settings = load_settings()
+    from samba_agent.queue.singleton import acquire_harness_lock
+
+    _process_lock = acquire_harness_lock(settings.root)
+    if _process_lock is None:
+        log.warning('같은 주문 큐의 하네스가 이미 실행 중 — 중복 실행하지 않는다')
+        return
     # 시각을 붙인다 — 도구 호출 사이 간격으로 어느 단계가 느린지 잰다(2026-09-26 주문 1건 수 분 문제)
     logging.basicConfig(
         level=logging.INFO,
@@ -227,6 +244,13 @@ def main() -> None:
 
     reg = Registry.load(settings.root)
     queue = JobQueue(settings.db_path)
+    from samba_agent.queue.office_scope import load_office_scope
+
+    queue.allowed_job_ids = load_office_scope(settings.db_path, settings.root / 'office-safe-scope.json')
+    office_scoped = queue.allowed_job_ids is not None
+    if office_scoped:
+        os.environ['SAMBA_NO_AUTO_CANCEL'] = '1'
+        log.warning('사무실 안전 범위: 신규 선물 %s건만 허용, 사무실 배송·기존 보류 재실행 금지', len(queue.allowed_job_ids))
     releases = ReleaseStore(settings.root / 'releases.sqlite')
     events = EventLog(settings.root / 'events.sqlite')
     crosscheck_ledger = configure_crosscheck(settings.root / 'ledger.sqlite')
@@ -274,7 +298,7 @@ def main() -> None:
             ),
             on_cancelled=make_cancel_export(settings, wave),
         )
-        if wave is not None
+        if wave is not None and os.environ.get('SAMBA_NO_AUTO_CANCEL') != '1'
         else None
     )
 
@@ -288,7 +312,14 @@ def main() -> None:
     has_lanes = bridge.supports_lanes()
     # 앱의 자식 탭 추적 수정 적용 전에는 기존 본 작업 통로를 유지한다.
     agent_bridge = bridge
-    agents = build_agents(reg, agent_bridge, decide, wave, settings.compare_accounts_max)
+    agents = build_agents(reg, agent_bridge, decide, wave, settings.compare_accounts_max,
+                          gift_only=office_scoped)
+    if office_scoped:
+        scoped_buyers = [a for a in agents.values() if isinstance(a, BuyerAgent)]
+        scoped_buyers += [a.sibling for a in scoped_buyers if a.sibling is not None]
+        if not agents['payer'].gift_only or not all(a.office_shipping_blocked for a in scoped_buyers):
+            raise RuntimeError('사무실 배송 보호 배선 미확인 — 작업 시작 중지')
+        log.warning('선물 한정 결제·사무실 배송 보호 배선 확인: True')
     repair_on = settings.repair_enabled
     if repair_on and not app_supports_pay_guard(bridge.scoped(['run_js'])):
         # 앱이 run_js safety:no_pay(결제 버튼 클릭 차단)를 모르면 AI 수리를 켜지 않는다 — 예전 앱은 이 값을
@@ -299,7 +330,15 @@ def main() -> None:
         repair_on = False
     if repair_on:
         # 스크립트 자가 수리 — 구매 에이전트가 저장 스크립트 실패를 AI 로 고쳐 이어 간다
-        repairer = ScriptRepairer(model=settings.repair_model, timeout_s=settings.repair_timeout_s)
+        if settings.repair_api_tiers:
+            from samba_agent.repair.tiers import TieredRepairer
+
+            repairer = TieredRepairer(root=settings.root, claude_model=settings.repair_model,
+                                     timeout_s=settings.repair_timeout_s)
+            repairer.record(0, 'configuration', 'active', 'Claude API -> Codex SDK -> chat monitor')
+            log.info('AI 수리 연결: 1차 Claude API → 2차 Codex SDK → 3차 대화 감시')
+        else:
+            repairer = ScriptRepairer(model=settings.repair_model, timeout_s=settings.repair_timeout_s)
         script_source = FileScriptSource(settings.site_scripts_file)
         script_history = ScriptHistory(settings.root / 'script-history')
         for agent in agents.values():
@@ -408,11 +447,17 @@ def main() -> None:
             except BridgeError as e:
                 return f'Error: {e}'
 
+        operator_agent = OperatorAgent(model=settings.operator_model, timeout_s=settings.operator_timeout_s)
+        if settings.repair_api_tiers:
+            from samba_agent.repair.tiers import TieredOperator
+
+            operator_agent = TieredOperator(root=settings.root, claude_model=settings.operator_model,
+                                            timeout_s=settings.operator_timeout_s)
         operator_service = OperatorService(
-            OperatorAgent(model=settings.operator_model, timeout_s=settings.operator_timeout_s),
+            operator_agent,
             call=_operator_call,
             queue=queue,
-            flag_order=flagger.mark if flagger is not None else None,
+            flag_order=flagger.mark if flagger is not None and not office_scoped else None,
             cancel_confirmed=flagger.confirmed if flagger is not None else None,
             report=_report,
             describe=_describe,
@@ -455,13 +500,25 @@ def main() -> None:
             ),
             # 앱 채팅이 도는 동안(409 busy)·앱이 꺼진 동안은 큐를 집지 않는다
             ready=lambda: _bridge_ready(bridge),
-            flag_order=flagger.mark if flagger is not None else None,
+            flag_order=flagger.mark if flagger is not None and not office_scoped else None,
             cancel_confirmed=flagger.confirmed if flagger is not None else None,
             add_memo=wave.add_memo if wave is not None else None,
             # SSG 선물 주문은 결제 뒤 폰 카카오톡에서 선물을 받아야 발송된다(사용자 2026-10-01 하네스 이식)
-            after_done=make_after_done(_source_sku_of),
-            operator=operator_service.submit if operator_service is not None else None,
-            operator_drain=operator_service.drain if operator_service is not None else None,
+            after_done=GiftFollowup(
+                queue,
+                accept=make_after_done(
+                    source_of_followup,
+                    gift_repair=GiftScreenRepairer(model=settings.repair_model) if settings.repair_enabled else None,
+                ),
+                source_of_job=_source_sku_of,
+                read_detail=detail_reader(bridge),
+                verify_only=make_verify_only(),
+                phone_session=make_phone_session(),
+                read_order=wave.get_order if wave is not None else None,
+                add_memo=wave.add_memo if wave is not None else None,
+            ),
+            operator=operator_service.submit if operator_service is not None and not office_scoped else None,
+            operator_drain=operator_service.drain if operator_service is not None and not office_scoped else None,
             # 중국 크림(식화) 주문은 폰 得物 앱으로 산다 — 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다
             phone_sources=(
                 {
@@ -475,7 +532,7 @@ def main() -> None:
                         pc_call=_pc_call(bridge),
                     )
                 }
-                if wave is not None
+                if wave is not None and not office_scoped
                 else {}
             ),
             sources=frozenset(
@@ -483,6 +540,12 @@ def main() -> None:
             ),
         )
     )
+
+    if office_scoped:
+        if (worker.d.flag_order is not None or worker.d.phone_sources
+                or worker.d.operator is not None or worker.d.operator_drain is not None):
+            raise RuntimeError('제한 범위 밖 실행 통로가 열려 있다 — 작업 시작 중지')
+        log.warning('선물 제한 범위: 폰 구매·기존 보류 자동 재실행 비활성 확인')
 
     def _diagnose_text(version: str | None) -> str:
         v = version or version_fn()
@@ -507,6 +570,12 @@ def main() -> None:
                 state_dir=settings.db_path.parent,
             )
     bot = SambaBot(slack_app, worker, queue, settings, _diagnose_text)
+    if settings.money_alert_receiver and settings.wave_tenant_id:
+        sms = SambaSmsSender(settings.money_alert_receiver, settings.wave_tenant_id, container=settings.sms_container)
+        money_alerts = MoneyBalanceAlerts(settings.db_path.parent / 'money-alerts.sqlite', sms.send)
+        for agent in agents.values():
+            if isinstance(agent, PayerAgent):
+                agent.money_balance_alert = money_alerts.observe
 
     # 자동 수집 — 삼바웨이브 클라이언트가 있고 켜져 있을 때만 돈다. 슬랙이 없으면 스레드 없이 큐에만 쌓인다
     intake: Intake | None = None

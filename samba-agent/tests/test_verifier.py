@@ -54,7 +54,8 @@ def test_셋이_같으면_통과(reg):
     route.side_effect = [page(EXPECTED), page(EXPECTED)]
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     out = agent(reg)(assignment(reg))
-    assert out.status == 'ok'
+    assert out.status == 'needs_ai'
+    assert out.payload['identity_unverified']
     assert out.payload['mismatches'] == []
 
 
@@ -132,7 +133,7 @@ def test_대조할_기대값이_없으면_ok가_아니라_사람에게_넘긴다
     respx.post(f'{URL}/tool/run_script').mock(return_value=page({}))
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     out = agent(reg)(assignment(reg, expected={}))
-    assert out.status == 'needs_human'
+    assert out.status == 'needs_ai'
     assert out.fail_reason is FailReason.VERIFY_MISMATCH
 
 
@@ -166,7 +167,8 @@ def test_삼바웨이브_값이_같으면_통과하고_앱_행은_읽지_않는�
     route.side_effect = [page(EXPECTED)]  # 소싱처 상세 1번만 부른다
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     out = verifier_with_wave(reg)(assignment(reg))
-    assert out.status == 'ok'
+    assert out.status == 'needs_ai'
+    assert out.payload['identity_unverified']
     assert out.payload['unverified'] == []
     assert route.call_count == 1
 
@@ -192,7 +194,7 @@ def test_삼바웨이브가_대조할_필드를_안_주면_사람에게_넘긴�
     respx.post(f'{URL}/tool/run_script').mock(return_value=page(EXPECTED))
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     out = verifier_with_wave(reg)(assignment(reg))
-    assert (out.status, out.fail_reason) == ('needs_human', FailReason.VERIFY_MISMATCH)
+    assert (out.status, out.fail_reason) == ('needs_ai', FailReason.VERIFY_MISMATCH)
     assert set(out.payload['unverified']) == set(EXPECTED)
 
 
@@ -204,7 +206,8 @@ def test_일부만_대조_가능하면_나머지는_대조_불가로_남긴다(r
     respx.post(f'{URL}/tool/run_script').mock(return_value=page(EXPECTED))
     respx.post(f'{URL}/tool/progress').mock(return_value=page('ok'))
     out = verifier_with_wave(reg)(assignment(reg))
-    assert out.status == 'ok'
+    assert out.status == 'needs_ai'
+    assert out.payload['identity_unverified']
     assert out.payload['unverified'] == ['source_order_no']
     assert any('대조 불가' in e.label for e in out.evidence)
 

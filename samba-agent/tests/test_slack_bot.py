@@ -73,7 +73,7 @@ def test_승인_버튼이_그래프를_이어간다(bot):
     b, q, w = bot
     b.handle_mention('<@BOT> A1 처리해', 'U1', 'ts1')
     w.tick()
-    assert q.get('A1').state == 'needs_human'
+    assert q.get('A1').state == 'needs_ai'
     out = b.handle_approval('A1', approved=True, user='U1')
     assert '승인' in out
     assert q.get('A1').state == 'done'  # 결제 승인 뒤에는 기록·검증까지 이어진다
@@ -85,7 +85,7 @@ def test_미등록_사용자의_승인은_무시한다(bot):
     w.tick()
     out = b.handle_approval('A1', approved=True, user='U999')
     assert '권한' in out
-    assert q.get('A1').state == 'needs_human'
+    assert q.get('A1').state == 'needs_ai'
 
 
 def test_상태와_버전과_진단(bot):

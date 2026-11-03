@@ -19,21 +19,40 @@ export function newLaneState(): LaneState {
   return { owned: new Set(), current: null }
 }
 
+function adoptChildTabs(real: TabManager, state: LaneState): void {
+  const tabs = real.list()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const tab of tabs) {
+      const openerId = real.get(tab.id)?.openerId
+      if (!state.owned.has(tab.id) && openerId && state.owned.has(openerId)) {
+        state.owned.add(tab.id)
+        changed = true
+      }
+    }
+  }
+}
+
 /** 레인 보기. state 는 레인 이름마다 하나 — 브릿지 요청(세션)이 바뀌어도 이어진다 */
 export function laneTabs(real: TabManager, state: LaneState): TabManager {
+  const owns = (id: string): boolean => {
+    adoptChildTabs(real, state)
+    return state.owned.has(id)
+  }
   const mine = (t: AgentTarget): boolean =>
-    state.owned.has(t.id) ||
-    (t.kind === 'popup' && typeof t.openerId === 'string' && state.owned.has(t.openerId))
+    owns(t.id) ||
+    (t.kind === 'popup' && typeof t.openerId === 'string' && owns(t.openerId))
   const alive = (id: string): boolean => real.listTargets().some((t) => t.id === id && mine(t))
   const overrides: Partial<Record<keyof TabManager, unknown>> = {
-    list: () => real.list().filter((t) => state.owned.has(t.id)),
+    list: () => real.list().filter((t) => owns(t.id)),
     listTargets: (): AgentTarget[] =>
       real
         .listTargets()
         .filter(mine)
         .map((t) => ({ ...t, active: t.id === state.current })),
     active: (): Tab | null =>
-      state.current && state.owned.has(state.current) ? real.get(state.current) : null,
+      state.current && owns(state.current) ? real.get(state.current) : null,
     // 폰 배선(tab-port)이 보는 "자동화가 조작하는 진짜 탭" 도 레인의 작업 탭이다 — 전역 표식을 보면
     // 사람이 보던 탭의 호스트로 계정을 찾아 결제가 거부됐다(실기 2026-10-06)
     workingTab: (): Tab | null => {
@@ -58,7 +77,7 @@ export function laneTabs(real: TabManager, state: LaneState): TabManager {
       if (alive(id)) state.current = id
     },
     activate: (id: string): void => {
-      if (state.owned.has(id)) state.current = id
+      if (owns(id)) state.current = id
     },
     create: (opts: Parameters<TabManager['create']>[0]): ReturnType<TabManager['create']> => {
       // 레인 탭은 전역 자동화 대상 표식을 바꾸지 않고, 사람이 창을 쓰는 중이면 뒤에서만 연다(visible-guard.ts)
@@ -68,7 +87,7 @@ export function laneTabs(real: TabManager, state: LaneState): TabManager {
       return t
     },
     close: (id: string): void => {
-      if (!state.owned.has(id)) return
+      if (!owns(id)) return
       real.close(id)
       state.owned.delete(id)
       if (state.current === id) state.current = null
@@ -112,6 +131,7 @@ export function labelLaneTargets(
   }
   const laneOf = (t: AgentTarget): string | undefined => {
     for (const [name, st] of lanes) {
+      adoptChildTabs(real, st)
       if (st.owned.has(t.id)) return name
       if (t.kind === 'popup' && typeof t.openerId === 'string' && st.owned.has(t.openerId))
         return name

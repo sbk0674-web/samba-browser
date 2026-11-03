@@ -196,6 +196,17 @@ class AgentBase:
         try:
             parsed = json.loads(body)
         except ValueError as e:
+            # page.get 경합은 스크립트 고장이 아니다. 배송지 저장 등 이미 실행된
+            # 동작을 재실행하거나 AI 수리로 보내지 않는다. 결제 이후 단계는
+            # bridge_down 자동 재접수 대상이 되지 않도록 결제불명으로 보존한다.
+            first_line = body.strip().splitlines()[0] if body.strip() else ''
+            if re.fullmatch(r'(?:Error:\s*)?page\s+busy', first_line, re.IGNORECASE):
+                prepay = self.spec.name.startswith('buyer.')
+                raise AgentFailure(
+                    'fail' if prepay else 'needs_ai',
+                    f'{name}: 페이지 읽기 경합(page busy) — 스크립트 수리·동작 재실행 안 함',
+                    FailReason.BRIDGE_DOWN if prepay else FailReason.PAY_INTERRUPTED,
+                ) from e
             # 원문 앞부분을 남겨 원인(도구 오류·시간 초과·안내 문구)을 가를 수 있게 한다(마스킹)
             raise AgentFailure(
                 'fail',

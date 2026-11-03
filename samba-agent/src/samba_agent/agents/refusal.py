@@ -23,7 +23,8 @@ CARD_REFUSALS = ('card-required', 'card-not-found')
 # 금고가 잠겨 비밀값을 만질 수 없다 — 다시 해도 같다. 사람이 금고를 열어야 한다
 VAULT_LOCKED_REFUSALS = ('vault-locked',)
 
-# 결제 앱이 멈춘 자리(PayFailReason) — 재결제 위험이 있어 재시도 없이 사람에게 넘긴다
+# 결제 앱이 멈춘 자리(PayFailReason) — 재결제 위험이 있어 재시도 없이 사람에게 넘긴다.
+# unknown 으로 남기면 감시/수리 루프가 "일시 오류"처럼 다시 넣을 수 있어 결제 중복 위험이 생긴다.
 PAY_REFUSALS = (
     'declined',
     'password-failed',
@@ -66,7 +67,7 @@ PERMISSION_REFUSALS = (
     'are not available inside run_js',
 )
 
-Verdict = tuple[Literal['fail', 'needs_human'], FailReason]
+Verdict = tuple[Literal['fail', 'needs_ai'], FailReason]
 
 
 def classify_refusal(result: str) -> Verdict | None:
@@ -84,11 +85,11 @@ def classify_refusal(result: str) -> Verdict | None:
     if any(body.startswith(m) for m in CARD_REFUSALS):
         return 'fail', FailReason.CARD_MISSING
     if any(body.startswith(m) for m in VAULT_LOCKED_REFUSALS):
-        return 'needs_human', FailReason.PERMISSION_DENIED
+        return 'needs_ai', FailReason.PERMISSION_DENIED
     if any(m in body for m in SECRET_SCREEN_REFUSALS):
-        return 'needs_human', FailReason.CAPTCHA
+        return 'needs_ai', FailReason.CAPTCHA
     if any(body.startswith(m) or m in body for m in PAY_REFUSALS):
-        return 'needs_human', FailReason.UNKNOWN
+        return 'needs_ai', FailReason.PAY_INTERRUPTED
     if any(m in body for m in PERMISSION_REFUSALS):
         return 'fail', FailReason.PERMISSION_DENIED
     return 'fail', FailReason.PERMISSION_DENIED

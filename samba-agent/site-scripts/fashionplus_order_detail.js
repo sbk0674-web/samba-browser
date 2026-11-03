@@ -28,7 +28,7 @@ const tr = (await page.get({})).tree
 const t = (tr.split('PAGE TEXT:')[1] || '').replace(/\s+/g, ' ')
 const got = (t.match(/주문 상세 (\d+) \(신청일: (\d{4}-\d\d-\d\d)\)/) || [])
 const item = tr.match(/link "(.*?) 옵션 (.+?)" href=\/goods\/detail\/(\d+)/)
-const status = (t.match(/옵션 .+? (결제완료|입금대기|배송준비중|배송중|배송완료|구매확정|취소신청|취소완료|반품\S*|교환\S*|환불\S*) \d+개/) || [])[1] || null
+const status = (t.match(/옵션 .+? (결제완료|입금대기|배송준비중|배송중|배송완료|구매확정|취소신청|취소완료|반품\S*|교환\S*|환불\S*)(?: 배송조회)? \d+개/) || [])[1] || null
 const method = ((t.match(/결제수단 정보 결제수단 (.+?) 결제승인일/) || [])[1] || '').trim()
 const email = (t.match(/이메일 ([\w.+-]+)@/) || [])[1] || null
 return done({

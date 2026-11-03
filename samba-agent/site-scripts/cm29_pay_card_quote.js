@@ -54,7 +54,7 @@ async function pickForm() {
 async function radios() {
   const r = (await page.get({ selector: 'label:has(input[type=radio])' })).tree
   // 이름 없는 라디오만(현금영수증 라디오는 이름이 있다), 번호 순 = 화면 순
-  const ids = lines(r).filter(l => /\] radio value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
+  const ids = lines(r).filter(l => /\] radio(?: "[^"]*")?(?: name=\S+)? value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
   const K = [['적립', /구매 적립금 받기/], ['선할인', /선할인 받기/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
   const got = []
   let p = 0

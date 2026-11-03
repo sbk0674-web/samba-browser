@@ -10,6 +10,7 @@
 3. 토큰은 헤더로만 쓰고 예외 메시지·로그에 옮기지 않는다.
 """
 
+import os
 import re
 from datetime import datetime
 from typing import Literal, Self
@@ -167,6 +168,7 @@ class WaveOrder(BaseModel):
     # SAMBA 정산금. 목록 응답에 실리면 마진을 정산금 기준으로 계산한다(없으면 판매가 근사)
     revenue: float | None = None
     seller: str | None = None
+    sales_channel_alias: str | None = None
     channel_name: str | None = None
     # 중국 크림 주문 — 판매처(得物 …)·판매처 가격(위안)·수집상품 상품코드(식화 품번). 삼바웨이브가 실어 줄 때만
     source_seller: str | None = None
@@ -239,7 +241,7 @@ class WaveOrder(BaseModel):
             # 행 id — 같은 상품주문번호의 다른 행(다른 사이즈)과 구분해 조회·기입한다
             wave_id=(self.id or '').strip() or None,
             source=self.source_site or '',
-            seller=(self.seller or '').strip(),
+            seller=(self.seller or self.sales_channel_alias or self.channel_name or '').strip(),
             sku=sku,
             qty=max(int(self.quantity or 1), 1),
             option=option,
@@ -514,11 +516,22 @@ class WaveClient:
         사용자 2026-09-28: 미이행은 취소요청이 아니라 취소중. reason 은 삼바웨이브가 주문 메모에 [취소근거] 로 남긴다.
         바뀌었으면 True, 이미 취소중이면 False.
         """
+        if os.environ.get('SAMBA_NO_AUTO_CANCEL') == '1':
+            raise WaveError(FailReason.UNKNOWN, '자동 취소 금지 모드 — 취소요청을 보내지 않았다')
         payload: dict[str, object] = {'status': 'cancelling', 'reason': reason}
         if flag:
             payload['flag'] = flag
         body = self._request('PUT', f'/orders/{order_no}/status', json=payload)
-        return bool(body.get('changed')) if isinstance(body, dict) else False
+        changed = bool(body.get('changed')) if isinstance(body, dict) else False
+        if (
+            isinstance(body, dict)
+            and body.get('ok') is True
+            and body.get('status') == 'cancelling'
+            and body.get('changed') is False
+            and reason.strip()
+        ):
+            self.add_memo(order_no, '[취소근거] ' + reason.strip())
+        return changed
 
     def dewu_tracking_targets(self, limit: int = 30) -> list[dict[str, str]]:
         """중국 크림 得物 주문 중 해외송장이 빈 건 — [{order_number, sourcing_order_number}]."""

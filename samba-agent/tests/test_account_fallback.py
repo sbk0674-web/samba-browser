@@ -109,10 +109,9 @@ def test_구매_한도에_걸린_계정은_빼고_다음으로_싼_계정으로_
     )
     account, snap = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
     assert account == 'buyer02'  # 한도 계정 다음으로 싼 계정(동률이면 앞 계정)
-    # 계정 전부를 주문서로 견적한다 — 빠른 값은 쿠폰·결제수단 적립·청구할인을 다 알지 못한다
-    assert calls == ACCOUNTS
-    # 이긴 계정이 마지막으로 연 계정이 아니라 주문서를 다시 만든다
-    assert snap.get('resnap') is True
+    # 산 계정의 주문서까지만 만든다 — 마지막으로 연 계정이라 다시 만들지 않는다
+    assert calls == ['buyer01', 'buyer02']
+    assert snap.get('resnap') is not True
 
 
 @respx.mock
@@ -126,7 +125,7 @@ def test_로그인_안_된_계정도_계정_사유라_다음_계정으로_잇는
             {
                 'buyer01': AgentFailure('fail', LIMIT, FailReason.OUT_OF_STOCK),
                 'buyer02': AgentFailure(
-                    'needs_human', 'buyer02: 로그인이 안 돼 있어 견적 못 함', FailReason.PERMISSION_DENIED
+                    'needs_ai', 'buyer02: 로그인이 안 돼 있어 견적 못 함', FailReason.PERMISSION_DENIED
                 ),
                 'buyer03': '결제 가능한 수단 없음',
                 'buyer05': {'cost': 43000.0},
@@ -151,7 +150,7 @@ def test_상품_사유면_다른_계정을_돌지_않는다(buyer, monkeypatch) 
     )
     with pytest.raises(AgentFailure) as e:
         buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert calls == ACCOUNTS  # 한 묶음으로 견적한다 — 묶음 뒤로 더 잇지는 않는다
+    assert calls == ['buyer01']
     assert e.value.reason.startswith('확정 품절')
 
 
@@ -191,7 +190,7 @@ def test_한도_계정_말고_나머지가_품절_표시면_확정_품절이다(
     )
     with pytest.raises(AgentFailure) as e:
         buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
-    assert calls == ACCOUNTS
+    assert calls == ['buyer01', 'buyer02']
     assert e.value.reason.startswith('확정 품절')
 
 
@@ -217,14 +216,14 @@ def test_결제_항목_없는_계정이_뽑히면_다음_계정으로_잇는다(
     )
     account, _ = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
     assert account == 'buyer02'  # 결제 항목 없는 최저 계정은 빠지고 그다음으로 싼 계정
-    assert calls == ACCOUNTS
+    assert calls == ['buyer01', 'buyer02']
 
 
 def test_계정_사유_판정() -> None:
     assert is_account_failure(AgentFailure('fail', LIMIT, FailReason.OUT_OF_STOCK))
-    assert is_account_failure(AgentFailure('needs_human', '로그인 실패(x)', FailReason.PERMISSION_DENIED))
+    assert is_account_failure(AgentFailure('needs_ai', '로그인 실패(x)', FailReason.PERMISSION_DENIED))
     assert not is_account_failure(AgentFailure('fail', '원가 못 읽음', FailReason.OUT_OF_STOCK))
-    assert not is_account_failure(AgentFailure('needs_human', '캡차', FailReason.CAPTCHA))
+    assert not is_account_failure(AgentFailure('needs_ai', '캡차', FailReason.CAPTCHA))
 
 
 def test_품절_표시_항목은_목록_뒤쪽에_있어도_그대로_보인다() -> None:

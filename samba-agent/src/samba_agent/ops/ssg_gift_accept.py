@@ -565,6 +565,7 @@ def make_after_done(
     *,
     adb: str | None = None,
     phone_serial: str | None = None,
+    gift_repair: Callable[..., str | None] | None = None,
 ) -> Callable[[object, dict], str | None]:
     """끝난 작업 뒤처리 — SSG 선물 주문이면 폰에서 선물을 받는다. source_of_job(작업) → (소싱처, 상품명)."""
     from samba_agent.agents.buyer import model_code_of
@@ -608,7 +609,21 @@ def make_after_done(
                             model_code=model_code_of(sku) or '',
                         )
                     except GiftAcceptError as e:
-                        log.warning('선물 수락(카톡 검색) 실패 — 옛 방식으로 다시: %s', e)
+                        from samba_agent.ops.evidence import save_phone_shot, tag
+
+                        shot = save_phone_shot(adb_path, serial, order_no, 'gift_search_failed', tuple(adb_server_args()))
+                        first_failure = str(e)
+                        log.warning('선물 수락(카톡 검색) 최초 실패: %s%s', e, tag(shot))
+                        if gift_repair is not None:
+                            repaired = gift_repair(phone, sku=sku, model_code=model_code_of(sku) or '', problem=first_failure)
+                            if repaired:
+                                return 'SSG ' + repaired
+                        if any(stage in first_failure for stage in ('화면', '배송정보', '선물 받기', '상품')):
+                            return f'SSG 선물 수락 실패 — {first_failure}{tag(shot)}'
+                        try:
+                            return 'SSG ' + accept_ssg_gift(phone, model_code_of(sku) or '', sku=sku)
+                        except GiftAcceptError as fallback_error:
+                            raise GiftAcceptError(f'최초: {first_failure} / 재시도: {fallback_error}') from fallback_error
                 return 'SSG ' + accept_ssg_gift(phone, model_code_of(sku) or '', sku=sku)
             except GiftAcceptError as e:
                 # 실패 순간의 폰 화면을 남긴다 — 글자 덤프만으로는 안내 팝업·완료 화면을 오판한다(2026-10-14)

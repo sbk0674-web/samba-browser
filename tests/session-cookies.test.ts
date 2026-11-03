@@ -9,6 +9,7 @@ import {
   removeStaleHostCopies,
   keepSessionCookies,
   persistedCookie,
+  shouldKeepSessionCookie,
   SESSION_COOKIE_KEEP_DAYS
 } from '../src/main/browser/session-cookies'
 
@@ -52,6 +53,13 @@ describe('persistedCookie', () => {
   it('만료가 있는 쿠키·도메인 없는 쿠키는 건드리지 않는다', () => {
     expect(persistedCookie(cookie({ session: false, expirationDate: 1 }))).toBeNull()
     expect(persistedCookie(cookie({ domain: undefined }))).toBeNull()
+  })
+
+  it('유튜브·구글 로그인 쿠키는 유지하지 않는다(로그아웃이 다시 살아나지 않게)', () => {
+    expect(shouldKeepSessionCookie(cookie({ domain: '.youtube.com' }))).toBe(false)
+    expect(shouldKeepSessionCookie(cookie({ domain: '.accounts.google.com' }))).toBe(false)
+    expect(persistedCookie(cookie({ domain: '.youtube.com', name: 'SID' }))).toBeNull()
+    expect(persistedCookie(cookie({ domain: '.accounts.google.com', name: 'ACCOUNT_CHOOSER' }))).toBeNull()
   })
 
   it('cookieUrl 은 secure 여부와 경로를 따른다', () => {

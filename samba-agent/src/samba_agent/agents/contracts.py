@@ -82,11 +82,18 @@ class Assignment(BaseModel):
 class AgentResult(BaseModel):
     """에이전트 → 감독자. 이 모양 말고는 아무것도 돌려주지 않는다."""
 
-    status: Literal['ok', 'fail', 'needs_human']
+    status: Literal['ok', 'fail', 'needs_ai']
     payload: dict[str, object] = Field(default_factory=dict)
     reason: str = Field(min_length=1)
     fail_reason: FailReason | None = None
     evidence: tuple[Evidence, ...] = ()
+
+    @model_validator(mode='before')
+    @classmethod
+    def _legacy_ai_status(cls, value: object) -> object:
+        if isinstance(value, dict) and value.get('status') == 'needs_human':
+            return {**value, 'status': 'needs_ai'}
+        return value
 
     @model_validator(mode='after')
     def _check_fail_reason(self) -> 'AgentResult':

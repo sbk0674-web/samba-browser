@@ -13,6 +13,8 @@ from samba_agent.supervisor.state import RunState
 
 # 구매 결과에서 다음 단계가 일하는 데 필요한 값 — 대조용이 아니라 인계용이다
 BUYER_HANDOFF_FIELDS = (
+    # Verifier must use the buyer's actual shipping kind, just as Recorder does.
+    'order_type',
     'card',
     'account',
     'cost',
@@ -71,7 +73,7 @@ def _handoff(state: RunState) -> dict[str, object]:
             out.update({f: r.payload.get(f) for f in BUYER_HANDOFF_FIELDS})
         if name == 'payer':
             # 결제가 성공 화면에서 뽑은 소싱 주문번호 — 기록·검증이 이걸 쓴다
-            out.update({f: r.payload.get(f) for f in ('card', 'source_order_no', 'arrival_memo')})
+            out.update({f: r.payload.get(f) for f in ('card', 'source_order_no', 'arrival_memo', 'naver_payment')})
     return {k: v for k, v in out.items() if v is not None}
 
 

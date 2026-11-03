@@ -4,6 +4,10 @@ $day = Get-Date -Format 'yyyyMMdd'
 $log = Join-Path $dir "logs\monitor-codex-$day.log"
 $last = Join-Path $dir 'logs\monitor-codex-last.txt'
 New-Item -ItemType Directory -Force (Join-Path $dir 'logs') | Out-Null
+$ensure = Join-Path $dir 'ensure-order-harness.ps1'
+if (Test-Path $ensure) {
+  powershell -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $ensure
+}
 $lock = Join-Path $dir 'logs\monitor-codex.lock'
 # 앞 실행이 아직 끝나지 않았으면 겹쳐 돌지 않는다(40분 넘은 잠금은 죽은 것으로 본다)
 if ((Test-Path $lock) -and ((Get-Date) - (Get-Item $lock).LastWriteTime).TotalMinutes -lt 40) { exit 0 }

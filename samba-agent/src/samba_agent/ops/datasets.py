@@ -41,11 +41,14 @@ def load_seed(root: Path, name: str) -> list[Example]:
         if not line.strip():
             continue
         row = json.loads(line)
+        outputs = dict(row['outputs'])
+        if outputs.get('status') == 'needs_human':
+            outputs['status'] = 'needs_ai'
         out.append(
             Example(
                 name=name,
                 inputs=row['inputs'],
-                outputs=row['outputs'],
+                outputs=outputs,
                 tags=tuple(row.get('tags', ())),
             )
         )

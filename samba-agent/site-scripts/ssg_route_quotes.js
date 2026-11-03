@@ -8,7 +8,8 @@
 // 반환 {ok, item_id, model, routes:[{route, entry_url, landed, ckwhere, mall_ok, listed, page_best, page_sale, sold_out, percent?, note?}], note}
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
-const t0 = Date.now(), late = () => Date.now() - t0 > 62000
+// 브릿지 run_script 제한(75초)보다 훨씬 먼저 빠져야 하네스가 주문 자체를 붙잡지 않는다.
+const t0 = Date.now(), late = () => Date.now() - t0 > 38000
 const pf = args.profile ? { profile: args.profile } : {}
 const sku = String(args.sku || '')
 const item = (sku.match(/itemId=(\d+)/) || [])[1]
@@ -62,7 +63,7 @@ if (want.includes('direct')) {
 if (want.includes('danawa') && model && !late()) {
   await open('https://search.danawa.com/dsearch.php?query=' + encodeURIComponent(model))
   try { await page.waitFor('pcode', 8000) } catch (e) {}
-  const pc = [...new Set(ids(await tree({ selector: 'a[href*="prod.danawa.com/info/?pcode="]' })).map(l => (hrefOf(l).match(/pcode=(\d+)/) || [])[1]).filter(Boolean))].slice(0, 3)
+  const pc = [...new Set(ids(await tree({ selector: 'a[href*="prod.danawa.com/info/?pcode="]' })).map(l => (hrefOf(l).match(/pcode=(\d+)/) || [])[1]).filter(Boolean))].slice(0, 1)
   let hit = null
   for (const p of pc) {
     if (late() || hit) break
@@ -92,7 +93,7 @@ if (want.includes('enuri') && model && !late()) {
   await sleep(1200)
   const all = ids(await tree({ selector: 'a[href*="Redirect.jsp"], a[href*="/catalog/"]' }))
   const pls = all.filter(l => /Redirect/.test(l) && /신세계/.test(l)).map(l => (hrefOf(l).match(/pl_no=(\d+)/) || [])[1])
-  const cats = [...new Set(all.map(l => (hrefOf(l).match(/\/catalog\/(\d+)/) || [])[1]).filter(Boolean))].slice(0, 2)
+  const cats = [...new Set(all.map(l => (hrefOf(l).match(/\/catalog\/(\d+)/) || [])[1]).filter(Boolean))].slice(0, 1)
   for (const c of cats) {
     if (late()) break
     await open('https://price.enuri.com/catalog/' + c)
@@ -100,7 +101,7 @@ if (want.includes('enuri') && model && !late()) {
     for (const l of ids(await tree({ selector: 'a[href*="vcode=47&"]' }))) pls.push((hrefOf(l).match(/pl_no=(\d+)/) || [])[1])
   }
   let got = null
-  for (const pl of [...new Set(pls.filter(Boolean))].slice(0, 4)) {
+  for (const pl of [...new Set(pls.filter(Boolean))].slice(0, 2)) {
     if (late() || got) break
     const u = `https://www.enuri.com/move/Redirect.jsp?type=ex&cmd=move_${pl}&pl_no=${pl}`
     await open(u)

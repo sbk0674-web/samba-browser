@@ -219,14 +219,14 @@ describe('VaultCaptureGate', () => {
     expect(b.setPendingCapture).not.toHaveBeenCalled()
   })
 
-  it('묻지 않고 자동 저장이 켜져 있으면 확인 바 없이 저장한다', () => {
+  it('묻지 않고 자동 저장이 켜져 있어도 새 계정은 확인 바를 띄운다', () => {
     const autoSave = vi.fn(() => true)
     const b = build({ autoSaveEnabled: true, autoSave })
-    expect(b.gate.handle({}, FRAME, PAYLOAD)).toBe('auto-saved')
-    expect(autoSave).toHaveBeenCalledWith(
+    expect(b.gate.handle({}, FRAME, PAYLOAD)).toBe('accepted')
+    expect(autoSave).not.toHaveBeenCalled()
+    expect(b.setPendingCapture).toHaveBeenCalledWith(
       expect.objectContaining({ username: 'alice', password: PASSWORD, isNew: true })
     )
-    expect(b.setPendingCapture).not.toHaveBeenCalled()
   })
 
   it('자동 저장이 켜져 있어도 잠긴 금고면 잠금 해제를 먼저 묻는다', () => {

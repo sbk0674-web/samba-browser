@@ -18,7 +18,7 @@ from samba_agent.settings import DEFAULT_ROOT
 def test_모든_에이전트_데이터셋이_있다():
     """스크립트가 다 있는(active) 소싱처와 공통 에이전트에는 시드 데이터셋이 있어야 한다.
 
-    scripts_pending 소싱처는 아직 실제로 돌지 않는다(부르면 곧바로 needs_human) — 시드도 없다.
+    scripts_pending 소싱처는 아직 실제로 돌지 않는다(부르면 곧바로 needs_ai) — 시드도 없다.
     """
     reg = Registry.load(DEFAULT_ROOT)
     counts = seed_counts(DEFAULT_ROOT)
@@ -43,7 +43,7 @@ def test_데이터셋마다_10건_이상이고_성공과_실패가_모두_있다
 def test_실패_사례의_기대는_올바른_거절이다():
     for e in load_seed(DEFAULT_ROOT, 'ds.buyer.musinsa'):
         if 'failure' in e.tags:
-            assert e.outputs['status'] in ('fail', 'needs_human')
+            assert e.outputs['status'] in ('fail', 'needs_ai')
             assert e.outputs['fail_reason']
 
 

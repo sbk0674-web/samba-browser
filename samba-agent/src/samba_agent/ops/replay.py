@@ -232,7 +232,7 @@ def _replay_assign(inputs: Mapping[str, object]) -> tuple[dict[str, object], lis
     options = dict(inputs.get('options', {}))
     spec = _registry().pick('buyer', order, options)
     if spec is None:
-        return {'status': 'needs_human', 'fail_reason': FailReason.UNKNOWN.value}, []
+        return {'status': 'needs_ai', 'fail_reason': FailReason.UNKNOWN.value}, []
     return {'status': 'ok', 'agent': spec.name}, []
 
 
@@ -245,7 +245,7 @@ def _replay_payer(inputs: Mapping[str, object]) -> tuple[dict[str, object], list
     if isinstance(snapshot, Mapping):
         raw = snapshot.get('raw')
         if isinstance(raw, str) and '캡차' in raw:
-            return {'status': 'needs_human', 'fail_reason': FailReason.CAPTCHA.value}, tools_called
+            return {'status': 'needs_ai', 'fail_reason': FailReason.CAPTCHA.value}, tools_called
 
     options = inputs.get('options')
     card = options.get('card') if isinstance(options, Mapping) else None
@@ -258,7 +258,7 @@ def _replay_payer(inputs: Mapping[str, object]) -> tuple[dict[str, object], list
         return {'status': 'ok', 'payload': {'dry_run': True, 'paid': False}}, tools_called
 
     if isinstance(snapshot, Mapping) and snapshot.get('approval_confirmed') is False:
-        return {'status': 'needs_human', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
+        return {'status': 'needs_ai', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
 
     tools_called.append('phone_approve_payment')
     result: dict[str, object] = {'status': 'ok', 'payload': {'paid': True}}
@@ -276,7 +276,7 @@ def _replay_recorder(inputs: Mapping[str, object]) -> tuple[dict[str, object], l
         return {'status': 'ok', 'payload': {'dry_run': True}}, tools_called
     snapshot = inputs.get('snapshot')
     if not isinstance(snapshot, Mapping):
-        return {'status': 'needs_human', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
+        return {'status': 'needs_ai', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
     expected = snapshot.get('expected', {})
     actual = snapshot.get('actual', {})
     if expected == actual:
@@ -291,7 +291,7 @@ def _replay_verifier(inputs: Mapping[str, object]) -> tuple[dict[str, object], l
     tools_called: list[str] = ['get_page']
     snapshot = inputs.get('snapshot')
     if not isinstance(snapshot, Mapping):
-        return {'status': 'needs_human', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
+        return {'status': 'needs_ai', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
     if not snapshot.get('found', True):
         return {'status': 'fail', 'fail_reason': FailReason.UNKNOWN.value}, tools_called
     expected = snapshot.get('expected', {})

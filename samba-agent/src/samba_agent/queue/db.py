@@ -21,14 +21,15 @@ from typing import Literal
 
 from samba_agent.failures import FailReason
 
-JobState = Literal['queued', 'running', 'done', 'failed', 'needs_human', 'cancelled']
+JobState = Literal['queued', 'running', 'done', 'failed', 'needs_ai', 'cancelled']
 # 살아 있는 상태 — 이 중 하나면 같은 주문의 새 요청을 거절한다
-LIVE_STATES: tuple[JobState, ...] = ('queued', 'running', 'needs_human')
+LIVE_STATES: tuple[JobState, ...] = ('queued', 'running', 'needs_ai')
 # 최초 1회 + 재시도 1회(스펙 §4.3-4)
 MAX_ATTEMPTS = 2
 # 결제 노드에 들어갔다는 표시. 이 단계에서 죽은 행은 재시작해도 다시 돌리지 않는다
 # (폰 승인이 이미 나갔을 수 있다 — 재결제 금지, 스펙 §6)
 PAY_STARTED_STEP = '결제 진행 중'
+GIFT_FOLLOWUP_KEY = '_ssg_gift_followup'
 # COMMIT 이 잠금에 막힐 때 다시 해 보는 횟수·간격
 COMMIT_TRIES = 5
 COMMIT_WAIT_S = 1.0
@@ -55,6 +56,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state);
 CREATE INDEX IF NOT EXISTS jobs_order_no ON jobs(order_no);
 CREATE UNIQUE INDEX IF NOT EXISTS jobs_wave_id ON jobs(wave_id) WHERE wave_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS gift_followups (
+  job_id INTEGER PRIMARY KEY, state TEXT NOT NULL, next_at REAL NOT NULL, created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS gift_followups_due ON gift_followups(state, next_at);
 """
 # 옛 표(order_no UNIQUE, wave_id 없음)에서 새 표로 옮길 때 그대로 복사하는 열 — id 를 지켜야 체크포인트
 # 스레드(job:<id>)가 이어진다
@@ -103,6 +108,7 @@ class JobQueue:
     """주문 큐. 한 프로세스(실행기)만 쓴다."""
 
     def __init__(self, path: Path) -> None:
+        self.allowed_job_ids: frozenset[int] | None = None
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -111,10 +117,11 @@ class JobQueue:
         self._db.execute('PRAGMA busy_timeout=5000')
         self._migrate_legacy()
         self._db.executescript(_SCHEMA)
+        self._db.execute("UPDATE jobs SET state='needs_ai' WHERE state='needs_human'")
         # 실행기가 도중에 죽었다면 running 인 행이 남는다. 결제 진행 중이던 행은
         # 다시 집으면 재결제가 되므로(리뷰 지적 — Critical 2) 사람에게 넘긴다.
         self._db.execute(
-            "UPDATE jobs SET state='needs_human', error=?, updated_at=? "
+            "UPDATE jobs SET state='needs_ai', error=?, updated_at=? "
             "WHERE state='running' AND step=?",
             (FailReason.PAY_INTERRUPTED.value, _now(), PAY_STARTED_STEP),
         )
@@ -255,10 +262,20 @@ class JobQueue:
             ).fetchone()
             if running is not None:
                 return None
+            scope_sql = ''
+            scope_args: tuple[int, ...] = ()
+            if self.allowed_job_ids is not None:
+                if not self.allowed_job_ids:
+                    return None
+                scope_args = tuple(self.allowed_job_ids)
+                scope_sql = 'AND attempts=0 AND id IN (' + ','.join('?' for _ in scope_args) + ') '
             row = self._db.execute(
                 "SELECT * FROM jobs WHERE state='queued' "
+                + scope_sql +
                 "ORDER BY CASE WHEN json_extract(options, '$._daangn_single_stock') = 1 "
-                "THEN 0 ELSE 1 END, id LIMIT 1"
+                "THEN 0 ELSE 1 END, "
+                "coalesce(julianday(json_extract(options, '$._order_received_at')), "
+                "julianday(created_at)), id LIMIT 1", scope_args
             ).fetchone()
             if row is None:
                 return None
@@ -274,11 +291,45 @@ class JobQueue:
             (agent, step, _now(), job_id),
         )
 
-    def finish(self, job_id: int, state: JobState, *, error: str | None = None) -> None:
+    def finish(self, job_id: int, state: JobState, *, error: str | None = None,
+               gift_followup: dict[str, object] | None = None) -> None:
         """실행 종료 상태 기록."""
+        if gift_followup is not None:
+            if state != 'done':
+                raise ValueError('선물 재검증은 구매 완료와만 함께 기록한다')
+            # 구매 done과 별도 선물 대기를 한 트랜잭션에 쓴다. 재시작해도 구매 큐로 돌아가지 않는다.
+            with self._immediate():
+                row = self._by_id(job_id)
+                if row is None:
+                    raise ValueError('없는 작업')
+                options = json.loads(row['options'])
+                options[GIFT_FOLLOWUP_KEY] = gift_followup
+                self._db.execute(
+                    'UPDATE jobs SET state=?, error=?, options=?, updated_at=? WHERE id=?',
+                    (state, error, json.dumps(options, ensure_ascii=False), _now(), job_id),
+                )
+                self._index_gift_followup(job_id, gift_followup)
+            return
         self._db.execute(
             'UPDATE jobs SET state=?, error=?, updated_at=? WHERE id=?',
             (state, error, _now(), job_id),
+        )
+
+    def pending_gift_followups(self, now: float) -> list[Job]:
+        """구매는 done인 채 선물 확인만 대기 중인 작업. 구매 claim에는 절대 포함하지 않는다."""
+        rows = self._db.execute(
+            "SELECT j.* FROM gift_followups f JOIN jobs j ON j.id=f.job_id "
+            "WHERE f.state='pending' AND f.next_at<=? AND j.state='done' "
+            'ORDER BY f.next_at, f.job_id LIMIT 1',
+            (now,),
+        ).fetchall()
+        return [self._job(row) for row in rows]
+
+    def _index_gift_followup(self, job_id: int, task: dict[str, object]) -> None:
+        self._db.execute(
+            'INSERT INTO gift_followups(job_id,state,next_at,created_at) VALUES(?,?,?,?) '
+            'ON CONFLICT(job_id) DO UPDATE SET state=excluded.state,next_at=excluded.next_at',
+            (job_id, str(task['state']), float(task.get('next_at', 0)), time.time()),
         )
 
     def set_version(self, job_id: int, version: str) -> None:
@@ -303,7 +354,7 @@ class JobQueue:
         return self._job(self._by_id(job_id))
 
     def try_start_resume(self, key: str, *, stage: str | None) -> Job | None:
-        """승인 재개 — 읽기(needs_human·단계 확인)와 running 전환을 한 트랜잭션으로 묶는다.
+        """승인 재개 — 읽기(needs_ai·단계 확인)와 running 전환을 한 트랜잭션으로 묶는다.
 
         두 스레드가 동시에 같은 승인 버튼을 눌러도 BEGIN IMMEDIATE 가 뒤엣놈을 기다리게 하고,
         먼저 커밋된 쪽이 state 를 running 으로 바꿔놔서 뒤엣놈은 조건에 걸려 None 을 받는다
@@ -311,12 +362,13 @@ class JobQueue:
         여럿이면 먼저 접수된 것부터.
         """
         with self._immediate():
-            rows = [r for r in self._rows_by_key(key) if r['state'] == 'needs_human']
-            row = next((r for r in rows if _waiting(r['step'], stage)), None)
+            rows = [r for r in self._rows_by_key(key) if r['state'] == 'needs_ai']
+            row = next((r for r in rows if _waiting(r['step'], stage)
+                        and (self.allowed_job_ids is None or r['id'] in self.allowed_job_ids)), None)
             if row is None:
                 return None
             self._db.execute(
-                "UPDATE jobs SET state='running', updated_at=? WHERE id=? AND state='needs_human'",
+                "UPDATE jobs SET state='running', updated_at=? WHERE id=? AND state='needs_ai'",
                 (_now(), row['id']),
             )
             return self._job(self._by_id(row['id']))
@@ -369,6 +421,8 @@ class JobQueue:
                 'UPDATE jobs SET options=? WHERE id=?',
                 (json.dumps(options, ensure_ascii=False), job_id),
             )
+            if key == GIFT_FOLLOWUP_KEY and isinstance(value, dict):
+                self._index_gift_followup(job_id, value)
 
     def needs_ai_unjudged(self, limit: int = 5) -> list[Job]:
         """AI 대행이 아직 보지 않은 needs_ai(사유 unknown) — 오래된 것부터.

@@ -180,7 +180,7 @@ class Registry:
         return found.key if found else value
 
     def pick(self, kind: str, order: OrderRef, options: Mapping[str, str]) -> AgentSpec | None:
-        """담당 조건이 맞는 첫 에이전트. 없으면 None → 감독자가 needs_human(unsupported)."""
+        """담당 조건이 맞는 첫 에이전트. 없으면 None → 감독자가 needs_ai(unsupported)."""
         fields = {'source': order.source, 'seller': order.seller, **dict(options)}
         for s in self.of_kind(kind):
             if all(self._matches(fields, k, v) for k, v in s.match.items()):

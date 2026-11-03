@@ -4,7 +4,7 @@ import dataclasses
 import pytest
 
 from samba_agent.operator.agent import MIN_EVIDENCE_CHARS, OperatorAgent, Verdict, normalize
-from samba_agent.operator.service import OPERATOR_KEY, OperatorService, eligible
+from samba_agent.operator.service import DEFER_KEY, OPERATOR_KEY, OperatorService, eligible
 from samba_agent.queue.db import JobQueue
 
 
@@ -32,10 +32,33 @@ class _Q:
     def __init__(self, tmp_path):
         self.q = JobQueue(tmp_path / 'jobs.sqlite')
         self.job, _ = self.q.enqueue('T1', 'u', {}, None, wave_id='ord_T1')
-        self.q.finish(self.job.id, 'needs_human', error='unknown')
+        self.q.finish(self.job.id, 'needs_ai', error='unknown')
 
     def job_now(self):
         return self.q.get_by_id(self.job.id)
+
+
+@pytest.mark.parametrize('confirmed', [True, False, 'error'])
+def test_operator_cancel_finishes_only_after_wave_readback(tmp_path, confirmed):
+    h = _Q(tmp_path)
+
+    def check(key, reason):
+        assert key == 'ord_T1' and reason == 'out_of_stock'
+        if confirmed == 'error':
+            raise RuntimeError('readback unavailable')
+        return confirmed
+
+    svc = OperatorService(
+        OperatorAgent(),
+        call=lambda *_: '',
+        queue=h.q,
+        flag_order=lambda *_: '재고X 표시함',
+        report=lambda *_: None,
+        cancel_confirmed=check,
+        run_async=False,
+    )
+    svc.apply(h.job_now(), Verdict('cancel', '품절', '지정 상품 주문 옵션이 구매 목록에 없음'))
+    assert h.job_now().state == ('cancelled' if confirmed is True else 'needs_ai')
 
 
 def test_맡길_수_있는_멈춤은_결제_전_알_수_없는_사유뿐(tmp_path):
@@ -65,14 +88,14 @@ def test_retry_판단은_작업을_처음부터_다시_넣고_cancel_은_표시�
     again = h.job_now()
     assert again.state == 'queued' and again.options.get(OPERATOR_KEY) == 1
     # 취소는 근거를 메모로 남긴다
-    h.q.finish(again.id, 'needs_human', error='unknown')
+    h.q.finish(again.id, 'needs_ai', error='unknown')
     svc.apply(h.job_now(), Verdict('cancel', '품절', '주문 옵션 240 (품절) — 상품 화면 선택지'))
     assert flagged and flagged[0][0] == 'ord_T1' and flagged[0][1] == 'out_of_stock'
     assert '[AI 대행 확인]' in flagged[0][2]
     # human 은 아무것도 바꾸지 않는다
     before = h.job_now().state
     svc.apply(h.job_now(), Verdict('human', '판단 불가'))
-    assert h.job_now().state == before and any('사람 확인' in r for r in reports)
+    assert h.job_now().state == before and any('needs_ai' in r for r in reports)
 
 
 @pytest.mark.parametrize('blocked', ['결제하기 버튼 클릭', 'password 입력', '주문취소 클릭'])
@@ -94,8 +117,12 @@ def test_바빠서_못_본_needs_ai_는_drain_이_나중에_맡긴다(tmp_path):
             return Verdict('human', '확인 필요')
 
     svc = OperatorService(
-        Agent(), call=lambda *_: '', queue=h.q, flag_order=None,
-        report=lambda *_: None, run_async=False,
+        Agent(),
+        call=lambda *_: '',
+        queue=h.q,
+        flag_order=None,
+        report=lambda *_: None,
+        run_async=False,
     )
     assert [j.id for j in h.q.needs_ai_unjudged()] == [h.job.id]
     assert svc.drain() is True
@@ -107,3 +134,33 @@ def test_바빠서_못_본_needs_ai_는_drain_이_나중에_맡긴다(tmp_path):
     other, _ = h.q.enqueue('T2', 'u', {OPERATOR_KEY: 1}, None, wave_id='ord_T2')
     h.q.finish(other.id, 'needs_ai', error='unknown')
     assert all(j.id != other.id for j in h.q.needs_ai_unjudged())
+
+
+def test_주문_조회가_일시_오류면_error_로_고정하지_않고_미룬다(tmp_path):
+    """실기 2026-10-19: 삼바웨이브 재배포 502 구간에 AI 대행의 주문 조회가 실패해 _operator=error 로 묶였다(세 번)."""
+    h = _Q(tmp_path)
+
+    def broken(_job):
+        raise ValueError('order lookup incomplete: source, seller, sku, qty')
+
+    judged: list[str] = []
+    svc = OperatorService(
+        OperatorAgent(),
+        call=lambda *_: '',
+        queue=h.q,
+        flag_order=None,
+        report=lambda *_: None,
+        describe=broken,
+        run_async=False,
+    )
+    svc._agent.judge = lambda **_: judged.append('x') or Verdict('human', 'x')  # type: ignore[method-assign]
+    assert svc.submit(h.job_now(), 'unknown', '탭이 닫힘') is True
+    job = h.job_now()
+    assert judged == []  # 판단은 하지 않았다
+    assert OPERATOR_KEY not in job.options  # error 로 고정하지 않는다
+    assert float(job.options[DEFER_KEY]) > 0
+    assert svc.drain() is False  # 미룬 시각 전엔 다시 집지 않는다
+    h.q.mark_option(job.id, DEFER_KEY, 0)  # 시간이 지난 것처럼
+    svc._describe = lambda j: ('MUSINSA', 'MUSINSA · S1')  # type: ignore[assignment]
+    assert svc.drain() is True
+    assert judged == ['x']

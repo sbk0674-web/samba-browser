@@ -25,6 +25,7 @@ from samba_agent.agents.base import (
     split_page_dialogs,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment, OrderRef
+from samba_agent.agents.order_identity import color_code_conflict
 from samba_agent.agents.registry import AgentSpec
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
@@ -82,8 +83,12 @@ def office_block_in(page: str) -> bool:
     인데 다른 곳의 이름과 합쳐 사무실로 봤다(실기 2026-09-25).
     """
     flat = re.sub(r'\s+', ' ', page)
-    detail = r'\s*'.join(re.escape(part) for part in OFFICE_DETAIL.split())
-    near = rf'{OFFICE_NAME}.{{0,160}}?{re.escape(OFFICE_ADDRESS_HINT)}\s*,?\s*{detail}'
+    # 사무실은 101호·102호 둘 다 같은 곳이다(사용자 2026-11-03) — 이미 저장된 사무실 배송지를 그대로 쓴다
+    # 이름과 주소 사이에 다른 배송지 칸('배송지 김가명 …')이 끼면 다른 사람 배송지다
+    near = (
+        rf'{OFFICE_NAME}(?:(?!배송지|받는|수령).){{0,160}}?'
+        rf'{re.escape(OFFICE_ADDRESS_HINT)}\s*,?\s*{OFFICE_ROOM_RE}'
+    )
     return re.search(near, flat) is not None
 
 
@@ -422,6 +427,7 @@ def cheapest_quotes(
                 continue
         reward = _as_float(q.get('reward'))
         if quote_provider(method, card) == 'naver':
+            card = NAVERPAY_CARD
             # 네이버페이 기본 적립(결제액 1%)은 사이트 적립(A-RT 포인트 등)과 따로 붙는다 — 원가에서 뺀다
             # (사용자 2026-09-25: 사용 포인트는 더하고 적립 포인트·네이버 포인트는 뺀다. 실측 64,600 → 646)
             reward += round(cost * NAVERPAY_POINT_RATE)
@@ -454,6 +460,8 @@ OFFICE_ADDRESS_HINT = local_aliases.apply('사무실길 58')
 OFFICE_NAME = local_aliases.apply('김사무')
 # 까대기 주문 배송지(사무실). 기본 배송지가 사무실이 아닐 때 이번 주문에만 넣는다 — poizon-sourcing 스킬 "사무실 배송"
 OFFICE_DETAIL = '1층 102호'
+# 저장된 사무실 배송지 호수 — 101호·102호 모두 같은 사무실(사용자 2026-11-03)
+OFFICE_ROOM_RE = r'(?:1\s*층\s*)?10[12]\s*호'
 # SSG 선물하기 스크립트(2026-09-29) — 바로구매 주문서로 견적한 뒤 선물 주문서로 바꿔 탄다
 SSG_GIFT_ENTER_SCRIPT = 'ssg_gift_enter'
 SSG_GIFT_ADDRESS_SCRIPT = 'ssg_gift_address'
@@ -629,10 +637,10 @@ def effective_cost(row: dict[str, object]) -> float:
     used = _as_float(row.get('points_used'))
     card = str(row.get('card') or '')
     factor = billing_factor(card or None)
-    if factor == 1.0 and '네이버' in f'{card} {row.get("method") or ""}':
-        # 네이버페이는 그 안에 등록한 현대카드로 결제된다 — 카드 이름이 안 보여도 청구할인 2.7%가 붙는다
-        # (사용자 2026-10-02). 다른 카드 이름이 적혀 있으면 그 카드 계수를 쓴다(위 billing_factor)
-        factor = billing_factor(NAVERPAY_CARD)
+    if row.get('payment_kind') == 'money' or (
+        '네이버' in card and any(word in card for word in ('머니', '충전', '계좌'))
+    ):
+        factor = 1.0
     if factor == 1.0 and '토스' in f'{card} {row.get("method") or ""}':
         # 토스페이도 현대카드로 낸다(사용자 2026-10-06)
         factor = billing_factor(TOSS_CARD)
@@ -699,7 +707,11 @@ def decide_order_type(
 
 
 def shipping_fee_for(order: OrderRef, order_type: str) -> float:
-    """삼바웨이브에 기록할 배송비 — 포이즌 외 마켓의 까대기 건만 2,300원, 나머지(포이즌·직배)는 0."""
+    """당근 바로판매·포이즌·직배는 0, 그 외 까대기는 2,300원."""
+    if re.fullmatch(r'당근\s*[0-9]+', order.order_no.strip()) and (
+        order.seller.strip().startswith('당근') or order.seller.strip().lower() == 'daangn'
+    ):
+        return 0.0
     if order_type == 'kkadaegi' and not is_poison_seller(order.seller):
         return float(KKADAEGI_SHIPPING_FEE)
     return 0.0
@@ -746,7 +758,7 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
     숫자만 같은 것(사이즈 230 ↔ '230(mm)'). '품절' 표시가 붙은 후보는 뺀다.
     아무 단계도 안 맞으면 빈 목록 — 절대 '가까운 값' 으로 대신하지 않는다.
     """
-    live = [o for o in options if not _sold_out(o)]
+    live = [o for o in options if not _sold_out(o) and not color_code_conflict(wanted, o)]
     if not wanted:
         return live
     # 프리사이즈 표기 차이(FREE·F·ONE·ONE SIZE·OS·단일) — 주문이 프리사이즈인데 후보가 프리사이즈 하나뿐이면 그것이다
@@ -1192,14 +1204,13 @@ COUPON_GAP_MIN_WON = 3000
 COUPON_GAP_RATE = 0.05
 
 
-# 빠른 비교(상품 화면 할인가 − 최대 적립)는 순위를 정하는 데 쓰지 않는다 — 견적 순서만 정한다.
-# 상품 화면 값은 결제수단 적립·청구할인을 모르고, 쿠폰이 반영 안 된 값을 줄 때도 있다:
-# 실기 2026-10-01 플리즈노팔로우(30원 차로 hwangnol06 선택, 주문서 원가는 edelvise06 이 862원 쌈),
-# 2026-10-02 노스페이스 비니(edelvise06 화면가 34,460 인데 주문서는 쿠폰 적용 29,960 — 무신사머니 적립까지 치면 최저).
+# 계정마다 다른 건 쿠폰뿐이고 상품 화면 '나의 할인가'가 쿠폰을 반영한다(사용자 2026-11-03) — 계정 전부의 주문서를
+# 만들면 주문 1건이 11분 걸렸다. 화면가가 싼 계정 하나만 주문서를 만들고, 계정 사유로 못 사면 다음 계정으로 잇는다.
+# 쿠폰이 화면가에 안 잡혀 주문서가 비싼 경우는 coupon_gap 검사가 잡는다.
 def quick_batches(ranked: list[str], scores: dict[str, float]) -> list[list[str]]:
-    """빠른 비교 순위를 견적 묶음으로 나눈다 — 계정 전부를 한 묶음으로 주문서 견적한다(싼 순서대로)."""
-    del scores  # 값의 크기로 계정을 빼지 않는다
-    return [list(ranked)] if ranked else []
+    """빠른 비교 순위를 한 계정씩 나눈다(싼 순서대로)."""
+    del scores
+    return [[account] for account in ranked]
 
 
 def coupon_gap(my_price: float | None, sheet_total: float) -> float:
@@ -1702,6 +1713,7 @@ class BuyerAgent(AgentBase):
     _dry_run: bool = True
     # 배송지 공급자(삼바웨이브 상세). 없으면 스냅샷·전용 스크립트로 받는다
     _shipping_fn: 'ShippingFn | None' = None
+    office_shipping_blocked: bool = False
     # 계정 비교 상한(SAMBA_COMPARE_ACCOUNTS_MAX). 배선은 factory 가 한다
     compare_accounts_max: int = 3
     # 결제에 쓸 수 있는 결제 제공자(SAMBA_ALLOWED_PAY_PROVIDERS). None 이면 키마스터에 있는 것 전부
@@ -1715,7 +1727,6 @@ class BuyerAgent(AgentBase):
     _order_type_noted: tuple[str, str] | None = None
     # 주문번호 → 받는 곳이 라자다 배대지인가(삼바웨이브 배송지를 한 번만 본다)
     _forwarder_seen: dict[str, bool] | None = None
-
     def __call__(self, assignment: Assignment) -> AgentResult:
         self._dry_run = assignment.dry_run
         # 계정 비교 중 견적이 실패한 사유들(모든 계정 실패 때 결과 판정에 쓴다)
@@ -2240,6 +2251,8 @@ class BuyerAgent(AgentBase):
             '반드시 지킬 것: 옵션(사이즈·색상)을 실제로 고르지 못했으면 구매하기·바로구매 버튼을 절대 누르지 말고 '
             'options 만 돌려준다 — 옵션 없이 누르면 "옵션을 선택해 주세요" 경고창이 계정 수만큼 쏟아진다. '
             '구매 버튼은 옵션을 고른 뒤, 또는 옵션 선택창이 아예 없는 상품일 때만 누른다.'
+            '상품 주소는 전달받은 sku의 정확한 상품 ID/URL만 사용한다. 모델번호로 상품 ID를 추측하거나 '
+            '상품번호에 숫자를 붙여 후보 주소를 만들거나 새 탭으로 반복 탐색하지 않는다. 품절은 그대로 반환한다.'
         )
 
         def pick_failed(out: dict[str, object]) -> bool:
@@ -3073,6 +3086,9 @@ class BuyerAgent(AgentBase):
             # 방금 만든 주문서 탭을 짚어 준다 — 같은 계정의 주문서 탭이 하나 더 남아 있으면 스크립트가
             # '주문서 탭 여러 개'로 멈춘다(실기 2026-10-02 29CM 교차 비교 승: 견적 없이 진행해 결제창을 못 열었다)
             quote_args['tab'] = str(snap.get('order_tab'))
+        def check_quotes(output: dict[str, object]) -> str | None:
+            return quotes_problem(output, offered, allowed, src.direct_card, src.easy_pay_card)
+
         try:
             out = self.script_json(
                 src.payment_quotes_script,
@@ -3085,9 +3101,7 @@ class BuyerAgent(AgentBase):
                     'points_used 에는 사용한 적립금·포인트를 넣는다 — 원가 = cost × 카드 청구할인 − reward + points_used. '
                     '결제하기는 누르지 않는다.'
                 ),
-                check=lambda o: quotes_problem(
-                    o, offered, allowed, src.direct_card, src.easy_pay_card
-                ),
+                check=check_quotes,
             )
         except AgentFailure as e:
             self.note('결제수단 견적', mask_text(f'못 읽음({e.reason[:80]}) — 스냅샷 원가로 진행'))
@@ -3245,6 +3259,8 @@ class BuyerAgent(AgentBase):
         """주문서에 담긴 옵션이 주문 옵션과 같은가. 주문 옵션에 사이즈 숫자가 있으면 그 숫자가 꼭 겹쳐야 한다."""
         if not wanted:
             return True
+        if color_code_conflict(wanted, selected):
+            return False
         # 하네스가 매칭해 스크립트에 넘긴 선택지 글자(옵션 재선택)가 주문서에 그대로 담겼으면 같은 옵션이다
         picked = getattr(self, '_reselected', {}).get(wanted)
         if picked and ''.join(picked.split()).lower() in ''.join(selected.split()).lower():
@@ -3265,6 +3281,7 @@ class BuyerAgent(AgentBase):
         AI 에게는 사이즈 숫자가 겹치는 후보만 준다(numeric_overlap_options). 답은 후보 중 하나로 맞춰지지
         않으면 버린다. 같은 (주문 옵션, 후보) 는 작업 안에서 한 번만 묻는다(계정 4개 비교).
         """
+        options = [o for o in options if not color_code_conflict(wanted, o)]
         rule = matching_options(options, wanted)
         if rule or not wanted:
             return rule
@@ -3395,10 +3412,11 @@ class BuyerAgent(AgentBase):
         ]
         try:
             verdict = self.decide_once(
-                '같은 상품·같은 옵션을 무신사 계정 여러 개로 주문서까지 만들어 읽은 값이다. 계정마다 다를 수 있는 것은 '
-                '쿠폰(받은 쿠폰·적용액)과 등급 적립뿐이고, 비교액은 결제액+사용 적립금이다. 적립금 규칙: 보유 5만원 미만이면 '
-                '0원, 이상이면 최대 사용. 값이 말이 안 되는 계정(예: 쿠폰을 받았는데 적용 0원, 다른 계정과 옵션이 다름, '
-                '비교액이 혼자 크게 튐, 적립금 규칙 위반)을 choice 에 쉼표로 적고(없으면 "없음") reason 에 계정별 이유를 적어라.\n'
+                '같은 상품·같은 옵션을 한 사이트의 계정 여러 개로 주문서까지 만들어 읽은 값이다. 계정마다 다를 수 있는 것은 '
+                '쿠폰(받은 쿠폰·적용액)과 등급 적립뿐이다. 비교액은 결제액+사용 적립금에서 결제수단 혜택을 뺀 값이라 결제액보다 '
+                '낮을 수 있다. 적립금 사용불가 상품은 보유액과 상관없이 사용 0원이 정상이다. 값이 말이 안 되는 계정(예: 쿠폰을 '
+                '받았는데 적용 0원, 다른 계정과 옵션이 다름, 비교액이 혼자 크게 튐)을 choice 에 쉼표로 적고(없으면 "없음") '
+                'reason 에 계정별 이유를 적어라.\n'
                 f'주문 옵션: {a.order.option}\n값: {json.dumps(rows, ensure_ascii=False)}',
                 Decision,
             )
@@ -3533,7 +3551,8 @@ class BuyerAgent(AgentBase):
             update={'order': order2, 'options': {**a.options, **extra, 'no_cross': True}}
         )
         try:
-            s_acc, s_snap = cmp._pick_cheapest(a2, cmp._candidate_accounts(a2))
+            # 다른 사이트는 값만 견주면 된다 — 계정 하나로 본다(계정 전부 비교로 5분 넘게 걸렸다, 2026-11-03)
+            s_acc, s_snap = cmp._pick_cheapest(a2, cmp._candidate_accounts(a2)[:1])
             if sib_src.payment_quotes and _as_float(s_snap.get('cost')) > 0:
                 cmp._apply_payment_quotes(a2, s_acc, s_snap)
         except AgentFailure as e:
@@ -3918,9 +3937,25 @@ class BuyerAgent(AgentBase):
             FailReason.PERMISSION_DENIED,
         )
 
+    # 삼바웨이브 주문 조회(factory 가 꽂는다) — 구매를 시작하기 전에 이미 산 주문인지 본다
+    order_lookup: Callable[[str], object] | None = None
+
+    def _already_bought(self, a: Assignment) -> None:
+        """사람이 직접 사서 소싱주문번호를 넣은 주문은 견적부터 하지 않는다(2026-11-03 당근 941: 산 주문을 다시 견적)."""
+        if self.order_lookup is None or a.options.get('rebuy_of'):
+            return
+        try:
+            current = self.order_lookup(a.order.wave_key)
+        except WaveError:
+            return  # 확인 못 하면 결제 직전 재조회가 다시 막는다
+        sourcing_no = str(getattr(current, 'sourcing_order_number', '') or '').strip()
+        if sourcing_no:
+            raise AgentFailure('fail', f'이미 소싱주문번호가 있다: {sourcing_no}', FailReason.DUPLICATE)
+
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
         self._current_order_no = a.order.order_no
+        self._already_bought(a)
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
         self._ship_key = ''
         self._ship_districts: list[str] = []
@@ -4463,6 +4498,8 @@ class BuyerAgent(AgentBase):
         # 실기 2026-09-30 무신사) — 스냅샷이 만든 주문서 탭을 배송지 스크립트에 넘긴다
         self._ship_tab = str(snap.get('order_tab') or '')
         if self.order_type_of(a.order, snap) == 'kkadaegi':
+            if self.office_shipping_blocked:
+                raise AgentFailure('needs_ai', '사무실 호수 확인 대기 — 사무실 배송 선택·구매 중지', FailReason.UNKNOWN)
             # 까대기는 사무실이 받는 곳이다 — 결제 직전 주문서에 사무실 도로명이 보여야 한다(고객 주소와 대조하지 않는다).
             # 기본 배송지 유지·기존 사무실 선택 경로가 열쇠를 안 만들어 대조 없이 결제되던 구멍(2026-10-08)
             self._ship_key = road_key(OFFICE_SHIPPING.get('address'))
@@ -4471,7 +4508,8 @@ class BuyerAgent(AgentBase):
                 return
             # 기본 배송지가 사무실이 아니다(또는 없다) — 목록에 사무실 배송지가 있으면 그것을 고르고,
             # 없을 때만 사무실 주소를 새로 넣는다. 기본 배송지 자체는 바꾸지 않는다(poizon-sourcing 스킬 "사무실 배송")
-            if self._select_existing_shipping(dict(OFFICE_SHIPPING), account):
+            # 상세주소(호수)는 비워서 고른다 — 101호·102호 어느 쪽으로 저장돼 있어도 같은 사무실이다
+            if self._select_existing_shipping({**OFFICE_SHIPPING, 'address_detail': ''}, account):
                 return
             self.note('배송지', '목록에 사무실 배송지가 없어 사무실 주소를 새로 넣는다')
             self._apply_shipping(a, dict(OFFICE_SHIPPING), account)
@@ -4484,7 +4522,9 @@ class BuyerAgent(AgentBase):
         shipping = self._fetch_shipping(a, snap)
         # 직배·선물도 같은 배송지가 이미 목록에 있으면 고른다 — 재시도마다 같은 주소가 새로 저장되던 것을 막는다
         # (실기 2026-09-27: 29CM·무신사 주소록에 같은 고객 주소가 4개 쌓임)
-        if self._select_existing_shipping(dict(shipping), account):
+        # 롯데온은 목록을 뒤지지 않고 둘째 항목을 덮어쓴다(사용자 지시 — 주소록에 고객 주소를 쌓지 않는다)
+        overwrite = source_of(self.spec.name).key == 'lotteon'
+        if not overwrite and self._select_existing_shipping(dict(shipping), account):
             # 기존 배송지를 골라 통과한 경로도 결제 직전 주문서 대조 열쇠를 만든다 — 새 배송지 입력 경로에서만 만들어져
             # 재시도(기존 항목 선택)로 엉뚱한 줄이 골라져도 대조 없이 결제되던 오배송 구멍(2026-10-08, 5건)
             self._ship_key = road_key(shipping.get('address'))
@@ -4509,6 +4549,9 @@ class BuyerAgent(AgentBase):
         # 선물포장 추가 칸 문구('031(블랙) 선물포장 &…')가 옵션 글자에 붙어 오면 떼어 낸다 — 붙은 채 선물 진입에 넘기면
         # 옵션을 하나로 못 찾았다(실기 2026-10-21 SSG 라코스테 양말 2803)
         selected = re.sub(r'\s*선물\s*포장\s*&.*$', '', selected).strip()
+        # 신세계백화점 상품은 되읽은 옵션 앞에 상품명이 붙어 온다('… 덩크 로우 DD1503-103 옵션 : 245') — 옵션 값만 남긴다
+        # (실기 2026-11-03 SSG 4059·3996: 상품명째 넘겨 옵션을 하나로 못 찾았다)
+        selected = re.sub(r'^.*옵션\s*[:：]\s*', '', selected).strip()
         want = str(a.order.option or '')
         # 2단 옵션(색/사이즈)은 주문서 되읽기가 뒷단('S 쇼핑백 신청')만 잡는다 — 선물 진입 스크립트는 '색/사이즈' 를
         # 칸 순서대로 고르므로 주문 옵션 그대로 준다(실기 2026-10-05 SSG 지오다노 '03 블루/S')
@@ -4711,7 +4754,10 @@ class BuyerAgent(AgentBase):
                 FailReason.UNKNOWN,
             )
         self._fill_phone(applied)
-        self._confirm_shipping(shipping, args)
+        if applied.get('edited'):
+            self._save_edited_shipping(shipping, {**args, 'gift': bool(applied.get('gift'))})
+        else:
+            self._confirm_shipping(shipping, args)
         # 결제 직전 주문서 대조용 열쇠(도로명+번호) — 전체 주소는 남기지 않는다
         self._ship_key = road_key(shipping.get('address'))
         # 결제 직전 시·군·구 대조용 — 동·번지가 같은 다른 도시(여수 남산동 262-4)를 걸러낸다(2026-10-23)
@@ -4756,6 +4802,25 @@ class BuyerAgent(AgentBase):
             ),
             check=shipping_set_problem(shipping),
         )
+
+    def _save_edited_shipping(self, shipping: dict[str, object], args: dict[str, object]) -> None:
+        """덮어쓴 둘째 배송지를 저장하고 골라 주문서에 반영한다. 주문서에서 되읽은 값이 달라야 멈춘다."""
+        saved = self.script_json(
+            f'{source_of(self.spec.name).key}_save_edited',
+            {k: v for k, v in args.items() if k in ('name', 'address', 'tab', 'gift')},
+            goal='배송지 수정 창을 저장하고 그 줄을 골라 주문서에서 되읽은 이름·주소를 ok:true 와 함께 돌려준다.',
+            check=lambda o: (
+                None
+                if o.get('ok') and shipping_matches(shipping, o)
+                else f'확정 실패: note={o.get("note")}'
+            ),
+        )
+        if not saved.get('ok') or not shipping_matches(shipping, saved):
+            raise AgentFailure(
+                'needs_ai',
+                f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:80])}',
+                FailReason.UNKNOWN,
+            )
 
     def _confirm_shipping(self, shipping: dict[str, object], args: dict[str, object]) -> None:
         """팝업 폼 사이트는 전화까지 채운 폼을 저장/적용해야 주문서에 반영된다(sources.yaml shipping_confirm).
@@ -4806,7 +4871,7 @@ class BuyerAgent(AgentBase):
             addr = f'{embedded.get("address") or ""} {embedded.get("address_detail") or ""}'
             office = (
                 OFFICE_ADDRESS_HINT in addr
-                and _norm(OFFICE_DETAIL) in _norm(addr)
+                and re.search(OFFICE_ROOM_RE, addr) is not None
                 and _norm(str(embedded.get('name') or '')) == _norm(OFFICE_NAME)
             )
         else:

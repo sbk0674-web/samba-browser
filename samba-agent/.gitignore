@@ -7,6 +7,9 @@ __pycache__/
 ops/reports/*.md
 ops/reports/*.eval.json
 ops/reports/*.approval.json
+ops/reports/naver-cost-audit-*.json
+ops/reports/naver-expected-points-*.json
+ops/reports/harness-reload-state-*.json
 !ops/reports/.gitkeep
 # 예전 위치(패키지 안) — 남아 있는 파일도 커밋되지 않게 둔다
 src/samba_agent/ops/reports/*.md

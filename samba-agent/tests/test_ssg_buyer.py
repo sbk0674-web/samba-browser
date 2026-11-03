@@ -323,10 +323,10 @@ def test_모델코드가_없거나_후보가_모두_안_맞으면_사람에게(s
     no_model = a.model_copy(update={'order': a.order.model_copy(update={'sku': '그냥 운동화'})})
     with pytest.raises(AgentFailure) as e:
         ssg._snapshot(no_model, 'acc1')
-    assert e.value.status == 'needs_human' and '모델코드' in e.value.reason
+    assert e.value.status == 'needs_ai' and '모델코드' in e.value.reason
     with pytest.raises(AgentFailure) as e:
         ssg._snapshot(a, 'acc1')
-    assert e.value.status == 'needs_human' and '맞는 상품이 없다' in e.value.reason
+    assert e.value.status == 'needs_ai' and '맞는 상품이 없다' in e.value.reason
 
 
 @respx.mock
@@ -335,7 +335,7 @@ def test_봇_차단이면_수리_재시도_없이_사람에게(ssg) -> None:
     mock_scripts({'ssg_route_quotes': {'error': 'blocked', 'note': 'PerimeterX'}}, calls)
     with pytest.raises(AgentFailure) as e:
         ssg._snapshot(assignment(MALL_B), 'acc1')
-    assert (e.value.status, e.value.fail_reason) == ('needs_human', FailReason.CAPTCHA)
+    assert (e.value.status, e.value.fail_reason) == ('needs_ai', FailReason.CAPTCHA)
     assert [n for n, _ in calls] == ['ssg_route_quotes']  # 한 번만 — 수리·직접 경로 없음
 
 

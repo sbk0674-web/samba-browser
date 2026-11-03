@@ -7,7 +7,7 @@
 
 from collections.abc import Mapping
 
-ALERT_RULES = ('fail_rate_2x', 'needs_human_30pct', 'duration_50pct')
+ALERT_RULES = ('fail_rate_2x', 'needs_ai_30pct', 'duration_50pct')
 NEEDS_HUMAN_LIMIT = 0.30
 DURATION_LIMIT = 1.50
 
@@ -22,8 +22,8 @@ def check_alerts(today: Mapping[str, float], yesterday: Mapping[str, float]) -> 
     prev_fail = float(yesterday.get('fail_rate', 0))
     if prev_fail > 0 and float(today.get('fail_rate', 0)) > prev_fail * 2:
         fired.append('fail_rate_2x')
-    if float(today.get('needs_human_rate', 0)) > NEEDS_HUMAN_LIMIT:
-        fired.append('needs_human_30pct')
+    if float(today.get('needs_ai_rate', 0)) > NEEDS_HUMAN_LIMIT:
+        fired.append('needs_ai_30pct')
     prev_ms = float(yesterday.get('avg_duration_ms', 0))
     if prev_ms > 0 and float(today.get('avg_duration_ms', 0)) > prev_ms * DURATION_LIMIT:
         fired.append('duration_50pct')

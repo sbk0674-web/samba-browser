@@ -17,17 +17,18 @@ from samba_agent.ops.ssg_gift_accept import (
     ACCEPT,
     CHANNEL,
     CHECK_BTN,
+    CLOSE_ID,
+    CONSENT,
     DONE,
     DOOR,
     GO_LABELS,
     KAKAO,
+    LATER,
     SSG_APP,
     GiftAcceptError,
     Node,
     Phone,
     _close_browser,
-    LATER,
-    CONSENT,
     find_text,
     has_text,
     same_product,
@@ -127,12 +128,28 @@ def matching_notice(nodes: list[Node], who: str, words: set[str]) -> Node | None
     return None
 
 
+def gift_overlay(nodes: list[Node]) -> bool:
+    return any(node.desc.lower() in ('close', '닫기') and node.rid != CLOSE_ID for node in nodes)
+
+
+def gift_check_button(phone: Phone, nodes: list[Node]) -> Node | None:
+    if gift_overlay(nodes):
+        raise GiftAcceptError('광고 팝업이 선물 화면을 가림 — AI 화면 복구 필요')
+    check = next((node for node in nodes if CHECK_BTN in node.text and 150 < node.y < 1510), None)
+    if check is not None and phone.top_package() == SSG_APP:
+        navigation = [node for node in nodes if '홈으로 이동' in node.desc]
+        if any(abs(node.x - check.x) < 120 and abs(node.y - check.y) < 80 for node in navigation):
+            raise GiftAcceptError('선물 버튼과 SSG 하단 홈 좌표가 겹침 — AI 화면 복구 필요')
+    return check
+
+
 def accept_ssg_gift_by_search(
     phone: Phone,
     order_no: str,
     *,
     sku: str = '',
     model_code: str = '',
+    verify_only: bool = False,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
     """주문번호로 SSG 선물 수락 알림을 찾아 받는다. 성공하면 결과 한 줄, 실패하면 GiftAcceptError."""
@@ -286,13 +303,16 @@ def accept_ssg_gift_by_search(
     if has_text(nodes, DONE):
         _close_browser(phone, sleep)
         return '이미 받은 선물(상품 대조·완료 화면) — 브라우저 닫음'
+    if verify_only:
+        _close_browser(phone, sleep)
+        raise GiftAcceptError('독립 재확인에서 선물 수락 완료 미확인 — 수락 동작 없이 종료')
     sleep(3)
     # 버튼 글자 뒤에 기한 안내가 붙고('옵션/배송지 확인 10/18(일) 23:59까지 …') 화면이 늦게 그려진다 —
     # 다시 읽으며 기다리고, 화면 아래라 좌표가 0 이면 올려서 찾는다(실기 2026-10-14: 3일째 미수락 F3E61B)
     check = None
     for _ in range(5):
         nodes = phone.nodes()
-        check = next((n for n in nodes if CHECK_BTN in n.text and n.y > 0), None)
+        check = gift_check_button(phone, nodes)
         if check is not None:
             break
         if any(CHECK_BTN in n.text for n in nodes):
@@ -308,11 +328,10 @@ def accept_ssg_gift_by_search(
     )
     nodes = wait_for(on_form, 25)
     if not on_form(nodes):
-        _close_browser(phone, sleep)
         raise GiftAcceptError('옵션/배송지 확인 뒤 배송정보 입력 화면이 안 떴다')
     sleep(2)
     # 문앞 배송·개인정보 동의·'선물 받기' 는 화면 아래에 있어 좌표가 0 으로 읽힌다 — 보일 때까지 올린다
-    visible = lambda ns, part: next((n for n in ns if part in n.text and n.y > 0), None)
+    visible = lambda ns, part: next((n for n in ns if part in n.text and 150 < n.y < 1510), None)
     for _ in range(4):
         nodes = phone.nodes()
         if visible(nodes, DOOR) is not None and visible(nodes, ACCEPT) is not None:
@@ -324,7 +343,7 @@ def accept_ssg_gift_by_search(
     if door is not None:
         phone.tap(door.x, door.y)
     else:
-        phone.tap(*DOOR_XY)
+        raise GiftAcceptError('배송 요청사항 문앞 버튼 미확인 — AI 화면 복구 필요')
     sleep(1.5)
     # 개인정보 수집 동의가 안 찍혀 있으면 '선물 받기' 를 눌러도 완료 화면이 안 뜬다(실기 2026-10-14)
     consent = visible(phone.nodes(), CONSENT)
@@ -332,11 +351,12 @@ def accept_ssg_gift_by_search(
         phone.tap(consent.x, consent.y)
         sleep(1.2)
     nodes = phone.nodes()
-    accept = next((n for n in nodes if n.text.strip() == ACCEPT and n.y > 0), None) or visible(nodes, ACCEPT)
-    phone.tap(accept.x, accept.y) if accept else phone.tap(*ACCEPT_XY)
+    accept = next((n for n in nodes if n.text.strip() == ACCEPT and 150 < n.y < 1510), None)
+    if accept is None:
+        raise GiftAcceptError('선물 받기 버튼 미확인 — AI 화면 복구 필요')
+    phone.tap(accept.x, accept.y)
     nodes = wait_for(lambda ns: has_text(ns, DONE), 25)
     if not has_text(nodes, DONE):
-        _close_browser(phone, sleep)
         raise GiftAcceptError('"선물 받기"를 눌렀지만 완료 화면이 안 떴다 — 사람이 확인')
     phone.tap(*LATER_XY)  # 리뷰 팝업
     sleep(1.5)

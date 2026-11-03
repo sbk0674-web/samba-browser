@@ -86,11 +86,13 @@ class OperatorAgent:
         max_turns: int = DEFAULT_MAX_TURNS,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         query_fn: Any = None,
+        api_provider: str | None = None,
     ) -> None:
         self.model = model
         self.max_turns = max_turns
         self.timeout_s = timeout_s
         self._query_fn = query_fn
+        self.api_provider = api_provider
 
     def judge(self, *, call: BridgeCall, ctx: dict[str, object]) -> Verdict:
         """AI 로 판단한다. 도구가 결정을 못 남기면 human."""
@@ -147,6 +149,14 @@ class OperatorAgent:
                 str(inp.get('evidence', '')).strip()[:300],
             )
             return text('기록했다. 끝내라.')
+
+        if self.api_provider:
+            from samba_agent.repair.api import run_api_loop
+
+            await run_api_loop(self.api_provider, self.model, prompt, SYSTEM_PROMPT,
+                               [run_js, decide], self.max_turns,
+                               lambda: state.verdict is not None)
+            return
 
         server = create_sdk_mcp_server(name='operator', version='1.0.0', tools=[run_js, decide])
         options = ClaudeAgentOptions(

@@ -35,6 +35,26 @@ def client() -> WaveClient:
     return WaveClient(BASE, TOKEN, TENANT)
 
 
+@pytest.mark.parametrize('changed,reason,expected_memo', [
+    (False, 'confirmed stock unavailable', True),
+    (True, 'confirmed stock unavailable', False),
+    (False, '   ', False),
+])
+@respx.mock
+def test_existing_cancel_state_appends_reason_without_counting_a_new_cancel(changed, reason, expected_memo):
+    respx.put(f'{API}/orders/uuid-1/status').mock(
+        return_value=httpx.Response(200, json={'ok': True, 'status': 'cancelling', 'changed': changed})
+    )
+    memo = respx.post(f'{API}/orders/uuid-1/memo').mock(
+        return_value=httpx.Response(200, json={'rows': 1})
+    )
+    assert client().set_cancel_requested('uuid-1', reason, flag='no_stock') is changed
+    assert memo.called is expected_memo
+    if expected_memo:
+        import json
+        assert json.loads(memo.calls[0].request.content)['line'] == '[취소근거] ' + reason
+
+
 @respx.mock
 def test_목록은_헤더와_창을_붙여_부르고_주문을_돌려준다():
     route = respx.get(f'{API}/pending-orders').mock(
@@ -306,6 +326,18 @@ def test_OrderRef_는_삼바웨이브_행_id_를_들고_다닌다():
     assert ref.wave_key == 'uuid-1'
     blank = WaveOrder.model_validate({**ORDER_JSON, 'id': ''}).to_order_ref()
     assert blank.wave_id is None and blank.wave_key == '2026092300001'
+
+
+def test_판매처는_sales_channel_alias_로도_읽는다():
+    ref = WaveOrder.model_validate(
+        {
+            'order_number': 'A1',
+            'source_site': 'MUSINSA',
+            'sales_channel_alias': 'KT알파쇼핑(E441399)',
+            'product_name': '운동화',
+        }
+    ).to_order_ref()
+    assert ref.seller == 'KT알파쇼핑(E441399)'
 
 
 @respx.mock

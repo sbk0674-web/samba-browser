@@ -40,3 +40,61 @@ def test_읽은_송장만_삼바에_넣는다(monkeypatch):
     res = collect_dewu_tracking(Wave(), Phone(), sleep=lambda s: None)  # type: ignore[arg-type]
     assert res == {'checked': 2, 'updated': 1}
     assert written == [('A-1', '顺丰速运', 'SF1869232756807')]
+
+
+def test_구매주문이_들어오면_송장수집을_양보한다(monkeypatch):
+    read = []
+    monkeypatch.setattr('samba_agent.ops.dewu_tracking.read_dewu_tracking',
+                        lambda phone, son, sleep: read.append(son))
+
+    class Wave:
+        def dewu_tracking_targets(self):
+            return [{'sourcing_order_number': str(i)} for i in range(3)]
+
+    class Phone:
+        def key(self, code):
+            pass
+
+    res = collect_dewu_tracking(Wave(), Phone(), idle=lambda: len(read) == 0)
+    assert read == ['0']
+    assert res == {'checked': 1, 'updated': 0}
+
+
+def test_loop_rechecks_orders_after_phone_lock(monkeypatch):
+    import pytest
+    import samba_agent.ops.dewu_tracking as d
+    import samba_agent.ops.ssg_gift_accept as g
+
+    targets = []
+    collected = []
+    sleeps = []
+
+    class StopLoop(BaseException):
+        pass
+
+    class Thread:
+        def __init__(self, *, target, **kwargs):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    class Wave:
+        def dewu_tracking_targets(self):
+            return [{'sourcing_order_number': 'test-order'}]
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) > 1:
+            raise StopLoop
+
+    checks = iter([True, False])
+    monkeypatch.setattr(d.threading, 'Thread', Thread)
+    monkeypatch.setattr(d.time, 'sleep', sleep)
+    monkeypatch.setattr(g, 'find_phone_serial', lambda *args: 'test-device')
+    monkeypatch.setattr(d, 'collect_dewu_tracking',
+                        lambda *args, **kwargs: collected.append(True) or {'checked': 0, 'updated': 0})
+    d.start_dewu_tracking_loop(Wave(), idle=lambda: next(checks))
+    with pytest.raises(StopLoop):
+        targets[0]()
+    assert collected == []

@@ -142,6 +142,38 @@ def test_captcha_is_not_repaired(buyer) -> None:
     assert fake.calls == []
 
 
+@pytest.mark.parametrize('raw', ['Error: page busy', 'Error: page busy\n    at G (evalmachine.<anonymous>:3:130)'])
+def test_page_busy_does_not_start_script_repair_or_replay_shipping(buyer, raw) -> None:
+    run = respx.post(f'{URL}/tool/run_script').mock(return_value=page(raw))
+    fake = FakeRepairer(RepairOutcome('gave_up', 'not a code failure'))
+    buyer.repairer = fake
+    with pytest.raises(AgentFailure) as caught:
+        buyer.script_json('musinsa_set_shipping', {}, goal='shipping', check=ok_check)
+    assert caught.value.fail_reason is FailReason.BRIDGE_DOWN
+    assert fake.calls == []
+    assert run.call_count == 1
+
+
+def test_page_busy_after_payment_is_not_classified_as_prepay_bridge_retry(buyer) -> None:
+    buyer.spec = buyer.spec.model_copy(update={'name': 'verifier'})
+    run = respx.post(f'{URL}/tool/run_script').mock(return_value=page('Error: page busy'))
+    fake = FakeRepairer(RepairOutcome('gave_up', 'no retry'))
+    buyer.repairer = fake
+    with pytest.raises(AgentFailure) as caught:
+        buyer.script_json('musinsa_order_detail', {}, goal='verify paid order', check=ok_check)
+    assert caught.value.fail_reason is FailReason.PAY_INTERRUPTED
+    assert fake.calls == []
+    assert run.call_count == 1
+
+
+def test_page_busy_words_in_successful_json_are_not_an_error(buyer) -> None:
+    respx.post(f'{URL}/tool/run_script').mock(return_value=page('{"cost": 100,"note":"page busy before"}'))
+    fake = FakeRepairer(RepairOutcome('gave_up', 'no repair'))
+    buyer.repairer = fake
+    assert buyer.script_json('musinsa_product_snapshot', {}, goal='quote', check=ok_check)['cost'] == 100
+    assert fake.calls == []
+
+
 def test_one_repair_attempt_per_script_per_job(buyer) -> None:
     respx.post(f'{URL}/tool/run_script').mock(return_value=page('{"cost": 0}'))
     fake = FakeRepairer(RepairOutcome('gave_up', 'x'))

@@ -92,9 +92,29 @@ describe('rekeyToRemote', () => {
 
   it('보관된 서버 재료가 없으면 no-remote, 잠겨 있으면 locked', async () => {
     expect(await vault.rekeyToRemote('x')).toBe('no-remote')
+    const account = vault.upsertAccount({ host: 'example.com', username: 'alice' })
+    vault.putItem({ accountId: account.id, type: 'login', label: '로그인', value: 'secret-1' })
     const remote = await remoteMaterial('account-master')
     vault.applyKeyMaterial(remote)
     vault.lock()
     expect(await vault.rekeyToRemote('account-master')).toBe('locked')
+  })
+
+  it('잠긴 빈 금고는 서버 재료로 바로 맞춘다', async () => {
+    vault.dispose()
+    db.close()
+    db = await openDatabase(':memory:')
+    vault = new VaultService(db, settings())
+    vault.setOutboxRecorder((table, id, op) => recorded.push([table, id, op]))
+    await vault.setup('pc-master')
+    const remote = await remoteMaterial('account-master')
+    expect(vault.applyKeyMaterial(remote)).toBe('mismatch')
+    vault.lock()
+
+    expect(await vault.rekeyToRemote('wrong')).toBe('wrong-master')
+    expect(await vault.rekeyToRemote('account-master')).toBe('ok')
+    vault.lock()
+    expect(await vault.unlock('pc-master')).toBe(false)
+    expect(await vault.unlock('account-master')).toBe(true)
   })
 })

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     slack_bot_token: SecretStr | None = Field(default=None, alias='SLACK_BOT_TOKEN')
     slack_app_token: SecretStr | None = Field(default=None, alias='SLACK_APP_TOKEN')
     slack_channel: str = Field(default='#sambaorder', alias='SLACK_CHANNEL')
+    money_alert_receiver: str | None = Field(default=None, alias='SAMBA_MONEY_ALERT_RECEIVER')
+    sms_container: str = Field(default='local-samba-api-1', alias='SAMBA_SMS_CONTAINER')
     # NoDecode: 환경변수 값을 JSON 으로 풀지 않고 아래 검증기가 쉼표로 나눈다(예: U1,U2)
     slack_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(
         default=(), alias='SLACK_ALLOWED_USERS'
@@ -73,6 +75,7 @@ class Settings(BaseSettings):
     # 저장 스크립트가 실패하면 AI 가 화면을 보고 고쳐 이어 간다(검증 통과한 코드만 저장, 이전 판은 이력 폴더)
     # 기본 꺼짐 — 2026-09-24 수리 시험 중 '결제하기' 클릭으로 실결제 발생. 앱 쪽 결제 버튼 클릭 차단 전까지 켜지 않는다
     repair_enabled: bool = Field(default=False, alias='SAMBA_REPAIR_ENABLED')
+    repair_api_tiers: bool = Field(default=False, alias='SAMBA_REPAIR_API_TIERS')
     repair_model: str = Field(default='claude-opus-5-5', alias='SAMBA_REPAIR_MODEL')
     repair_timeout_s: float = Field(default=900.0, ge=60, alias='SAMBA_REPAIR_TIMEOUT_S')
     # AI 대행 — 결제 전에 막힌 작업의 상황 판단(retry·cancel·human). 화면은 읽기만 한다

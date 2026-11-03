@@ -36,7 +36,7 @@ if (!isOrderUrl(t.url)) continue
 if (profile && String(t.profile || '').toLowerCase() === profile) { await tabs.close(t.id).catch(nop); continue }
 try { await tabs.switch(t.id); const em = await Promise.race([emailOnForm(), sleep(3000).then(() => null)]); if (em === null || sameAccount(em)) await tabs.close(t.id) } catch (e) {}
 }
-const url = prdtNo ? `${HOST}/product?prdtNo=${prdtNo}` : /^https?:/.test(sku) ? sku : `${HOST}/display/search-word/result?searchWord=${encodeURIComponent(sku)}`
+const url = /^https?:/.test(sku) ? sku : prdtNo ? `${HOST}/product?prdtNo=${prdtNo}` : `${HOST}/display/search-word/result?searchWord=${encodeURIComponent(sku)}`
 const tid = tabIdOf(await tabs.open(withProfile(url)))
 if (!tid) return { options: [], error: 'no_tab' }
 await tabs.switch(tid)
@@ -57,6 +57,7 @@ const sold = all.filter(o => soldIds.has(o.id))
 const options = [...avail.map(o => o.t), ...sold.map(o => `${o.t} 품절`)]
 const base = { options, already_ordered: null, coupons: {}, methods: [], cost: null, reward: 0, margin_pct: null, product_url, selected: null, product_name: pn || null }
 const stop = async (note, extra = {}) => { await tabs.close(tid).catch(nop); return { ...base, note, ...extra } }
+if(!all.length&&!/상품코드\s*:/.test(pt)&&/kakaoPixel/.test(pt))return await stop('상품 화면 미표시',{ error: 'page_not_rendered' })
 if (!/\bLOGOUT\b/.test(pt)) return await stop('로그인 안 됨', { error: 'login_required' })
 if (!all.length && /판매 종료 및 중지된 상품/.test(pt)) return await stop('판매 종료 및 중지된 상품', { options: want ? [`${want} 품절`] : [], sale_ended: true })
 if (!all.length && want) return await stop('사이즈 선택지를 읽지 못함')
@@ -90,7 +91,7 @@ const cost = num((t.match(/결제예정금액\s*([\d,]+)\s*원/) || [])[1]) || n
 const qty = +((t.match(/\/\s*(\d+)\s*개/) || [])[1] || 0) || null
 const reward = num((t.match(/([\d,]+)\s*P\s*적립\s*예정/) || [])[1])
 const line = t.match(/배송 상품 (.{2,160}?) ([^\s\/]{1,20})\s*\/\s*(\d+)\s*개/)
-const selected = (line ? line[2] : null) || picked
+const selected = line ? line[2] : null
 const methods = lines(await pg.get({ selector: 'input[name=rgPaymentModule]' })).map(labelOf).filter(Boolean)
 const ship = lines(await pg.get({ selector: '#tabAddress1' }))
 const addr = ship.filter(x => /\] textbox value="/.test(x)).map(valOf)

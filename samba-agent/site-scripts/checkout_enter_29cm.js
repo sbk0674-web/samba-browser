@@ -1,7 +1,3 @@
-// 29CM 결제창 진입(09-26) — 수단을 고르고 '결제하기'로 결제창을 연다(비밀번호 안 넣음). dryRun 이면 직전에 멈춘다.
-// 실결제는 expect·상품번호·tab 필수(dry 는 tab 없으면 대조 통과 하나). 대조는 결제 탭 화면만 — 주문서를 새 탭으로
-// 다시 열면 서버 주문서가 기본값(배송지 등)으로 돌아갈 수 있어 열지 않는다. 같은 계정 동시 구매는 하네스 락 몫.
-// args: card, profile, tab, expect{option,selected,product_no}, amount, dryRun  반환 {ok,method,checkout,popup_url,total,note}
 const lines = t => t.split('PAGE TEXT')[0].split('\n').filter(l => /^\[\d/.test(l))
 const idOf = l => parseInt(l.slice(1))
 const nameOf = l => (l.match(/^\[\d+\] \w+ "([^"]*)"/) || [])[1]
@@ -21,16 +17,16 @@ function mismatch(f, e) {
   if (!e) return null
   const no = String(e.product_no || '')
   if (no && f.nos[0] !== no) return '상품번호 ' + f.nos + ' ≠ ' + no
-  const sz = ((e.option || '') + ' ' + (e.selected || '')).match(/(?<![\d.])\d{2,3}(?:\.5)?(?![\d.])/g) || []
+  const codes = [...String(e.option || '').matchAll(/\(([A-Za-z]{1,4}\d{2,4})\)/g)].map(m => m[1].toUpperCase())
+  if (codes.some(c => !f.opt.toUpperCase().includes('(' + c + ')'))) return '색상 코드 불일치 또는 미확인'
+  const sz = ((e.option || '') + ' ' + (e.selected || '')).match(/(?<![\d.A-Za-z])\d{2,3}(?:\.5)?(?![\d.])/g) || []
   if (sz.length && !sz.some(x => new RegExp('(?<![\\d.])' + x + '(?![\\d.])').test(f.opt))) return '옵션 ' + sz + ' ≠ ' + f.opt
   const lz = s => (s + '').toUpperCase().match(/(?<![A-Z])(X{0,3}S|M|X{0,3}L|\dXL|FREE)(?![A-Z])/g) || [], el = lz((e.option || '') + ' ' + (e.selected || ''))
   if (!sz.length && el.length && lz(f.opt).length && !lz(f.opt).some(x => el.includes(x))) return '옵션 ' + el + ' ≠ ' + f.opt
-  // 상품명 단어는 payer 가 본다(여기선 상품번호가 필수)
   return null
 }
-// 라디오 번호를 라벨 순서로 맞춘다(value 는 늘 on)
 async function radios() {
-  const r = (await page.get({ selector: 'label:has(input[type=radio])' })).tree, ids = lines(r).filter(l => /\] radio value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
+  const r = (await page.get({ selector: 'label:has(input[type=radio])' })).tree, ids = lines(r).filter(l => /\] radio(?: "[^"]*")?(?: name=\S+)? value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
   const K = [['적립', /구매 적립금 받기/], ['선할인', /선할인 받기/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
   const got = []; let p = 0
   for (const [k, re] of K) { const i = tx.slice(p).search(re); if (i >= 0) { got.push(k); p += i + 1 } }
@@ -42,7 +38,6 @@ async function settle(prev) {
   for (let i = 0; i < 20; i++) { await sleep(150); tx = text((await page.get({})).tree); const s = seg(tx); if (s === last && (s !== prev || i >= 3)) break; last = s }
   return tx
 }
-// 선택 표시(실측): 머니=보유 잔액, 페이=카드 목록, 기타=하위 버튼, 토스·카카오=현금영수증, 카드=없음
 const shown = tx => { const s = seg(tx); return { money: /보유 잔액 [\d,]+원/.test(s), pay: /결제수단 추가하기|\(\s*[\d*]{2,6}\s*\)\s*(신용|체크)카드/.test(s), etc: /PIN번호 결제|가상계좌|휴대폰결제/.test(s), cash: /현금 영수증/.test(s) } }
 const dsc = tx => (tx.match(/ㄴ 결제 즉시 할인 ([^ㄴ\d-]+?) ?-[\d,]+원/) || [])[1]
 const dry = !!(args.dryRun || args.dry_run), E = args.expect
@@ -57,8 +52,6 @@ if (amt != null && !(amt > 0)) return fail('amount 이상: ' + args.amount)
 if (!dry && amt == null) return fail('no amount')
 let c = (await tabs.list()).filter(x => CK.test(x.url || ''))
 if (args.tab) c = c.filter(x => x.id === String(args.tab))
-// 계정 비교를 동시에 돌리면 계정마다 주문서 탭이 열린다 — 이 계정(프로필)의 탭만 본다
-// (실기 2026-09-29: 'multiple checkout tabs' 로 원가를 못 읽었다)
 if (args.profile) { const mine = c.filter(x => !x.profile || x.profile === args.profile); if (mine.length) c = mine }
 if (!c.length) return fail('no checkout tab')
 const ok = []; let why = null
@@ -90,11 +83,9 @@ if (n.includes('무신사머니')) {
   const d = dsc(tx)
   if (!s.cash || s.money || s.pay || s.etc || (d && !norm(d).includes(norm(method)))) return fail(method + ' 선택 안 됨 ' + (d || ''))
 } else if (/카드(결제)?$/.test(n) && R['카드']) {
-  // 카드사 이름 → '카드 결제'(카드사는 결제창에서)
   await click(R['카드']); method = '카드 결제'; s = shown(tx)
   if (s.cash || s.money || s.pay || s.etc || dsc(tx)) return fail('카드 결제 선택 안 됨')
 } else if (R['기타']) {
-  // 기타의 하위 수단 — 이름이 정확히 같은 버튼만(배너 아님)
   await click(R['기타'])
   const sub = lines((await page.get({})).tree).find(l => /\] button "/.test(l) && norm(nameOf(l)) === n)
   if (!sub) return fail(card + ' 하위 수단 없음')
@@ -103,7 +94,6 @@ if (n.includes('무신사머니')) {
   if (!shown(tx).etc || (d && !norm(d).includes(n))) return fail(card + ' 선택 안 됨 ' + (d || ''))
 } else return fail('모르는 결제수단: ' + card)
 if (!CK.test(await page.url())) return fail('주문서를 벗어남')
-// 결제 탭 화면만 다시 읽어 대조한다(새 탭 재오픈 없음)
 const warn = E ? null : 'no expect(dry)'
 const f2 = await formInfo(), m2 = mismatch(f2, E)
 if (m2) return fail('order form mismatch', { why: m2 })

@@ -27,6 +27,24 @@ export interface CookieJarLike {
   set(details: CookiesSetDetails): Promise<void>
 }
 
+const SESSION_KEEP_EXCLUDED_DOMAINS = [
+  'google.com',
+  'youtube.com',
+  'youtube.co.kr',
+  'ytimg.com',
+  'googleusercontent.com'
+]
+
+function cookieHost(cookie: Pick<Cookie, 'domain'>): string {
+  return (cookie.domain ?? '').replace(/^\./, '').toLowerCase()
+}
+
+export function shouldKeepSessionCookie(cookie: Pick<Cookie, 'domain'>): boolean {
+  const host = cookieHost(cookie)
+  if (!host) return false
+  return !SESSION_KEEP_EXCLUDED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))
+}
+
 /** 쿠키가 온 도메인·경로로 되돌아갈 URL(set 은 url 을 요구한다) */
 export function cookieUrl(cookie: Pick<Cookie, 'domain' | 'path' | 'secure'>): string {
   const host = (cookie.domain ?? '').replace(/^\./, '')
@@ -41,6 +59,7 @@ export function persistedCookie(
 ): CookiesSetDetails | null {
   if (!cookie.session) return null
   if (!cookie.domain) return null
+  if (!shouldKeepSessionCookie(cookie)) return null
   // host-only 세션 쿠키는 건드리지 않는다. 같은 쿠키를 덮어쓰면 사이트가 곧바로 바꾼 새 값을 비동기 되쓰기가
   // 옛 값으로 되돌린다 — 무신사머니 결제창이 "로그인 세션을 찾을 수 없습니다"로 튕겼다(실기 2026-09-26).
   // 로그인 유지가 필요한 토큰(무신사 app_atk 등)은 도메인 쿠키라 그대로 남긴다

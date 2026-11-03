@@ -26,7 +26,7 @@ NO_RETRY_REASONS = frozenset(
 def should_retry(spec: AgentSpec, result: AgentResult, attempts: int) -> bool:
     """이 실패를 같은 에이전트로 한 번 더 시켜도 되는가."""
     if result.status != 'fail':
-        return False  # needs_human 은 재시도하지 않는다
+        return False  # needs_ai 은 재시도하지 않는다
     if spec.retry <= 0:
         return False  # 결제 에이전트 — 재결제 위험
     if result.fail_reason in NO_RETRY_REASONS:

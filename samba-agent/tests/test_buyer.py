@@ -1986,8 +1986,8 @@ def test_주소에_건물번호가_없고_상세가_번호로_시작하는_주�
     assert not shipping_matches(want, {**got, 'address': '경기 용인시 처인구 라마바로 29'})
 
 
-def test_빠른_비교는_순서만_정하고_계정_전부를_주문서로_견적한다():
-    """실기 2026-10-02 비니: edelvise06 화면가 34,460(쿠폰 미반영)이라 비교에서 빠졌는데 주문서는 가장 쌌다."""
+def test_빠른_비교는_싼_계정부터_한_계정씩_주문서를_만든다():
+    """계정마다 다른 건 쿠폰뿐이라 화면가가 싼 계정 하나만 주문서를 만든다(사용자 2026-11-03)."""
     from samba_agent.agents.buyer import quick_batches
 
     scores = {
@@ -1997,7 +1997,7 @@ def test_빠른_비교는_순서만_정하고_계정_전부를_주문서로_견�
         'roasterydg': 28320.0,
     }
     ranked = ['hwangnol06', 'roasterydg', 'edelvise06', 'cannonfort', 'unread']
-    assert quick_batches(ranked, scores) == [ranked]
+    assert quick_batches(ranked, scores) == [[account] for account in ranked]
     assert quick_batches([], {}) == []
 
 
@@ -2017,15 +2017,15 @@ def test_단일_상품_색_표기가_달라도_같은_색이면_진행한다():
     )
 
 
-def test_네이버페이는_현대카드_청구할인을_원가에_반영한다():
-    """사용자 2026-10-02: 네이버페이는 현대카드로 결제된다 — 2.7% 청구할인. 다른 카드가 적혀 있으면 그 카드 계수."""
+def test_네이버페이는_확인된_카드만_청구할인을_반영한다():
     from samba_agent.agents.buyer import effective_cost
 
     assert effective_cost(
         {'method': '네이버페이', 'card': None, 'cost': 97670, 'reward': 977}
-    ) == round(97670 * 0.973 - 977)
+    ) == 97670 - 977
+    assert effective_cost({'card': '네이버페이 - 현대카드', 'cost': 100000}) == 97300
     assert (
-        effective_cost({'card': '네이버페이', 'cost': 100000}) == 97300
+        effective_cost({'card': '네이버페이', 'cost': 100000}) == 100000
     )  # 주문 상세의 결제수단 글자
     assert effective_cost({'card': '네이버페이 - 롯데카드', 'cost': 100000}) == 98000
     # 토스페이도 현대카드(청구할인 2.7%) — 사용자 2026-10-06

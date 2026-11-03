@@ -224,7 +224,7 @@ def test_다나와_링크를_못_받으면_직접_들어가지_않고_사람에�
     )
     with pytest.raises(AgentFailure) as e:
         hmall._snapshot(assignment(), 'buyer01')
-    assert e.value.status == 'needs_human' and 'no_hmall_row' in e.value.reason
+    assert e.value.status == 'needs_ai' and 'no_hmall_row' in e.value.reason
     assert [n for n, _ in calls] == ['hmall_danawa_entry']  # 스냅샷(직접 진입)은 부르지 않는다
 
 
@@ -240,7 +240,7 @@ def test_도착에_제휴가_없으면_수리_없이_사람에게(hmall) -> None
     )
     with pytest.raises(AgentFailure) as e:
         hmall._snapshot(assignment(), 'buyer01')
-    assert e.value.status == 'needs_human' and 'no_affiliate' in e.value.reason
+    assert e.value.status == 'needs_ai' and 'no_affiliate' in e.value.reason
     assert [n for n, _ in calls].count('hmall_product_snapshot') == 1  # 재시도·수리 없음
 
 
@@ -367,7 +367,7 @@ def test_SSG_봇_차단인데_H몰에도_없으면_원래대로_사람에게(reg
     monkeypatch.setattr(BuyerAgent, '_login_as', lambda self, account: None)
     monkeypatch.setattr(BuyerAgent, '_snapshot', snap_blocked)
     out = ssg(assignment(SSG_URL, source='SSG'))
-    assert out.status == 'needs_human' and '봇 차단' in out.reason
+    assert out.status == 'needs_ai' and '봇 차단' in out.reason
     assert sib.bought == []
 
 
@@ -412,7 +412,7 @@ def _ssg_buy_fails(monkeypatch, failure: AgentFailure) -> None:
 @respx.mock
 def test_SSG_가_싸도_배송지에서_막히면_H몰_견적으로_대체_구매(reg, monkeypatch) -> None:
     ssg, sib, _seen = _ssg_with_sibling(reg, monkeypatch, 84000)
-    _ssg_buy_fails(monkeypatch, AgentFailure('needs_human', '배송지 입력 검증에 실패했다: no order form', FailReason.UNKNOWN))
+    _ssg_buy_fails(monkeypatch, AgentFailure('needs_ai', '배송지 입력 검증에 실패했다: no order form', FailReason.UNKNOWN))
     out = ssg(assignment(SSG_URL, source='SSG'))
     assert out.status == 'ok' and out.payload['buy_source'] == 'HMALL'
     bought = sib.bought[0]
@@ -553,5 +553,5 @@ def test_카드_직접결제_승인이_안_보이면_재결제_없이_사람에�
     respx.post(f'{URL}/tool/list_tabs').mock(return_value=page('[]'))
     respx.post(f'{URL}/tool/get_page').mock(return_value=page('주문서 [나이키] 덩크 로우 레트로 HF5441-100 285 | 1개'))
     out = payer(reg)(pay_assignment(reg, False))
-    assert out.status == 'needs_human' and '재결제 금지' in out.reason
+    assert out.status == 'needs_ai' and '재결제 금지' in out.reason
     assert out.fail_reason == FailReason.PAY_INTERRUPTED

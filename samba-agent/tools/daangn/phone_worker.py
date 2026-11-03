@@ -16,9 +16,18 @@ def read_phone_order(phone, candidate, chat, *, today: date) -> dict:
     source = source if isinstance(source, dict) else {}
     url = source.get('source_url') or ''
     host = (urlparse(url).hostname or '').lower()
-    is_musinsa = host == 'musinsa.com' or host.endswith('.musinsa.com')
-    progress = phone.progress(candidate.account, candidate.product_title, chat.sale_price, today)
+    is_musinsa = urlparse(url).scheme == 'https' and (host == 'musinsa.com' or host.endswith('.musinsa.com'))
+    is_owned = (not url and source.get('source_site') == '보유재고'
+                and source.get('source_verified') is True)
+    # 검증된 채팅 결제시각만 전달한다. 폰 카드의 상품/가격/취소 여부는 progress가 다시 대조한다.
+    progress_args = {}
+    if (chat.payment_confirmed is True and not chat.cancelled
+            and isinstance(chat.payment_event_at, datetime) and chat.payment_event_at.utcoffset() is not None):
+        progress_args['payment_event_at'] = chat.payment_event_at
+    progress = phone.progress(candidate.account, candidate.product_title, chat.sale_price, today, **progress_args)
     if isinstance(progress, dict) and progress.get('awaiting_pickup') is True:
+        if not is_musinsa and not is_owned:
+            raise ValueError('예약 전 소싱 또는 보유재고 확인 필요')
         if (progress.get('payment_confirmed') is not True or progress.get('sales_account') != candidate.account
                 or progress.get('product_name') != candidate.product_title or progress.get('sale_price') != chat.sale_price):
             raise ValueError('예약 전 주문 정보 확인 실패')
@@ -45,8 +54,11 @@ def read_phone_order(phone, candidate, chat, *, today: date) -> dict:
         raise ValueError('주문 정보 불일치')
     if is_musinsa:
         progress['source_url'] = url
-    else:
+        progress.pop('source_site', None)  # 폰 화면 파서의 기본 보유재고 표기는 실제 소싱 근거가 아니다.
+    elif is_owned:
         progress['source_site'] = '보유재고'
+    else:
+        progress.pop('source_site', None)
     if chat.payment_event_at is not None and chat.payment_event_at.utcoffset() is not None:
         event = chat.payment_event_at.astimezone(timezone(timedelta(hours=9)))
         progress['payment_after_cutoff_verified'] = (

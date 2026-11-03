@@ -387,10 +387,10 @@ export class VaultService {
   async rekeyToRemote(
     master: string
   ): Promise<'ok' | 'locked' | 'no-remote' | 'wrong-master' | 'decrypt-failed'> {
-    if (!this.key) return 'locked'
     const remote = this.pendingRemoteMaterial
     if (!remote) return 'no-remote'
     if (master.length === 0) return 'wrong-master'
+    if (!this.key && this.repo.listAllItemRows().length > 0) return 'locked'
     const newKey = await deriveKey(master, remote.salt, {
       memoryKiB: remote.kdf.memoryKiB,
       iterations: remote.kdf.iterations,
@@ -399,6 +399,10 @@ export class VaultService {
     if (!checkVerifier(newKey, { ciphertext: remote.verifierCt, iv: remote.verifierIv })) {
       zeroize(newKey)
       return 'wrong-master'
+    }
+    if (!this.key) {
+      this.adoptRemoteKeyOnly(newKey, remote)
+      return 'ok'
     }
     const r = this.rekeyTo(newKey, remote)
     if (r !== 'ok') return r
@@ -536,6 +540,24 @@ export class VaultService {
     this.applyKey(newKey)
     this.repo.insertAudit({ itemId: null, accountId: null, action: 'rekey', source: 'user' })
     return 'ok'
+  }
+
+  /**
+   * 로컬에 옮겨 잠글 비밀 항목이 없으면, 잠긴 빈 금고도 서버 키 재료로 바로 맞출 수 있다.
+   * 2호기가 빈 키마스터를 먼저 만든 뒤 1호기 기준 키를 내려받은 경우가 여기에 해당한다.
+   */
+  private adoptRemoteKeyOnly(newKey: Buffer, material: RemoteKeyMaterial): void {
+    this.repo.setMeta(META_SALT, material.salt)
+    this.repo.setMeta(META_KDF_PARAMS, Buffer.from(JSON.stringify(material.kdf), 'utf8'))
+    this.repo.setMeta(META_VERIFIER_CT, material.verifierCt)
+    this.repo.setMeta(META_VERIFIER_IV, material.verifierIv)
+    this.repo.deleteMeta(META_RECOVERY_SALT)
+    this.repo.deleteMeta(META_RECOVERY_CT)
+    this.repo.deleteMeta(META_RECOVERY_IV)
+    this.repo.deleteMeta(META_DEVICE_KEY)
+    this.pendingRemoteMaterial = null
+    this.applyKey(newKey)
+    this.repo.insertAudit({ itemId: null, accountId: null, action: 'rekey', source: 'user' })
   }
 
   /** 이 금고의 키 재료가 다른 PC 에서 내려온 것인가(잠금 해제 화면 안내 문구용) */

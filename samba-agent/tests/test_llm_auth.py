@@ -92,8 +92,7 @@ def test_응답이_시작된_뒤의_인증_오류는_같은_요청을_다시_보
     assert calls == ['tokA']
 
 
-def test_구독_경유_폴백은_API_키를_쓰지_않는다(monkeypatch) -> None:
-    """Claude Code 에는 API 크레딧이 안 쓰이고, 구독 한도가 남은 동안 API 로 새지 않게 한다."""
+def test_구독이_모두_막히면_API키까지_시도한다(monkeypatch) -> None:
     monkeypatch.setenv('SAMBA_ANTHROPIC_API_KEY', 'sk-ant-api-test')
     seen: list[str | None] = []
 
@@ -104,7 +103,7 @@ def test_구독_경유_폴백은_API_키를_쓰지_않는다(monkeypatch) -> Non
 
     with pytest.raises(RuntimeError):
         _collect(auth.with_fallback(q)(prompt='x', options=_Opts()))
-    assert seen == ['tokA', 'tokB']
+    assert seen == ['tokA', 'tokB', 'sk-ant-api-test']
 
 
 def test_워크스페이스_ID가_있으면_API_키_슬롯에_헤더를_붙인다(monkeypatch) -> None:
@@ -162,3 +161,66 @@ def test_인증_오류_글이_담긴_AssistantMessage_뒤에도_다음_계정으
     out = _collect(auth.with_fallback(q)(prompt='x', options=_Opts()))
     assert out[-1].content[0].text == 'ok'
     assert seen == ['tokA']
+
+
+def test_ResultMessage_한도_오류도_다음_계정으로_넘긴다() -> None:
+    """실기 2026-10-11: weekly limit 이 ResultMessage 로 오면 수리·대행이 바로 human 으로 빠졌다."""
+
+    class ResultMessage:
+        is_error = True
+        api_error_status = None
+
+        def __init__(self, result: str) -> None:
+            self.result = result
+
+    seen: list[str | None] = []
+
+    async def q(*, prompt, options):
+        token = options.env.get(auth.TOKEN_ENV)
+        seen.append(token)
+        if token == 'tokA':
+            yield ResultMessage(
+                "Claude Code returned an error result: You've hit your weekly limit"
+            )
+            return
+        yield f'ok:{token}'
+
+    out = _collect(auth.with_fallback(q)(prompt='x', options=_Opts()))
+    assert out == ['ok:tokB']
+    assert seen == ['tokA', 'tokB']
+
+
+def test_구독한도_초과뒤_API키로_넘긴다(monkeypatch):
+    monkeypatch.setenv('SAMBA_ANTHROPIC_API_KEY', 'keyA')
+    seen = []
+
+    async def q(*, prompt, options):
+        seen.append(dict(options.env))
+        if auth.TOKEN_ENV in options.env:
+            raise RuntimeError("You've hit your weekly limit")
+        yield 'api-ok'
+
+    assert _collect(auth.with_fallback(q)(prompt='x', options=_Opts())) == ['api-ok']
+    assert len(seen) == 3
+    assert seen[-1][auth.API_KEY_ENV] == 'keyA'
+    assert auth.TOKEN_ENV not in seen[-1]
+
+
+def test_도구실행뒤에는_API로_재호출하지_않는다(monkeypatch):
+    monkeypatch.setenv('SAMBA_ANTHROPIC_API_KEY', 'keyA')
+    seen = []
+
+    class ToolUseBlock:
+        pass
+
+    class AssistantMessage:
+        content = [ToolUseBlock()]
+
+    async def q(*, prompt, options):
+        seen.append(options.env)
+        yield AssistantMessage()
+        raise RuntimeError("You've hit your weekly limit")
+
+    with pytest.raises(RuntimeError):
+        _collect(auth.with_fallback(q)(prompt='x', options=_Opts()))
+    assert len(seen) == 1

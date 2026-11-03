@@ -22,6 +22,7 @@ import {
   detectLoginFields,
   detectSignedInHint,
   detectCaptchaHint,
+  EMAIL_RE,
   labelTextOf,
   passwordElement as detectPasswordElement,
   standaloneUsernameElement,
@@ -1076,7 +1077,7 @@ function isButtonish(el: HTMLElement): boolean {
   )
 }
 
-const LOGIN_TEXT = /로그인하기|로그인|login|sign in/i
+const LOGIN_TEXT = SUBMIT_TEXT_RE
 
 // 로그인 필드 탐지. 호출할 때마다 스냅샷을 새로 구성한다 — SPA 는 클라이언트 라우팅으로 화면이
 // 바뀌어도 문서를 새로 만들지 않아 이전 registry 가 낡은 채 남기 때문(E2E 하네스에서 확인된 버그).
@@ -1612,13 +1613,36 @@ export function readLoginCredentials(
   if (!pw || !pw.value) return null
   // username 후보 선택은 login-detect 모듈에 위임한다
   const typed = (detectUsernameElementFor(pw)?.value ?? '').trim()
-  return { username: typed || rememberedUsername.trim(), password: pw.value }
+  return { username: typed || rememberedUsername.trim() || readUsernameHint(), password: pw.value }
 }
 
 /** 비밀번호 칸이 없는 화면(2단계 로그인의 아이디 단계)에서 입력된 아이디. 없으면 빈 문자열 */
 export function readUsernameStep(): string {
   if (detectPasswordElement()) return ''
-  return (standaloneUsernameElement()?.value ?? '').trim()
+  return (standaloneUsernameElement()?.value ?? '').trim() || readUsernameHint()
+}
+
+const EMAIL_VALUE_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
+
+function usernameHintInputValue(): string {
+  const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+  for (const el of inputs) {
+    const key = `${el.name} ${el.id} ${el.autocomplete} ${el.getAttribute('aria-label') ?? ''}`
+    if (!/(identifier|email|username|login|아이디|이메일)/i.test(key)) continue
+    const value = el.value.trim()
+    if (EMAIL_VALUE_RE.test(value)) return value
+  }
+  return ''
+}
+
+function usernameHintFromText(): string {
+  const text = (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ')
+  const found = text.match(/[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+/)
+  return found && EMAIL_RE.test(found[0]) ? found[0] : ''
+}
+
+function readUsernameHint(): string {
+  return usernameHintInputValue() || usernameHintFromText()
 }
 
 // 로그인 제출로 볼 수 있는 클릭 대상. 한국 쇼핑몰은 form 안이어도 type="button" 버튼(패션플러스 v-on:click="login"),

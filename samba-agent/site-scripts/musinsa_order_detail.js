@@ -5,7 +5,7 @@
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const no = nz(args.source_order_no || args.orderNo)
-const R = { source_order_no: no || null, status: '', paid: 0, points_used: 0, points_total: 0, points_box: null, prepay_points: null, reward: 0, card: '', note: null }
+const R = { shipping: {name:null,address:null,address_detail:null}, selected:null, option:null, qty:null, source_order_no: no || null, status: '', paid: 0, points_used: 0, points_total: 0, points_box: null, prepay_points: null, reward: 0, card: '', note: null }
 if (!/^\d{10,}$/.test(no)) return { ...R, note: 'no order number' }
 const get = async o => { for (let i = 0; i < 6; i++) { try { return (await page.get(o)).tree } catch (e) { await sleep(600) } } return '' }
 const text = async () => nz((await get({})).split('PAGE TEXT:')[1])
@@ -29,9 +29,49 @@ if (!good(t)) {
 if (!good(t)) { await closeAll(); return { ...R, note: 'order detail not found for ' + no } }
 
 // 상태: '주문 상품 N개' 바로 뒤
-R.status = ((t.match(/주문 상품 \d+개\s*(결제 완료|입금 대기|상품 준비 중|배송 준비 중|배송 중|배송 완료|구매 확정|취소 요청|취소 완료|반품 요청|반품 완료|교환 요청|교환 완료|환불 완료|[가-힣]{2,4} ?(?:완료|대기|중|확정))/) || [])[1] || '')
+R.status = ((t.match(/주문 상품 \d+개\s*(결제 완료|입금 대기|상품 준비 중|배송 준비 중|배송 시작|배송 중|배송 완료|구매 확정|취소 요청|취소 완료|반품 요청|반품 처리 중|반품 완료|교환 요청|교환 완료|환불 완료|[가-힣]{2,4} ?(?:완료|대기|중|확정))/) || [])[1] || '')
 const pay = t.slice(t.indexOf('결제 정보'))
 R.paid = num((pay.match(/결제 금액\s*(?:\d+%\s*)?([\d,]+)\s*원/) || [])[1])
+
+const shipStart=t.indexOf(no), shipStop=t.indexOf('주문 상품',shipStart+no.length);
+if(shipStart>=0 && shipStop>shipStart) R.shipping_text=t.slice(shipStart+no.length,shipStop);
+// 배송지·수취인: '주문번호 N 이름 배송지 변경 주소 … 전화번호'
+try {
+  const ai = t.indexOf(no)
+  const bi = t.indexOf('배송지 변경', ai)
+  if (ai >= 0 && bi > ai) {
+    const nm = nz(t.slice(ai + no.length, bi))
+    if (nm && !/\*/.test(nm)) R.shipping.name = nm
+    const rest = t.slice(bi + 5)
+    const pm0 = rest.match(/0\d{1,2}-[\d*]{3,4}-[\d*]{4}|\b01\d{8,9}\b/)
+    const s = nz(pm0 ? rest.slice(0, pm0.index) : rest.slice(0, 120))
+    R.shipping.address = null; R.shipping.address_detail = null;
+    const shipEnd=t.indexOf('주문 상품',bi);
+    R.shipping_text=shipEnd>bi?t.slice(ai+no.length,shipEnd):null;
+    if (R.shipping.address && /\*{2,}/.test(R.shipping.address)) R.shipping.address = null
+    if (R.shipping.address_detail && /\*{2,}/.test(R.shipping.address_detail)) R.shipping.address_detail = null
+  }
+} catch (e) {}
+R.recipient = R.shipping.name; R.address = R.shipping.address; R.address_detail = R.shipping.address_detail
+
+// 주문 상품 옵션·수량: '판매자 정보 상품명 옵션 / N개 금액원'
+try {
+  const links = (await get({ interactive: 1 })).split('\n')
+  let pname = ''
+  for (const x of links) {
+    const m = x.match(/^\[\d+\] link "([^"]+)" href=\S*\/products\/\d+/)
+    if (m && !/상품 ?상세로 이동|샵으로 이동/.test(m[1])) { pname = nz(m[1]); break }
+  }
+  const si = t.indexOf('판매자 정보', t.indexOf('주문 상품'))
+  const seg = si >= 0 ? t.slice(si + 6, t.indexOf('결제 정보')) : ''
+  const q = seg.match(/(?:^|\s)\/?\s*(\d+)개\s+[\d,]+원/)
+  let before = q ? seg.slice(0, q.index) : ''
+  if (pname && before.includes(pname)) before = before.slice(before.indexOf(pname) + pname.length)
+  else if (pname) before = ''
+  before = nz(before).replace(/\/\s*$/, '').replace(/^\//, '').trim()
+  if (q) R.qty = parseInt(q[1], 10)
+  if (before) R.selected = R.option = before
+} catch (e) {}
 
 // 적립금: '적립금 사용 -N원'을 눌러 펼치면 '보유 적립금 사용 -X원'·'적립금 선할인 -Y원'
 const pm = pay.match(/적립금 사용\s*-\s?([\d,]+)\s*원/)

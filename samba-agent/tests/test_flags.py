@@ -14,6 +14,7 @@ class _Wave:
         self.tags = tags
         self.changed = changed
         self.calls: list[tuple[str, str, str | None]] = []
+        self.memos: list[tuple[str, str]] = []
 
     def get_order(self, order_no: str) -> WaveOrderDetail:
         return WaveOrderDetail(order_number=order_no, action_tag=','.join(self.tags))
@@ -23,6 +24,10 @@ class _Wave:
         if flag and flag not in self.tags:
             self.tags.append(flag)
         return self.changed
+
+    def add_memo(self, order_no: str, line: str) -> bool:
+        self.memos.append((order_no, line))
+        return True
 
 
 def test_실패_사유별_표시():
@@ -42,6 +47,12 @@ def test_가격X_태그와_취소요청을_API_로_한_번에():
 def test_이미_취소요청이면_그대로_알린다():
     wave = _Wave(['no_stock'], changed=False)
     assert FlagMarker(wave).mark('A1', 'out_of_stock') == '재고X 표시함 · 이미 취소요청'  # type: ignore[arg-type]
+
+
+def test_이미_취소중이어도_새_근거메모를_남긴다():
+    wave = _Wave(['no_stock'], changed=False)
+    FlagMarker(wave).mark('A1', 'out_of_stock', '사이즈 200(매진) 직접 확인')
+    assert wave.memos == [('A1', '[취소근거] 사이즈 200(매진) 직접 확인')]
 
 
 def test_해당_없는_사유는_아무것도_안_한다():

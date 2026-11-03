@@ -33,7 +33,6 @@ from samba_agent.ops.ssg_gift_accept import (
     Phone,
     find_phone_serial,
     find_text,
-    phone_on_hold,
     wait_foreground,
 )
 
@@ -41,7 +40,7 @@ log = logging.getLogger(__name__)
 
 ROOM = '롯데ON'
 PREFIX = '[롯데ON]'
-INTERVAL_S = 60 * 60  # 사용자 2026-10-03 "루프 1시간으로"
+INTERVAL_S = 3 * 60 * 60
 RETRY_S = 10 * 60  # 방을 못 열었을 때 다시 보기까지
 # 방을 위로 올려 보는 쪽 수 — 한 쪽에 알림 두세 개가 보인다
 MAX_PAGES = 14
@@ -494,33 +493,32 @@ def start_lotteon_gift_tracking_loop(
     adb: str | None = None,
     phone_serial: str | None = None,
 ) -> threading.Thread:
-    """1시간마다(주문 작업이 없을 때만) 롯데ON 선물 송장을 모은다. 폰이 없으면 그 바퀴는 건너뛴다."""
+    """3시간마다(주문 작업이 없을 때만) 롯데ON 선물 송장을 모은다."""
     adb_path = adb or os.environ.get('SAMBA_ADB') or DEFAULT_ADB
     want = phone_serial or os.environ.get('SAMBA_PAY_PHONE') or DEFAULT_PHONE
     seen = SeenStore(state_dir / SEEN_FILE)
 
     def loop() -> None:
-        # 켜자마자 한 번 돈다 — 재시작이 잦은 날에도 밀리지 않게
-        wait = 90.0
+        wait = INTERVAL_S
         while True:
             time.sleep(wait)
             wait = INTERVAL_S
             try:
-                if not idle() or phone_on_hold():
-                    wait = 120.0  # 작업이 끝나는 대로 다시 본다
+                if not idle():
                     continue
                 serial = find_phone_serial(adb_path, want)
                 if serial is None:
                     continue
                 with PHONE_BUSY:
+                    if not idle():
+                        continue
                     res = collect_lotteon_gift_tracking(
                         wave, Phone(adb_path, serial), seen, idle=idle
                     )
                 if res is None:
                     # 2분마다 다시 열면 폰을 쓰는 다른 작업(앱 결제 등)과 계속 부딪친다(2026-10-03)
-                    wait = RETRY_S
                     log.info(
-                        '[롯데ON 선물 송장] 방을 못 열었거나 주문 작업이 시작돼 멈춤 — 10분 뒤 다시'
+                        '[롯데ON 선물 송장] 방을 못 열었거나 주문 작업이 시작돼 멈춤 — 3시간 뒤 다시'
                     )
                 else:
                     log.info(

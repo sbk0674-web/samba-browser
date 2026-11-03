@@ -1,5 +1,6 @@
 # samba-agent 하네스가 죽어 있으면 다시 올린다.
 $dir = $PSScriptRoot
+if (Test-Path -LiteralPath (Join-Path $dir 'PAUSE')) { exit 0 }
 $logs = Join-Path $dir 'logs'
 New-Item -ItemType Directory -Force $logs | Out-Null
 $watchLog = Join-Path $logs ("harness-watchdog-{0}.log" -f (Get-Date -Format 'yyyyMMdd'))
@@ -25,14 +26,19 @@ try {
 
   $day = Get-Date -Format 'yyyyMMdd-HHmmss'
   $harnessLog = Join-Path $logs "harness-$day.log"
+  if (Test-Path -LiteralPath (Join-Path $dir 'PAUSE')) { exit 0 }
   Add-Content $watchLog ("{0} missing -> restart log={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $harnessLog) -Encoding UTF8
-  Start-Process -WindowStyle Hidden -FilePath powershell.exe -ArgumentList @(
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-Command',
-    "Set-Location -LiteralPath '$dir'; `$env:PYTHONUNBUFFERED='1'; `$env:PYTHONIOENCODING='utf-8'; & '.\.venv\Scripts\python.exe' -m samba_agent *> '$harnessLog'"
-  )
+  # Hidden only hides the first window; CreateNoWindow prevents a console entirely.
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $env:ComSpec
+  $startInfo.Arguments = '/d /s /c ""' + (Join-Path $dir '.venv\Scripts\python.exe') + '" -m samba_agent > "' + $harnessLog + '" 2>&1"'
+  $startInfo.WorkingDirectory = $dir
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $startInfo.EnvironmentVariables['PYTHONUNBUFFERED'] = '1'
+  $startInfo.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
+  $startedProcess = [System.Diagnostics.Process]::Start($startInfo)
+  $startedProcess.Dispose()
 } finally {
   Remove-Item $lock -Force -ErrorAction SilentlyContinue
 }

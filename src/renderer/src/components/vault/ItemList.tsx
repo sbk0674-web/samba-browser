@@ -146,7 +146,7 @@ export function ItemList({ onAdd, onImport, onSettings }: Props): React.JSX.Elem
         type="button"
         onClick={() => select(a.id)}
         className={cn(
-          'flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] py-2 pr-2 text-left',
+          'flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] py-2 pr-8 text-left',
           options.indent ? 'pl-8' : 'pl-2',
           selectedAccountId === a.id && 'bg-[rgba(0,0,0,.06)]'
         )}
@@ -300,7 +300,7 @@ export function ItemList({ onAdd, onImport, onSettings }: Props): React.JSX.Elem
                   type="button"
                   onClick={() => toggleGroup(group.key)}
                   aria-expanded={expanded}
-                  className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] px-2 py-2 text-left hover:bg-black/[.03]"
+                  className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[10px] py-2 pl-2 pr-16 text-left hover:bg-black/[.03]"
                 >
                   <SiteFavicon host={group.key} />
                   <span className="min-w-0 flex-1">
