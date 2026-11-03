@@ -677,7 +677,7 @@ TOSS_TAB_WAIT_MS = 1000
 TOSS_POPUP_POLL_TRIES = 12
 TOSS_PUSH_WAIT_MS = 4000
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
-KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck')
+KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck', 'verify-failed')
 KAKAO_HUMAN_WAIT_TRIES = 36
 
 
