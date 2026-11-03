@@ -2907,7 +2907,8 @@ class BuyerAgent(AgentBase):
             f'상품 쿠폰 {_as_float(out.get("coupon")):,.0f}원 · 장바구니 쿠폰 {_as_float(out.get("cart_coupon")):,.0f}원 → 총 {total:,.0f}원',
         )
         # 나의 할인가는 적립금 사용까지 반영한 값이다 — 결제액(total)과 비교한다(적립금을 더하면 정상 주문을 막았다)
-        coupon_gap_failure(my_price, total, account)
+        if not getattr(self, '_coupon_gap_off', False):
+            coupon_gap_failure(my_price, total, account)
         self.note(
             '주문서 정돈',
             f'보유 적립금 {_as_float(out.get("points_balance")):,.0f}원 → 사용 {used:,.0f}원, 선할인 {out.get("prepay")}',
@@ -3866,6 +3867,16 @@ class BuyerAgent(AgentBase):
             if not self._account_reasons_only(n_err, n_skip):
                 break
         accounts = tried
+        gap_only = [e for e in self._quote_errors if '쿠폰 미적용 의심' in e.reason]
+        if not quotes and len(gap_only) >= 2 and len(gap_only) == len(self._quote_errors) and not self._quote_skips:
+            # 모든 계정이 같은 폭으로 비싸다 — 쿠폰이 빠진 게 아니라 상품 화면 할인가가 주문서에 없는 할인을 담은 것이다
+            # (2026-11-03 4080: 4계정 모두 5천원 넘게 차이). 가장 싼 계정의 주문서 값으로 산다(마진 검사는 그대로)
+            self.note('계정 선택', f'{len(gap_only)}계정 모두 화면가보다 비쌈 — 주문서 값으로 {accounts[0]} 견적')
+            self._coupon_gap_off = True
+            try:
+                quotes = self._payable_only(self._quote_batch(a, [accounts[0]]))
+            finally:
+                self._coupon_gap_off = False
         if not quotes:
             if unpayable:
                 raise AgentFailure(
