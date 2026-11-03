@@ -52,7 +52,7 @@ sources:
     buy_accounts: [buyer01, buyer02, buyer03, buyer04, buyer06, buyer07]   # 사용자 2026-09-28: ABC 계정 6개 전부 비교
   - id: LOTTEON
     key: lotteon
-    excluded_pay_providers: [site]  # L.PAY(간편결제) 비밀번호 창을 하네스가 못 찾음(4065·4070·4120·4139, 2026-11-04) — 고칠 때까지 다음 최저 수단으로
+    excluded_pay_providers: [site, kakao]  # 카카오페이 폰 승인 verify-failed(성공 3·실패 19, 4065 2026-11-04). L.PAY(간편결제) 비밀번호 창을 하네스가 못 찾음(4065·4070·4120·4139, 2026-11-04) — 고칠 때까지 다음 최저 수단으로
     payment_quotes: true  # 2026-09-23 lotteon_payment_quotes
     normal_price: true  # 2026-09-26 lotteon_normal_price(할인전 가격 → 포이즌 외 마켓 직배/까대기 판정)
     label: 롯데온
