@@ -460,8 +460,8 @@ OFFICE_ADDRESS_HINT = local_aliases.apply('사무실길 58')
 OFFICE_NAME = local_aliases.apply('김사무')
 # 까대기 주문 배송지(사무실). 기본 배송지가 사무실이 아닐 때 이번 주문에만 넣는다 — poizon-sourcing 스킬 "사무실 배송"
 OFFICE_DETAIL = '1층 102호'
-# 저장된 사무실 배송지 호수 — 101호·102호 모두 같은 사무실(사용자 2026-11-03)
-OFFICE_ROOM_RE = r'(?:1\s*층\s*)?10[12]\s*호'
+# 사무실 배송지는 102호로 통일한다(사용자 2026-11-03) — 101호로 저장된 칸은 고르지 않고 102호로 넣는다
+OFFICE_ROOM_RE = r'(?:1\s*층\s*)?102\s*호'
 # SSG 선물하기 스크립트(2026-09-29) — 바로구매 주문서로 견적한 뒤 선물 주문서로 바꿔 탄다
 SSG_GIFT_ENTER_SCRIPT = 'ssg_gift_enter'
 SSG_GIFT_ADDRESS_SCRIPT = 'ssg_gift_address'
@@ -4508,8 +4508,8 @@ class BuyerAgent(AgentBase):
                 return
             # 기본 배송지가 사무실이 아니다(또는 없다) — 목록에 사무실 배송지가 있으면 그것을 고르고,
             # 없을 때만 사무실 주소를 새로 넣는다. 기본 배송지 자체는 바꾸지 않는다(poizon-sourcing 스킬 "사무실 배송")
-            # 상세주소(호수)는 비워서 고른다 — 101호·102호 어느 쪽으로 저장돼 있어도 같은 사무실이다
-            if self._select_existing_shipping({**OFFICE_SHIPPING, 'address_detail': ''}, account):
+            # 102호로 저장된 사무실 칸만 고른다(호수 통일)
+            if self._select_existing_shipping(dict(OFFICE_SHIPPING), account):
                 return
             self.note('배송지', '목록에 사무실 배송지가 없어 사무실 주소를 새로 넣는다')
             self._apply_shipping(a, dict(OFFICE_SHIPPING), account)
