@@ -27,6 +27,8 @@ if(!popup){
 if(!popup){out.note='배송지 팝업 못 찾음';return out;}
 await tabs.switch(popup.id);
 try{await page.waitFor('배송지 추가하기',8000);}catch(e){}
+// 버튼 목록(interactive) 읽기에는 화면 글자가 비어 온다(실기 2026-11-04 hwangnol06 4136: 칸마다 글자 '' → 사무실 칸을 못 찾음) — 글자는 따로 읽어 붙인다
+async function rowsOf(o){const g=await G(o);const t=await G(o.query?{query:o.query}:{});return rowsFrom({tree:g.tree.split('PAGE TEXT:')[0]+'PAGE TEXT:'+(t.tree.split('PAGE TEXT:')[1]||'')});}
 function rowsFrom(g){
   const lines=g.tree.split('\n');const ids=[];
   for(let i=0;i<lines.length;i++){
@@ -68,12 +70,12 @@ async function search(q){
   await sleep(600);return await G({query:q});
 }
 let fb=false;
-let best=pick(rowsFrom(await G({interactive:true,query:nm})),true);
+let best=pick(await rowsOf({interactive:true,query:nm}),true);
 if(!best){const key=toks.filter(t=>/[0-9]/.test(t)||t.length>=3).slice(-2).join(' ')||ad;
   // 검색칸이 없으면 전체 목록에서 고른다(무신사는 이름을 '임*희' 로 가려 이름 검색이 안 걸린다, 실기 2026-11-03)
-  {const rs=rowsFrom(await G({interactive:true}));best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}}
+  {const rs=await rowsOf({interactive:true});best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}}
   if(!best)for(const q of [nm,key]){if(!q)continue;const g=await search(q);if(!g)break;
-    const rs=rowsFrom(await G({interactive:true,query:q}));best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}if(best)break;}}
+    const rs=await rowsOf({interactive:true,query:q});best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}if(best)break;}}
 if(!best){out.note='목록에 맞는 배송지 없음';return out;}
 out.found=true;
 const pickedName=(best.tx.replace(/^(?:기본 배송지|최근 사용)\s*/,'').split(' ')[0]||'');
