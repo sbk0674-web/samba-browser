@@ -30,6 +30,9 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 낱말이 똑같으면 같은 옵션이다 — 'ONE'(원사이즈)처럼 사이즈 꼴이 아닌 값도(실기 2026-11-03 4111 'LIGHT BEIGE ONE 1개' ↔ 'LIGHT BEIGE · ONE')
     if got and sorted(got) == sorted(want):
         return True
+    # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
+    if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
+        return True
     want_set = set(want) | {t.split('(')[0] for t in want if '(' in t}
     if got and all(t in want_set for t in got) and any(_SIZE_ONLY.fullmatch(t) for t in got):
         return True
