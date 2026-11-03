@@ -180,6 +180,7 @@ export function parseScan(
       lastAtText: timeText,
       lastAtSource,
       lastAtPrecise,
+      listOrder: channels.length,
       unread,
       productTitle: str(row.productTitle),
       productThumb: typeof row.productThumb === 'string' ? row.productThumb : null

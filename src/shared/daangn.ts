@@ -27,6 +27,8 @@ export interface DaangnChannelDto {
   lastAtSource?: 'message' | 'list'
   /** 원본에 날짜와 분 단위 시각이 함께 있을 때만 true */
   lastAtPrecise?: boolean
+  /** 현재 원본 목록의 최신순 위치. 날짜가 없는 대화를 맨 아래로 밀지 않기 위한 순서 근거 */
+  listOrder?: number
   unread: number
   productTitle: string
   productThumb: string | null
@@ -129,9 +131,62 @@ export function filterChannels(
   opts: { accountId: number | null; unreadOnly: boolean }
 ): DaangnChannelDto[] {
   const out = list.filter(
-    (c) => (opts.accountId === null || c.accountId === opts.accountId) && (!opts.unreadOnly || c.unread > 0)
+      (c) => opts.accountId === null || c.accountId === opts.accountId
   )
-  return out.sort((a, b) => b.lastAt - a.lastAt || (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0))
+  const compare = (a: DaangnChannelDto, b: DaangnChannelDto): number =>
+    b.lastAt - a.lastAt || (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0)
+  const groups = new Map<number, DaangnChannelDto[]>()
+  for (const c of out) {
+    const group = groups.get(c.accountId) ?? []
+    group.push(c)
+    groups.set(c.accountId, group)
+  }
+  const streams = [...groups.values()].map((rows) => {
+    const native = rows.some(c => c.lastAt <= 0) &&
+      rows.every(c => Number.isInteger(c.listOrder) && c.listOrder! >= 0) &&
+      new Set(rows.map(c => c.listOrder)).size === rows.length
+    rows.sort(native ? (a, b) => a.listOrder! - b.listOrder! : compare)
+    if (native) {
+      const dated = rows.filter(c => c.lastAt > 0)
+      const leading: DaangnChannelDto[] = []
+      const after = new Map<DaangnChannelDto, DaangnChannelDto[]>()
+      let anchor: DaangnChannelDto | undefined
+      for (const row of rows) {
+        if (row.lastAt > 0) anchor = row
+        else if (!anchor) leading.push(row)
+        else {
+          const run = after.get(anchor) ?? []
+          run.push(row)
+          after.set(anchor, run)
+        }
+      }
+      if (dated.length) {
+        const first = dated[0]
+        // 확인된 날짜는 실제 시각순을 지키고, 날짜 없는 연속 행만 원래 이웃 행에 붙인다.
+        rows = dated.sort(compare).flatMap(c => [
+          ...(c === first ? leading : []), c, ...(after.get(c) ?? [])
+        ])
+      }
+    }
+    // 표시·저장 날짜를 만들지 않는다. 계정 사이를 합칠 때만 가까운 원본 날짜를 순서 기준으로 사용한다.
+    const weights: number[] = []
+    let previous = 0
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].lastAt > 0) previous = rows[i].lastAt
+      weights[i] = rows[i].lastAt > 0 ? rows[i].lastAt : previous ||
+        rows.slice(i + 1).find(c => c.lastAt > 0)?.lastAt || 0
+    }
+    return { rows, weights, position: 0 }
+  })
+  const ordered: DaangnChannelDto[] = []
+  while (ordered.length < out.length) {
+    const available = streams.filter(s => s.position < s.rows.length)
+    available.sort((a, b) => b.weights[b.position] - a.weights[a.position] ||
+      compare(a.rows[a.position], b.rows[b.position]))
+    const next = available[0]
+    ordered.push(next.rows[next.position++])
+  }
+  return opts.unreadOnly ? ordered.filter(c => c.unread > 0) : ordered
 }
 
 /** 계정별 안 읽은 합계. 채널이 하나도 없는 계정은 키가 없다 */
