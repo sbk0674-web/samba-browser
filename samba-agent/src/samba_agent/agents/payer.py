@@ -1567,6 +1567,10 @@ class PayerAgent(AgentBase):
                     if isinstance(t, dict) and (t.get('kind') == 'popup' or t.get('active'))
                 ]
                 self.note('키패드 없음 화면', mask_text(' , '.join(seen))[:280])
+                # 같은 탭에 뜬 창·덮개 이름을 남긴다 — 롯데온 L.PAY 는 하네스로 열 때만 비밀번호 창이 없다(실기 2026-11-04 4139, 직접 열면 뜸)
+                # 결제 확인(get_page)으로 넘어가지 않게 찾기 도구만 쓴다
+                boxes = [str(self.tool('find_elements', query=q))[:200] for q in ('L.PAY', '혜택')]
+                self.note('키패드 없음 창', mask_text(' | '.join(boxes))[:400])
             except (AgentFailure, ValueError):
                 pass
             # 비밀번호 없이 결제가 끝나는 수단(무신사페이 등록 카드 등)은 키패드 대신 주문 완료 화면이 뜬다 —
