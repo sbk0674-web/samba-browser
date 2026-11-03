@@ -15,8 +15,11 @@ const road = rm ? rm[1] + rm[2] : ''
 // 상세는 '(' 앞까지 앞 6자 — 주문 상세 '수서1단지(SH빌리지) 102동' 은 주소록에 '수서1단지 102동' 으로 저장돼 '(' 가 키에 들면 영원히 안 맞는다(실기 2026-10-20 SSG 2706)
 const det = sq(nz(args.address_detail).split('(')[0]).slice(0, 6) || sq(args.address_detail).slice(0, 6)
 // 마스킹 이름 'ㅇ' 은 한 글자 아무거나 — 주문 '강*우' 는 주소록 '강지우' 와 같은 사람이다(도로명·상세가 함께 맞아야 통과)
-const nameRe = new RegExp(base.replace(/ㅇ/g, '[가-힣ㅇ]'))
-const mine = b => { const x = sq(b); return (!road || x.includes(road)) && (!det || x.includes(det)) && nameRe.test(b) }
+// 이름은 공백 없이 앞 8자·대소문자 무시 — 긴 영문 이름은 SSG 가 잘라 저장한다(실기 2026-11-03 4076)
+const nk = sq(base).toLowerCase().slice(0, 8)
+const nameRe = new RegExp(nk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ㅇ/g, '[가-힣ㅇ]'))
+const hasName = t => nameRe.test(sq(t).toLowerCase())
+const mine = b => { const x = sq(b); return (!road || x.includes(road)) && (!det || x.includes(det)) && hasName(b) }
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(400) } return '' }
 const idL = l => parseInt(l.slice(1))
 const findTab = async re => (await tabs.list()).find(t => re.test(t.url || ''))
@@ -88,7 +91,7 @@ let filled = false
 for (let i = 0; i < 10 && !filled; i++) {
   await sleep(1000)
   const gt = sq(await tree({}))
-  filled = gt.includes(base) && (!road || gt.includes(road)) && (!det || gt.includes(det))
+  filled = hasName(gt) && (!road || gt.includes(road)) && (!det || gt.includes(det))
 }
 if (!filled) return { ...R, note: '선물 화면에 받는 분이 안 들어감' + ((await findTab(/selectShpploc/)) ? '(주소록 창이 안 닫힘)' : '') }
 const go = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] button "계속하기"/.test(l))
@@ -99,7 +102,7 @@ if (od && /\/nodcsnOrder\/ordShppInfo/.test(od.url || '')) {
   await tabs.switch(od.id)
   try { await page.waitFor('계속하기', 6000) } catch (e) {}
   const mt = sq(await tree({}))
-  if (!mt.includes(base) || (road && !mt.includes(road)) || (det && !mt.includes(det))) return { ...R, note: '중간 배송정보의 받는 분 불일치' }
+  if (!hasName(mt) || (road && !mt.includes(road)) || (det && !mt.includes(det))) return { ...R, note: '중간 배송정보의 받는 분 불일치' }
   const next = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] (?:button|link) "계속하기"/.test(l))
   if (!next) return { ...R, note: '중간 배송정보 계속하기 없음' }
   await page.click(idL(next))
