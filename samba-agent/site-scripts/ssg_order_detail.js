@@ -68,6 +68,14 @@ if (giftStates.size === 1) {
   R.gift_status = [...giftStates][0]
   R.gift_accepted = R.gift_status === '수락완료'
 } else if (giftStates.size > 1) R.gift_status = '확인필요'
+// 옵션·수량·받는분(실기 2026-11-03 4085): '… 상품명 S/블랙(Z1) 판매가격 …', '상품수량 1개', '받으시는 분 성함 …'
+R.option = ((t.match(/상품유닛 목록형\s*(.*?)\s*판매가격/) || [])[1] || '').split(' ').pop() || null
+const qm = t.match(/상품수량\s*([\d,]+)\s*개/)
+R.qty = qm ? num(qm[1]) : null
+const si = t.search(/받으시는 분/), ui = t.search(/상품유닛|주문상품/)
+R.shipping_text = si >= 0 ? t.slice(si, ui > si ? ui : si + 400) : ''
+// 선물주문은 상세에 받는 분 이름만 나오고 주소는 안 나온다(고객이 카톡으로 입력)
+R.gift_order = /주문유형\s*선물주문/.test(t)
 const pi = t.search(/결제\s*정보/)
 const pay = pi >= 0 ? t.slice(pi, pi + 700) : ''
 R.paid = num((pay.match(/총\s*결제\s*금액\s*([\d,]+)\s*원/) || [])[1])

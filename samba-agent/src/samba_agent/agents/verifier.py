@@ -115,11 +115,19 @@ class VerifierAgent(AgentBase):
             # Some sites mask recipient names. Address text alone cannot prove the recipient.
             raw = str(source.get('shipping_text') or '')
             flat = _identity_address_key(raw)
-            for key in ('name', 'address', 'address_detail'):
+            # SSG 선물주문 상세는 받는 분 이름만 보이고 주소는 없다(고객이 카톡으로 입력, 실기 2026-11-03 4085) — 이름만 대조
+            keys = ('name',) if kind == 'gift' and source.get('gift_order') is True else ('name', 'address', 'address_detail')
+            for key in keys:
                 value = str(expected.get(key) or '')
                 if not value:
                     continue
-                if key == 'name':
+                if key == 'name' and kind == 'gift':
+                    # 선물 받는 분 이름은 SSG 가 잘라 저장한다(긴 영문 이름 — 실기 2026-11-03 4076) — 주소록 대조와 같이
+                    # 공백 빼고 앞 8자·대소문자 무시로 본다
+                    head = value.replace(' ', '').lower()[:8]
+                    if head not in raw.replace(' ', '').lower():
+                        missing.append('recipient')
+                elif key == 'name':
                     if not re.search(r'(?<![가-힣A-Za-z])' + re.escape(value) + r'(?![가-힣A-Za-z])', raw):
                         missing.append('recipient')
                 elif not _detail_found(flat, _identity_address_key(value), kind):
