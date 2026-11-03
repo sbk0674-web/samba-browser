@@ -20,6 +20,8 @@ _SIZE_ONLY = re.compile(r'^(?:\d{2,3}(?:\([a-z0-9]+\))?|\d?x{0,3}[sml]|free|f)$'
 def _tokens(value: object) -> list[str]:
     """옵션 글자를 낱말로 — 주문 옵션에만 붙는 수량('1개')은 뺀다."""
     text = re.sub(r'(?<!\S)\d+\s*개(?!\S)', ' ', str(value or '').casefold())
+    # 신발 사이즈 '250MM' 은 '250' 과 같다(실기 2026-11-04 롯데온 4127 'BLK(BLACK) 250 NS87R61A' ↔ '250MM')
+    text = re.sub(r'(?<=\d)\s*mm\b', '', text)
     return [t for t in re.split(r'[\s/:,·]+', text) if t]
 
 
