@@ -238,6 +238,8 @@ class VerifierAgent(AgentBase):
         quoted_reward = a.handoff.get('reward')
         if (
             not source.get('reward')
+            # 네이버페이는 영수증 적립만 쓴다 — 기록 단계와 같은 규칙(실기 2026-11-03 4090: 견적 적립 184 를 빼 36,866 으로 오탐)
+            and '네이버' not in f'{source.get("card") or ""} {a.handoff.get("card") or ""}'
             and isinstance(quoted_reward, int | float)
             and not isinstance(quoted_reward, bool)
             and quoted_reward > 0

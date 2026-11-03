@@ -375,6 +375,11 @@ class RecorderAgent(AgentBase):
             receipt = self._naver_receipt(a, sourcing_no)
             if receipt is not None:
                 detail = {**detail, **receipt}
+                # 검사 단계도 같은 영수증 값으로 원가를 다시 낸다(실기 2026-11-03 4090: 기록 36,050 · 검사 36,866 불일치)
+                values['naver_payment'] = {
+                    **receipt,
+                    'card_issuer': str(receipt.get('card') or '').split(' - ')[-1] if receipt.get('payment_kind') == 'card' else None,
+                }
                 if site_of(a).upper() == 'LOTTEON':
                     detail['reward_verified'] = True
         if site_of(a).upper() == 'LOTTEON' and naver and detail.get('reward_verified') is not True:

@@ -74,6 +74,11 @@ def _handoff(state: RunState) -> dict[str, object]:
         if name == 'payer':
             # 결제가 성공 화면에서 뽑은 소싱 주문번호 — 기록·검증이 이걸 쓴다
             out.update({f: r.payload.get(f) for f in ('card', 'source_order_no', 'arrival_memo', 'naver_payment')})
+        if name == 'recorder':
+            # 결제 단계가 확인 못 한 네이버 결제를 기록 단계가 영수증으로 확인했으면 검사도 그 값을 쓴다
+            values = r.payload.get('values')
+            if isinstance(values, dict) and isinstance(values.get('naver_payment'), dict):
+                out['naver_payment'] = values['naver_payment']
     return {k: v for k, v in out.items() if v is not None}
 
 
