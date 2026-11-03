@@ -1,14 +1,12 @@
 // 무신사 결제창 진입: 결제하기 직전(또는 결제)까지
 // 인자 {card, profile?, dryRun?, expect:{name, option, selected, product_no}, amount?, tab?}
 // dry 면 누르기 직전까지. expect 없으면 결제 안 함
-// 총액 못 읽으면 실패, amount+배송비 초과면 멈춤
 const nz = s => String(s || '').replace(/\s+/g, ' ').trim()
 const lc = s => nz(s).toLowerCase()
 const num = s => parseInt(String(s || '').replace(/[^\d]/g, ''), 10) || 0
 const OF = /musinsa\.com\/order\/order-form/
 const get = async o => { for (let i = 0; i < 6; i++) { try { return (await page.get(o)).tree } catch (e) { await sleep(600) } } return '' }
 const text = async () => nz((await get({})).split('PAGE TEXT:')[1])
-// 총액: 못 읽으면 null
 const totalOf = t => { const m = t.match(/총 결제 금액\s*(?:\d+%\s*)?([\d,]+)\s*원/); return m ? num(m[1]) : null }
 const segOf = t => nz((t.match(/주문 ?상품\s*\d+\s*개\s*(.*?)\s*\/\s*\d+\s*개/) || [])[1])
 const dry = !!(args.dryRun || args.dry_run)
@@ -18,7 +16,6 @@ const fail = (error, note) => ({ ...R, ok: false, error, note: note || error })
 const ex = typeof args.expect === 'string' ? { name: args.expect } : (args.expect && typeof args.expect === 'object' ? args.expect : null)
 if (!dry && !ex) return fail('no expect', 'no expect')
 
-// 주문서 대조: 다르면 사유
 const GEN = new Set('매장정품 정품 신발 운동화 스니커즈 스니커 남성 여성 남녀공용 공용 커플 키즈 아동 나이키 아디다스 뉴발란스 푸마 반스 컨버스 리복 아식스 휠라 스케쳐스 크록스 노스페이스 nike adidas puma vans converse reebok asics fila skechers crocs 모자 가방 티셔츠 블랙 화이트 그레이 네이비 black white grey gray navy'.split(' '))
 const tk = s => lc(s).split(/[^0-9a-z가-힣]+/).filter(Boolean)
 const ft = t => /^(free|one|f|os|onesize|프리)$/.test(t)
@@ -28,7 +25,8 @@ const mismatch = (seg, tree) => {
   const words = String(ex.name || '').split(/[\s/()[\],·_:-]+/).filter(w => w && !/^\d+$/.test(w) && !GEN.has(w.toLowerCase()) && !w.startsWith('옵션') && ((/[가-힣]/.test(w) && w.length >= 2) || w.length >= 4))
   const sizes = (String(ex.option || '') + ' ' + String(ex.selected || '')).match(/(?<![\d.A-Za-z])\d{2,3}(?:\.5)?(?![\d.A-Za-z])/g) || []
   const segNums = seg.split(/[^\d.]+/).filter(Boolean)
-  if (words.length && !words.some(w => low.includes(w.toLowerCase()))) return `name words ${words.slice(0, 5).join(',')} not in order form`
+  const ns = low.replace(/\s/g, '') // 띄어쓰기 무시(4136)
+  if (words.length && !words.some(w => ns.includes(w.toLowerCase()))) return `name words ${words.slice(0, 5).join(',')} not in order form`
   if (sizes.length && !sizes.some(x => segNums.includes(x))) return `size ${sizes.join('/')} not in order form`
   // 글자 사이즈는 주문서 줄에 같은 토큰이 있어야
   const ot = tk(ex.selected || ex.option)
