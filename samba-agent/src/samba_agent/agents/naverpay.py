@@ -28,8 +28,10 @@ def parse_receipt(text: str, source_order_no: str) -> dict[str, object]:
         raise ValueError('실제 결제 카드사 미확인')
     rewards = re.search(r'구매적립 안내 보기\s*총\s*([\d,]+)원', value)
     components = re.findall(r'(?:기본적립|머니 결제적립)\s*([\d,]+)원', value)
-    if not re.search(r'포인트 혜택|구매적립', value):
-        # 적립 칸 자체가 없는 영수증(실기 2026-11-03 롯데온 4081 현대카드 161,460원) — 적립 없음
+    reward_shown = bool(re.search(r'포인트 혜택|구매적립', value))
+    if not reward_shown:
+        # 적립 칸 자체가 없는 영수증(실기 2026-11-03 롯데온 4081·4097: 결제금액·카드만 보임) — 적립을 읽을 수 없다.
+        # 0 으로 확정하지 않고 reward_shown=False 로 알린다(기록 단계가 네이버페이 기본 적립 규칙을 쓴다)
         reward = 0
     elif not rewards or not components:
         raise ValueError('확정 가능한 네이버 적립 내역 없음')
@@ -48,6 +50,7 @@ def parse_receipt(text: str, source_order_no: str) -> dict[str, object]:
         'money_paid': money_paid,
         'naver_points_used': used,
         'naver_reward': reward,
+        'reward_shown': reward_shown,
         'payment_verified': True,
     }
 

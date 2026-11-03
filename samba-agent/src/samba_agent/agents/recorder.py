@@ -374,6 +374,14 @@ class RecorderAgent(AgentBase):
             # (실기 2026-11-03 4081·4086: 결제는 현대카드로 됐는데 확인값이 없어 기록이 멈췄다)
             receipt = self._naver_receipt(a, sourcing_no)
             if receipt is not None:
+                if receipt.get('reward_shown') is False:
+                    # 영수증에 적립 칸이 없다 — 네이버페이 기본 적립(결제액 1%)을 쓴다. 견적과 같은 규칙
+                    # (사용자 2026-09-25 실측 64,600 → 646. 실기 2026-11-03 4091·4097: 0 으로 둬 견적 오차 1% 로 멈춤)
+                    from samba_agent.agents.buyer import NAVERPAY_POINT_RATE
+
+                    base = float(receipt.get('card_paid') or receipt.get('paid') or 0)
+                    receipt = {**receipt, 'naver_reward': round(base * NAVERPAY_POINT_RATE)}
+                    self.note('네이버 적립', f'영수증에 적립 칸 없음 — 기본 1% {receipt["naver_reward"]:,}원 적용')
                 detail = {**detail, **receipt}
                 # 검사 단계도 같은 영수증 값으로 원가를 다시 낸다(실기 2026-11-03 4090: 기록 36,050 · 검사 36,866 불일치)
                 values['naver_payment'] = {
