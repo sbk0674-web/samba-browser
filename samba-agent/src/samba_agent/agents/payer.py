@@ -1814,7 +1814,9 @@ class PayerAgent(AgentBase):
                 if not isinstance(t, dict) or t.get('lane'):
                     continue
                 url = str(t.get('url') or '')
-                if not re.search(r'order/(?:result|confirmed)', url):
+                # 롯데온 완료 탭은 /p/order/complete/… — 빠져 있어 폰 승인 뒤에도 완료를 못 보고 요청을 3번 다 보냈다
+                # (실기 2026-11-04 750185764110345)
+                if not re.search(r'order/(?:result|confirmed|complete)', url):
                     continue
                 if want_domain and want_domain not in _host_of(url):
                     continue
