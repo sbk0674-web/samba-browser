@@ -1158,6 +1158,22 @@ _CLOSE_ORDER_TABS_JS = (
     "for (const t of await tabs.list()) { if (!t.lane && /order\\/order-form|order\\/checkout|order\\/orderform|pay\\.ssg\\.com\\/order|fashionplus\\.co\\.kr\\/order\\/\\d+|hmall\\.com\\/mo\\/oda\\/order/.test(t.url || '')) "
     '{ try { await tabs.close(t.id) } catch (e) {} } } return "ok"'
 )
+# 롯데온 주문서의 '주문할인혜택' 창(할인변경)이 견적 뒤에 남으면 배송지 창을 가려 배송지 입력이 멈춘다
+# (실기 2026-11-05 3481080893: 견적 스크립트의 닫기가 이 창을 못 닫아 6건이 배송지에서 멈춤) — 그 창의 닫기만 누른다
+_CLOSE_LOTTEON_DISCOUNT_JS = (
+    "const tab = __TAB__\n"
+    "if (tab) { try { await tabs.switch(tab) } catch (e) {} }\n"
+    "for (let i = 0; i < 4; i++) {\n"
+    "  const T = String((await page.get({})).tree || '')\n"
+    "  const d = T.match(/^\\[(\\d+)\\] dialog \"[^\"]*주문할인혜택/m)\n"
+    "  if (!d) return i ? 'closed' : 'none'\n"
+    "  const ids = [...T.matchAll(/^\\[(\\d+)\\] button \"닫기\"/gm)].map(m => parseInt(m[1])).filter(n => n > parseInt(d[1]))\n"
+    "  if (!ids.length) return 'no-close-button'\n"
+    "  await page.click(Math.min(...ids))\n"
+    "  await sleep(800)\n"
+    "}\n"
+    "return 'still-open'"
+)
 # 레인 보기에서는 제 레인이 연 탭만 보인다 — 전부 닫으면 그 레인 탭만 닫힌다
 _CLOSE_LANE_TABS_JS = (
     'for (const t of await tabs.list()) { try { await tabs.close(t.id) } catch (e) {} } return "ok"'
@@ -4565,6 +4581,17 @@ class BuyerAgent(AgentBase):
         # (실기 2026-09-27: 29CM·무신사 주소록에 같은 고객 주소가 4개 쌓임)
         # 롯데온은 목록을 뒤지지 않고 둘째 항목을 덮어쓴다(사용자 지시 — 주소록에 고객 주소를 쌓지 않는다)
         overwrite = source_of(self.spec.name).key == 'lotteon'
+        if overwrite:
+            try:
+                closed = self.tool(
+                    'run_js',
+                    code=_CLOSE_LOTTEON_DISCOUNT_JS.replace('__TAB__', json.dumps(self._ship_tab)),
+                    safety='no_pay',
+                )
+                if 'none' not in closed:
+                    self.note('배송지', f'주문할인혜택 창 닫기: {closed[:40]}')
+            except AgentFailure as e:
+                self.note('배송지', f'주문할인혜택 창 닫기 실패({e.reason[:60]})')
         if not overwrite and self._select_existing_shipping(dict(shipping), account):
             # 기존 배송지를 골라 통과한 경로도 결제 직전 주문서 대조 열쇠를 만든다 — 새 배송지 입력 경로에서만 만들어져
             # 재시도(기존 항목 선택)로 엉뚱한 줄이 골라져도 대조 없이 결제되던 오배송 구멍(2026-10-08, 5건)
