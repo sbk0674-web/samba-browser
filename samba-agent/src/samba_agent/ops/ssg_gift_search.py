@@ -137,9 +137,19 @@ def gift_check_button(phone: Phone, nodes: list[Node]) -> Node | None:
         raise GiftAcceptError('광고 팝업이 선물 화면을 가림 — AI 화면 복구 필요')
     check = next((node for node in nodes if CHECK_BTN in node.text and 150 < node.y < 1510), None)
     if check is not None and phone.top_package() == SSG_APP:
-        navigation = [node for node in nodes if '홈으로 이동' in node.desc]
-        if any(abs(node.x - check.x) < 120 and abs(node.y - check.y) < 80 for node in navigation):
-            raise GiftAcceptError('선물 버튼과 SSG 하단 홈 좌표가 겹침 — AI 화면 복구 필요')
+        def overlaps(ns: list[Node], btn: Node) -> bool:
+            navigation = [node for node in ns if '홈으로 이동' in node.desc]
+            return any(abs(node.x - btn.x) < 120 and abs(node.y - btn.y) < 80 for node in navigation)
+
+        if overlaps(nodes, check):
+            # SSG 앱 아래 메뉴 막대가 버튼과 겹친다 — 조금 올려 막대를 숨기고 다시 본다(accept_ssg_gift 와 같은 방법).
+            # 그래도 겹치면 홈을 잘못 누를 수 있어 멈춘다(실기 2026-11-04 53B45C: 겹침으로 수락 못 함)
+            phone.swipe_up()
+            time.sleep(1.5)
+            nodes = phone.nodes()
+            check = next((node for node in nodes if CHECK_BTN in node.text and 150 < node.y < 1510), None)
+            if check is not None and overlaps(nodes, check):
+                raise GiftAcceptError('선물 버튼과 SSG 하단 홈 좌표가 겹침 — AI 화면 복구 필요')
     return check
 
 

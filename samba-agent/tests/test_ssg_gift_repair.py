@@ -19,6 +19,11 @@ class FakePhone:
     def tap(self, x, y):
         self.taps.append((x, y))
 
+    def swipe_up(self):
+        self.swipes = getattr(self, 'swipes', 0) + 1
+        if getattr(self, 'after_swipe', None) is not None:
+            self.current = self.after_swipe
+
 
 def product():
     return Node('다이나핏 YUS23G30 베이지 270', '', '', 360, 400)
@@ -43,6 +48,20 @@ def test_bottom_home_overlap_requires_visual_repair():
     )
     with pytest.raises(GiftAcceptError, match='하단'):
         gift_check_button(phone, phone.nodes())
+    assert phone.taps == []
+    assert phone.swipes == 1
+
+
+def test_bottom_home_overlap_clears_after_swipe(monkeypatch):
+    import samba_agent.ops.ssg_gift_search as search
+
+    monkeypatch.setattr(search.time, 'sleep', lambda s: None)
+    check = Node('옵션/배송지 확인', '', '', 360, 1300)
+    phone = FakePhone(
+        [product(), Node('옵션/배송지 확인', '', '', 360, 1434), Node('', 'SSG.COM 홈으로 이동', '', 360, 1428)]
+    )
+    phone.after_swipe = [product(), check]
+    assert gift_check_button(phone, phone.nodes()) == check
     assert phone.taps == []
 
 
