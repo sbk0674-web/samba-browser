@@ -125,7 +125,8 @@ def payco_card_names(card: str) -> tuple[str, ...]:
             return names
     return ('현대',)
 
-PAY_SUCCESS_MARKERS = ('결제 완료', '결제완료', '주문완료', '주문 완료', '주문이 완료', 'approved')
+# 롯데온 선물 주문 완료 화면은 '…님께 선물을 보냈어요' 뿐이다 — 결제·주문 완료 글자가 없다(실기 2026-11-04 750185764110345)
+PAY_SUCCESS_MARKERS = ('결제 완료', '결제완료', '주문완료', '주문 완료', '주문이 완료', 'approved', '선물을 보냈어요')
 # 주문 완료 페이지 주소(무신사 /order/result/…, 롯데온 /order/complete/… 등) — 키패드 없이 끝난 결제를 알아보는 데 쓴다
 ORDER_DONE_URL_RE = re.compile(r'/order/(?:result|complete)/\d|orderComplete|order_complete|/order/done', re.IGNORECASE)
 # _press_keypad 가 키패드 없이 결제 완료 화면을 본 경우 돌려주는 값(앱 응답처럼 'ok' 로 시작한다)
