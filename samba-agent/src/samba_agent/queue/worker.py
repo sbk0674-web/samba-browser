@@ -122,14 +122,16 @@ class Worker:
         """queued 1건을 집어 끝까지(또는 승인 대기까지) 돌린다. 없으면 None."""
         if self.d.ready is not None and not self.d.ready():
             return None
+        # SSG 선물 업무폰 수락은 구매 큐가 비었을 때만 돌아 하루 종일 밀렸다(사용자 2026-11-04 컴플레인) —
+        # 구매를 집기 전에 기한이 된 수락 1건을 먼저 처리한다
+        drain = getattr(self.d.after_done, 'drain', None)
+        if not self.d.dry_run and callable(drain):
+            try:
+                drain()
+            except Exception:  # noqa: BLE001 — 구매 큐를 다시 실행하지 않는다
+                _log.exception('선물 별도 재검증 실패 — 대기 유지')
         job = self.d.queue.claim()
         if job is None:
-            drain = getattr(self.d.after_done, 'drain', None)
-            if not self.d.dry_run and callable(drain):
-                try:
-                    drain()
-                except Exception:  # noqa: BLE001 — 구매 큐를 다시 실행하지 않는다
-                    _log.exception('선물 별도 재검증 실패 — 대기 유지')
             if self.d.operator_drain is not None:
                 try:
                     self.d.operator_drain()
