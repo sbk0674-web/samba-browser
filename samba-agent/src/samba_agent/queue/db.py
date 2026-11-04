@@ -295,8 +295,8 @@ class JobQueue:
                gift_followup: dict[str, object] | None = None) -> None:
         """실행 종료 상태 기록."""
         if gift_followup is not None:
-            if state != 'done':
-                raise ValueError('선물 재검증은 구매 완료와만 함께 기록한다')
+            if state not in ('done', 'needs_ai'):
+                raise ValueError('선물 재검증은 결제된 작업(done·needs_ai)과만 함께 기록한다')
             # 구매 done과 별도 선물 대기를 한 트랜잭션에 쓴다. 재시작해도 구매 큐로 돌아가지 않는다.
             with self._immediate():
                 row = self._by_id(job_id)
@@ -319,7 +319,7 @@ class JobQueue:
         """구매는 done인 채 선물 확인만 대기 중인 작업. 구매 claim에는 절대 포함하지 않는다."""
         rows = self._db.execute(
             "SELECT j.* FROM gift_followups f JOIN jobs j ON j.id=f.job_id "
-            "WHERE f.state='pending' AND f.next_at<=? AND j.state='done' "
+            "WHERE f.state='pending' AND f.next_at<=? AND j.state IN ('done','needs_ai') "
             'ORDER BY f.next_at, f.job_id LIMIT 1',
             (now,),
         ).fetchall()

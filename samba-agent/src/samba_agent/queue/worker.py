@@ -530,7 +530,12 @@ class Worker:
         outcome = out['outcome']
         fail = out.get('fail_reason')
         prepare = getattr(self.d.after_done, 'prepare', None)
-        followup = prepare(job, out) if outcome == 'done' and not self.d.dry_run and callable(prepare) else None
+        followup = prepare(job, out) if outcome in ('done', 'needs_ai') and not self.d.dry_run and callable(prepare) else None
+        if followup is not None and outcome != 'done' and not followup.get('source_order_no'):
+            # 결제했다는 SSG 주문번호가 없으면(결제 여부 불명) 선물을 받지 않는다
+            followup = None
+        # 결제 뒤 검증 등에서 멈춰도 SSG 선물은 이미 결제됐다 — 선물확인은 따로 계속 돈다
+        # (실기 2026-11-05 2026110556DC7E: 검증 미확인으로 needs_ai 가 되자 선물확인이 아예 안 잡혔다)
         if followup is not None:
             self.d.queue.finish(job.id, outcome, error=str(fail) if fail else None, gift_followup=followup)
         else:
