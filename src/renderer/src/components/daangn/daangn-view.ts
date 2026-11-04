@@ -11,15 +11,17 @@ import {
 export function withNativeListOrder(channels: readonly DaangnChannelDto[], now = new Date()): DaangnChannelDto[] {
   const positions = new Map<number, number>()
   return channels.map(channel => {
+    const lastAtText = channel.lastAtText.trim().replace(/^날짜 미확인\s+(?=(?:오전|오후)\s*\d{1,2}:\d{2}$)/, '')
     const position = positions.get(channel.accountId) ?? 0
     positions.set(channel.accountId, position + 1)
     const listOrder = Number.isInteger(channel.listOrder) && channel.listOrder! >= 0
       ? channel.listOrder : position
-    const clockOnly = /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(channel.lastAtText.trim())
+    const clockOnly = /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(lastAtText)
     const today = clockOnly && (!Number.isFinite(channel.lastAt) || channel.lastAt <= 0)
-      ? parseKoreanTime(`오늘 ${channel.lastAtText.trim()}`, now) : 0
-    if (today > 0) return { ...channel, listOrder, lastAt: today, lastAtSource: 'list', lastAtPrecise: true }
-    return listOrder === channel.listOrder ? channel : { ...channel, listOrder }
+      ? parseKoreanTime(`오늘 ${lastAtText}`, now) : 0
+    if (today > 0) return { ...channel, listOrder, lastAtText, lastAt: today, lastAtSource: 'list', lastAtPrecise: true }
+    return listOrder === channel.listOrder && lastAtText === channel.lastAtText
+      ? channel : { ...channel, listOrder, lastAtText }
   })
 }
 

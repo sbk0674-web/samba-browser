@@ -32,7 +32,7 @@ export function ChannelList(): React.JSX.Element {
           {t('daangn.allChats')}
         </Tab>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div key={`${selectedAccountId ?? 'all'}:${unreadOnly}`} className="min-h-0 flex-1 overflow-y-auto">
         {accounts.length === 0 ? (
           <Empty text={t('daangn.noAccounts')} />
         ) : list.length === 0 ? (

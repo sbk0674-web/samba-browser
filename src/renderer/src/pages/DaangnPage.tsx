@@ -21,7 +21,7 @@ export function DaangnPage(): React.JSX.Element {
   return (
     <div className="flex h-full min-w-0 flex-col">
       <div className="flex items-center gap-4 border-b border-[var(--line)] bg-white px-4 py-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 [-webkit-app-region:drag]">
           <div className="text-[16px] font-semibold text-[var(--text)]">{t('daangn.title')}</div>
           <div className="text-[12px] text-[var(--text2)]">{t('daangn.subtitle')}</div>
         </div>

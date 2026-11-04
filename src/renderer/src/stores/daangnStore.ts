@@ -79,12 +79,15 @@ export const useDaangnStore = create<DaangnStoreState>((set, get) => ({
   error: null,
 
   load: async () => {
+    const channelsBeforeLoad = get().channels
     const [a, c] = await Promise.all([
       window.samba.daangn.accountsList(),
       window.samba.daangn.channelsList()
     ])
-    if (a.ok && c.ok) set({ accounts: a.data, channels: withNativeListOrder(c.data) })
-    else set({ error: !a.ok ? a.error : !c.ok ? c.error : null })
+    if (get().channels === channelsBeforeLoad) {
+      if (a.ok && c.ok) set({ accounts: a.data, channels: withNativeListOrder(c.data) })
+      else set({ error: !a.ok ? a.error : !c.ok ? c.error : null })
+    }
     await get().loadTemplates()
   },
 
