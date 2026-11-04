@@ -679,6 +679,10 @@ TOSS_PUSH_WAIT_MS = 4000
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
 KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck', 'verify-failed')
 KAKAO_HUMAN_WAIT_TRIES = 36
+# 사람 승인 요청 횟수 — 3번 요청 뒤에도 안 되면 삼바웨이브 메모(사용자 규칙 2026-11-04)
+KAKAO_HUMAN_ROUNDS = 3
+# 카카오페이 사람 승인은 업무시간(KST 08~18시)에만 요청한다 — 퇴근 뒤 업무폰 요청 금지(사용자 2026-11-04)
+KAKAO_WORK_HOURS = (8, 18)
 
 
 def _as_won(value: object) -> str:
@@ -958,21 +962,28 @@ class PayerAgent(AgentBase):
         self.note('카카오페이', mask_text(f'폰 키패드 자동 입력 실패({why[:60]}) — 사람 입력 대기'))
         # 사람이 바로 알 수 있게 PC 알림을 띄운다(사용자 2026-10-01 "결제 시도하고 알람 준 뒤 안 되면 삼바 메모")
         amount = _as_won(a.handoff.get('paid'))
-        toast.show(
-            '카카오페이 결제 비밀번호 입력',
-            f'{a.order.order_no} {amount} — 폰에서 3분 안에 결제 비밀번호를 넣어 주세요',
+        # 사람에게 3번 요청한다(사용자 규칙 2026-11-04) — 회차마다 알림을 다시 띄우고 3분씩 기다린다
+        for round_no in range(1, KAKAO_HUMAN_ROUNDS + 1):
+            toast.show(
+                f'카카오페이 결제 승인 요청 {round_no}/{KAKAO_HUMAN_ROUNDS}',
+                f'{a.order.order_no} {amount} — 업무폰 카카오페이 결제요청을 승인해 주세요(3분)',
+            )
+            self.note('카카오페이', f'사람 승인 요청 {round_no}/{KAKAO_HUMAN_ROUNDS} — {amount}')
+            for _ in range(KAKAO_HUMAN_WAIT_TRIES):
+                page = self._success_page(a)
+                if any(m in page for m in PAY_SUCCESS_MARKERS):
+                    return self._confirm_paid(a, card, paid_by='human')
+                self.tool('wait', ms=KAKAO_HUMAN_WAIT_MS)
+        memo = (
+            f'카카오페이 결제 사람 승인 {KAKAO_HUMAN_ROUNDS}회 요청했으나 완료 안 됨 [카카오페이 {amount}] '
+            '— 소싱처 주문내역 확인 전 재결제 금지'
         )
-        for _ in range(KAKAO_HUMAN_WAIT_TRIES):
-            page = self._success_page(a)
-            if any(m in page for m in PAY_SUCCESS_MARKERS):
-                return self._confirm_paid(a, card, paid_by='human')
-            self.tool('wait', ms=KAKAO_HUMAN_WAIT_MS)
-        raise AgentFailure(
-            'needs_ai',
-            '카카오페이 폰 비밀번호를 기다렸지만 결제 완료 화면이 안 떴다(재결제 금지 — 주문내역 확인)'
-            f' [카카오페이 {_as_won(a.handoff.get("paid"))}]',
-            FailReason.PAY_INTERRUPTED,
-        )
+        if self._wave is not None:
+            try:
+                self._wave.add_memo(a.order.wave_key, memo)
+            except Exception:  # noqa: BLE001 — 메모 실패가 결제 판정을 바꾸지 않는다
+                self.note('카카오페이', '삼바웨이브 메모 남기기 실패')
+        raise AgentFailure('needs_ai', memo, FailReason.PAY_INTERRUPTED)
 
     def _restore_kakao_tab(self, kakao_tab: str, helper_tab: str | None) -> None:
         """폰 승인 뒤 — 앞에 띄웠던 소싱처 탭을 닫고 카카오페이 결제창 탭으로 돌아간다(실패해도 확인 단계가 다시 본다)."""
@@ -1893,6 +1904,17 @@ class PayerAgent(AgentBase):
         self.step('payer: 결제창 진입')
         # 실제로 산 사이트(교차 비교) 기준으로 결제창에 들어간다
         script = checkout_script_for(str(a.handoff.get('buy_source') or a.order.source))
+        if str(card or '').startswith('카카오페이') and not a.dry_run:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            hour = datetime.now(ZoneInfo('Asia/Seoul')).hour
+            if not (KAKAO_WORK_HOURS[0] <= hour < KAKAO_WORK_HOURS[1]):
+                raise AgentFailure(
+                    'needs_ai',
+                    f'카카오페이 사람 승인은 업무시간({KAKAO_WORK_HOURS[0]}~{KAKAO_WORK_HOURS[1]}시)에만 요청 — 결제하지 않고 대기',
+                    FailReason.UNKNOWN,
+                )
         payload: dict[str, object] = {'card': card}
         # 현금영수증은 항상 지출증빙용(사용자 2026-09-29 롯데온) — 사업자등록번호는 이 PC 의 local-aliases.json 에만 둔다.
         # 주문서 칸이 비어 있을 때만 스크립트가 넣는다
@@ -2106,6 +2128,10 @@ class PayerAgent(AgentBase):
             # 카카오페이 PC 결제창은 QR/카톡결제 탭이다 — 카톡결제에 휴대폰·생년월일(키마스터 카카오페이 결제 항목)을 넣고
             # 결제요청을 눌러야 폰으로 결제 요청이 간다(사용자 2026-09-30 롯데온 카카오페이 머니)
             kakao_front = self._kakao_talk_request(a)
+            # 카카오페이 폰 화면은 하네스가 못 읽는다 — 자동 승인을 시도하지 않고 바로 사람에게 승인을 요청한다(사용자 규칙)
+            if kakao_front:
+                self._restore_kakao_tab(*kakao_front)
+            return self._wait_human_kakao(a, card, '사람 승인 방식')
         else:
             kakao_front = None
 
