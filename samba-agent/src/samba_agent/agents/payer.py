@@ -1934,6 +1934,24 @@ class PayerAgent(AgentBase):
             payload['amount'] = amount
         if a.handoff.get('order_tab'):
             payload['tab'] = str(a.handoff.get('order_tab'))
+        elif script == 'checkout_enter_lotteon' and profile:
+            # 롯데온 구매는 주문서 탭 id 를 넘기지 않는다 — 활성 탭이 사람이 열어 둔 다른 계정 주문서(나이키 덩크 230)여서
+            # 그 주문서로 L.PAY 결제를 시도했다(실기 2026-11-04). 이 계정 프로필의 주문서 탭이 하나일 때만 그것을 쓴다
+            try:
+                sheets = [
+                    t for t in json.loads(self.tool('list_tabs'))
+                    if isinstance(t, dict) and 'orderSheet' in str(t.get('url') or '')
+                    and str(t.get('profile') or '') == str(profile)
+                ]
+            except (AgentFailure, ValueError):
+                sheets = []
+            if len(sheets) != 1:
+                raise AgentFailure(
+                    'needs_ai',
+                    f'이 계정({profile}) 롯데온 주문서 탭이 {len(sheets)}개 — 어느 주문서인지 몰라 결제하지 않는다',
+                    FailReason.UNKNOWN,
+                )
+            payload['tab'] = str(sheets[0].get('id'))
         elif script == 'checkout_enter_29cm' and not a.dry_run:
             # 구매 핸드오프에 주문서 탭 id 가 빠진 경우(실기 2026-10-20 29CM 2770: no tab 4회) — 열린 탭 중
             # 주문서(checkout) 주소가 하나뿐이면 그것을 쓴다. 여럿이면 짐작하지 않는다
@@ -1967,6 +1985,24 @@ class PayerAgent(AgentBase):
             if self._prepare_naver_card(a):
                 return self._confirm_paid(a, card)
             entered['ok'] = True
+        if not entered.get('ok') and 'timed out' in str(entered.get('note') or ''):
+            # 결제창 스크립트가 시간 초과로 끊겨도 앱 안에서는 계속 돌아 결제가 끝날 수 있다(실기 2026-11-04 롯데온
+            # 4065·4070: '시간 초과' 로 기록한 뒤 L.PAY 결제 완료 → 재시도가 같은 상품을 또 사려 했다). 완료 화면을 찾아보고,
+            # 없으면 결제 여부 미확정으로 멈춘다 — 자동 재시도 금지
+            for _ in range(12):
+                try:
+                    listed = json.loads(self.tool('list_tabs'))
+                except (AgentFailure, ValueError):
+                    listed = []
+                if any(isinstance(t, dict) and ORDER_DONE_URL_RE.search(str(t.get('url') or '')) for t in listed):
+                    self.note('결제창', '스크립트 시간 초과 뒤 주문 완료 화면 확인 — 결제 확인으로 간다')
+                    return self._confirm_paid(a, card)
+                self.tool('wait', ms=5000)
+            raise AgentFailure(
+                'needs_ai',
+                '결제창 스크립트 시간 초과 — 결제 여부 미확정(소싱처 주문내역 확인 전 재결제 금지)',
+                FailReason.PAY_INTERRUPTED,
+            )
         if not entered.get('ok'):
             # 결제하기를 못 눌렀다 — 비밀번호 단계로 가지 않는다(실기: 수단을 못 찾고도 키패드를 찾다 거절)
             raise AgentFailure(

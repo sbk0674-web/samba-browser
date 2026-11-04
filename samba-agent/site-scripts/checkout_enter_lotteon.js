@@ -4,7 +4,7 @@ const cardCompanies=['롯데카드','신한카드','KB국민카드','삼성카�
 const simplePays=['간편결제','카카오페이','네이버페이','토스페이','삼성페이','휴대폰결제','충전결제','퀵계좌이체','온누리상품권'];
 const card=simplePays.find(p=>String(args.card||'').startsWith(p))||(args.issuer||args.card||'');
 if (args.tab && (await tabs.list()).some(t => t.id === String(args.tab))) await tabs.switch(String(args.tab));
-{ const ot=(await tabs.list()).filter(t=>/orderSheet/.test(t.url||''));
+{ const ot=(await tabs.list()).filter(t=>/orderSheet/.test(t.url||'')&&t.profile==args.profile);
 const good=async()=>{const T=String((await page.get({})).tree||'');const r=T.split('\n').find(l=>/radio "받는 분 주소로/.test(l));return !r||(/value="on"/.test(r)&&!/배송지를 선택해 ?주세요/.test(T));};
 if(ot.length>1&&!(await good())){for(const t of ot){await tabs.switch(t.id);await sleep(300);if(await good())break;}}}
 const url = await page.url();
@@ -88,15 +88,14 @@ if(ra&&!/value="on"/.test(ra)){await page.click(parseInt(ra.slice(1)));await sle
 const payId = await page.idOf('결제하기');
 if (payId<0) return {ok:false, error:'결제하기 없음', method};
 let pr=String(await page.click(payId));
-const LP=/dialog "L\.PAY 비밀번호/;for(let k=0;k<6;k++){
-let T='';for(let w=0;w<8;w++){await sleep(1e3);T=String((await page.get({})).tree||'');if(LP.test(T))break}
-if(LP.test(T))break;
-const Z=async(q,r)=>(await page.get({query:q})).tree.split(String.fromCharCode(10)).filter(l=>r.test(l)).map(l=>parseInt(l.slice(1)));
-if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){
-const b=await Z('닫기',/button "닫기"/);if(b.length){await page.click(Math.max(...b));await sleep(2000)}}
-if(/OVERLAY: "[^"]*할인 결제수단으로만/.test(T)){
-const b=await Z('적용하기',/button "적용하기"/);if(b.length){await page.click(Math.max(...b));await sleep(2500);continue}}
+const LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/;for(let k=0;k<4;k++){
+let T='',h=0;for(let w=0;w<10;w++){await sleep(1e3);T=String((await page.get({})).tree||'');if(LP.test(T)||DN.test(T))break}
+if(LP.test(T)||DN.test(T))break;
+const Z=async(q,r)=>(await page.get({query:q})).tree.split('\n').filter(l=>r.test(l)).map(l=>parseInt(l.slice(1)));
+if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const b=await Z('닫기',/button "닫기"/);if(b.length){await page.click(Math.max(...b));await sleep(2000);h=1}}
+if(/OVERLAY: "[^"]*할인 결제수단으로만/.test(T)){const b=await Z('적용하기',/button "적용하기"/);if(b.length){await page.click(Math.max(...b));await sleep(2500);h=1}}
 if(/OVERLAY: "혜택이 변경/.test(T)){await sleep(2500);continue}
+if(!h)break;
 const a=await page.idOf('결제하기');if(a<0)break;pr=String(await page.click(a))}
 await sleep(3000);
 if (/네이버페이/.test(method)) {
@@ -109,4 +108,4 @@ if(after)return{ok:false,error:after,method,receipt};
 const tbs = await tabs.list();
 const popup = tbs.find(t=>t.kind==='popup');
 const DT=String((await page.get({})).tree||'');
-return { ok:true, method, receipt, popup_url: popup? popup.url : null, keypad_in_tab: /네이버페이/.test(method)||LP.test(DT), diag:(LP.test(DT)?'K':'k')+(DT.match(/button "\d"/g)||[]).length };
+return { ok:true, method, receipt, popup_url: popup? popup.url : null, keypad_in_tab: /네이버페이/.test(method)||LP.test(DT) };
