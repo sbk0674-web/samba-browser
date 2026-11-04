@@ -1905,10 +1905,10 @@ class PayerAgent(AgentBase):
         # 실제로 산 사이트(교차 비교) 기준으로 결제창에 들어간다
         script = checkout_script_for(str(a.handoff.get('buy_source') or a.order.source))
         if str(card or '').startswith('카카오페이') and not a.dry_run:
-            from datetime import datetime
-            from zoneinfo import ZoneInfo
+            from datetime import datetime, timedelta, timezone
 
-            hour = datetime.now(ZoneInfo('Asia/Seoul')).hour
+            # 윈도우에는 tz 데이터베이스가 없다(ZoneInfo('Asia/Seoul') 실패 2026-11-04) — KST 는 고정 +9
+            hour = datetime.now(timezone(timedelta(hours=9))).hour
             if not (KAKAO_WORK_HOURS[0] <= hour < KAKAO_WORK_HOURS[1]):
                 raise AgentFailure(
                     'needs_ai',
