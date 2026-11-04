@@ -78,7 +78,11 @@ def make_phone_session():
                     'launcher',
                 )
                 if 'mWakefulness=Awake' in power and foreground not in allowed:
-                    raise GiftAcceptError('사용자 폰 화면 사용 중 — 선물 확인 보류')
+                    # 다른 앱이 떠 있어도 기다리지 않고 카카오톡을 앞으로 띄워 확인한다 — 선물확인이 최우선
+                    # (사용자 2026-11-04 "화면상관없이 찾아서 해야지", 53B45C 가 '폰 화면 사용 중' 으로 계속 밀렸다)
+                    phone.launch(KAKAO)
+                    if not wait_foreground(phone, KAKAO, 25):
+                        raise GiftAcceptError('카카오톡 진입 미확인')
                 if 'mWakefulness=Awake' not in power:
                     if not re.search(r'mWakefulness=(?:Asleep|Dozing)', power):
                         raise GiftAcceptError('폰 화면 상태 미확인')

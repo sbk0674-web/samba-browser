@@ -595,6 +595,8 @@ def make_after_done(
             try:
                 foreground = phone.top_package()
                 if foreground not in (KAKAO, SSG_APP, 'com.sec.android.app.launcher', 'com.android.launcher', 'com.android.launcher3', 'launcher'):
+                    # 여기는 다른 폰 작업과 나누는 공용 자물쇠가 없다 — 바로 뒤 선물확인 대기열(공용 자물쇠를 잡고 카카오톡을
+                    # 앞으로 띄움)이 몇 분 안에 이어 받는다
                     return 'SSG 선물 수락 실패 — 사용자 폰 화면 사용 중, 폰 조작하지 않음'
                 # 주문번호로 카톡 검색해 받는다(스크롤 탐색은 알림이 쌓이면 못 찾는다) — 번호를 모르거나 실패하면 옛 방식으로
                 order_no = source_order_no_of(out)

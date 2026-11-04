@@ -170,7 +170,10 @@ def accept_ssg_gift_by_search(
     if 'alipay' in foreground.lower():
         raise UserPhoneScreenInUse('알리페이 복구 화면 사용 중 — 폰 조작 중단')
     if foreground not in (KAKAO, SSG_APP, 'com.sec.android.app.launcher', 'com.android.launcher', 'com.android.launcher3', 'launcher'):
-        raise UserPhoneScreenInUse('사용자 폰 화면 사용 중 — 선물 수락 조작 중단')
+        # 다른 앱이 떠 있어도 카카오톡을 앞으로 띄워 찾는다(사용자 2026-11-04 "화면상관없이 찾아서 해야지")
+        phone.launch(KAKAO)
+        if not wait_foreground(phone, KAKAO, 25):
+            raise GiftAcceptError('카카오톡 진입 미확인')
 
     def wait_for(
         check: Callable[[list[Node]], bool], seconds: float, step: float = 1.5

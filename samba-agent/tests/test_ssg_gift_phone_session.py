@@ -11,7 +11,7 @@ from samba_agent.ops import ssg_gift_followup as followup
     [
         ('mCallState=1', 'com.kakao.talk', 'mWakefulness=Awake', '통화'),
         ('', 'com.kakao.talk', 'mWakefulness=Awake', '통화'),
-        ('mCallState=0', 'com.nhn.android.search', 'mWakefulness=Awake', '사용자'),
+        ('mCallState=0', 'com.nhn.android.search', 'mWakefulness=Awake', None),
         ('mCallState=0', 'com.eg.android.AlipayGphone', 'mWakefulness=Asleep', '알리페이'),
         ('mCallState=0', 'com.kakao.talk', 'unreadable', '화면 상태'),
         ('mCallState=0', 'com.kakao.talk', 'mWakefulness=Awake', None),
