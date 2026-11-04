@@ -110,8 +110,25 @@ def make_phone_session():
 def detail_reader(bridge):
     """이미 쓰는 소싱처 상세 저장 스크립트만 호출한다. 수리·구매·결제 도구는 노출하지 않는다."""
     reader = bridge.with_lane('ssg-gift-followup').scoped(['run_script'])
+    # 상세가 로그인을 요구하면(세션 만료) 키마스터로 다시 로그인한다 — 값은 앱만 넣는다(실기 2026-11-04: 'login required' 로
+    # 선물 4건이 업무폰 확인까지 못 가고 하루 종일 '대조 실패' 로 밀렸다)
+    loginer = bridge.with_lane('ssg-gift-followup').scoped(['new_tab', 'login', 'wait', 'close_tab'])
 
-    def read(task):
+    def _relogin(profile: str) -> None:
+        out = str(loginer.call('new_tab', url='https://member.ssg.com/member/login.ssg', profile=profile).result)
+        tab = re.search(r'tab ([0-9a-fA-F-]{8,})', out)
+        try:
+            loginer.call('wait', ms=4000)
+            for _ in range(2):
+                said = str(loginer.call('login', accountLabel=profile).result)
+                if said.startswith('already'):
+                    break
+                loginer.call('wait', ms=5000)
+        finally:
+            if tab:
+                loginer.call('close_tab', id=tab.group(1))
+
+    def _read_once(task):
         result = reader.call(
             'run_script',
             name=detail_script('SSG'),
@@ -127,6 +144,13 @@ def detail_reader(bridge):
         detail = json.loads(body)
         if not isinstance(detail, dict):
             raise TypeError('소싱처 상세 형식 불명')
+        return detail
+
+    def read(task):
+        detail = _read_once(task)
+        if detail.get('note') == 'login required' and task.get('profile'):
+            _relogin(str(task['profile']))
+            detail = _read_once(task)
         return detail
 
     return read

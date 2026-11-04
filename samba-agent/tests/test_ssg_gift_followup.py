@@ -220,7 +220,8 @@ def test_readonly_detail_adapter_reuses_existing_script(tmp_path):
             return self
 
         def scoped(self, tools):
-            assert tools == ['run_script']
+            # 상세 읽기와 키마스터 재로그인만 — 구매·결제·수리 도구는 노출하지 않는다
+            assert tools in (['run_script'], ['new_tab', 'login', 'wait', 'close_tab'])
             return self
 
         def call(self, tool, **args):
@@ -231,6 +232,37 @@ def test_readonly_detail_adapter_reuses_existing_script(tmp_path):
     assert result['source_order_no'] == NO
     assert calls[0][1]['name'] == 'ssg_order_detail'
     assert 'edelvise06' in calls[0][1]['args']
+
+
+def test_detail_reader_relogs_in_once_when_session_expired():
+    from samba_agent.ops.ssg_gift_followup import detail_reader
+
+    calls = []
+    details = iter([
+        '{"source_order_no":"2026103039AE04","paid":0,"note":"login required"}',
+        '{"source_order_no":"2026103039AE04","paid":10000}',
+    ])
+
+    class Bridge:
+        def with_lane(self, lane):
+            return self
+
+        def scoped(self, tools):
+            return self
+
+        def call(self, tool, **args):
+            calls.append(tool)
+            if tool == 'run_script':
+                return SimpleNamespace(result=next(details))
+            if tool == 'new_tab':
+                return SimpleNamespace(result='opened tab 0123abcd-0000-0000-0000-000000000000')
+            if tool == 'login':
+                return SimpleNamespace(result='already signed in')
+            return SimpleNamespace(result='ok')
+
+    result = detail_reader(Bridge())({'source_order_no': NO, 'profile': 'edelvise06'})
+    assert result['paid'] == 10000
+    assert calls == ['run_script', 'new_tab', 'wait', 'login', 'close_tab', 'run_script']
 
 
 @pytest.mark.parametrize(
