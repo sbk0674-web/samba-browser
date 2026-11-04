@@ -8,7 +8,7 @@ if(args.tab&&(await tabs.list()).some(t=>t.id===String(args.tab))) await tabs.sw
 const good=async()=>{const T=String((await page.get({})).tree||'');const r=T.split('\n').find(l=>/radio "받는 분 주소로/.test(l));return !r||(/value="on"/.test(r)&&!/배송지를 선택해 ?주세요/.test(T));};
 if(ot.length>1&&!(await good())){for(const t of ot){await tabs.switch(t.id);await sleep(300);if(await good())break;}}}
 const url=await page.url();
-if(!/orderSheet/.test(url)) return {ok:false, error:'no lotteon order sheet open in current tab'};
+if(!/orderSheet/.test(url))return{ok:false, error:'no lotteon order sheet'};
 for (let i=0;i < 6&&!/결제수단/.test((await page.get({query:'결제수단'})).tree);i++){
 const c=await page.idOf('계속하기');if(c < 0) break;await page.click(c);await sleep(2500);
 }
@@ -19,14 +19,14 @@ if(mc){
 await page.clickText('신용카드');
 await sleep(600);
 const sel=await page.idOf('카드를 선택해 주세요.');
-if(sel<0) return {ok:false, error:'card select box not found'};
+if(sel<0)return{ok:false, error:'no card select'};
 await page.click(sel);
 await sleep(600);
 await page.clickText(mc);
 method=mc;
 } else {
 const mp=simplePays.find(p=>p.includes(card)||(card&&card.length>0&&p.includes(card)));
-if(!mp) return {ok:false, error:'payment method not found: '+card};
+if(!mp)return{ok:false, error:'no method: '+card};
 const KP=mp==='카카오페이',KK=args.kakao_card?'카카오페이 카드':'카카오페이 머니';
 const LC=mp==='간편결제';
 await page.clickText(mp);await sleep(1500);
@@ -35,20 +35,20 @@ const Q=async(q,re)=>(await page.get({query:q})).tree.split('\n').filter(l=>re.t
 const hi=ls=>ls.length?Math.max(...ls.map(l=>parseInt(l.slice(1)))):-1;
 const disc=async()=>{const t=(await page.get({query:'주문할인금액'})).tree;const m=(t.split('PAGE TEXT')[1]||t).match(/주문할인금액\s*할인변경\s*(-?[\d,]+)원/);return m?parseInt(m[1].replace(/[,-]/g,''),10):0;};
 if(!(await disc())){
-const hb=await page.idOf('할인변경');if(hb<0&&KP) return {ok:false,error:'카카오페이 할인변경 버튼 없음'};
+const hb=await page.idOf('할인변경');if(hb<0&&KP)return{ok:false,error:'카카오페이 할인변경 버튼 없음'};
 if(hb>=0){await page.click(hb);await sleep(2000);
 const rs=(KP?await Q(KK,new RegExp('radio "'+KK+'\\d+%')):LC?await Q('롯데카드',/radio "롯데카드\s*\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
 const mx=rs.length?Math.max(...rs.map(x=>x.id)):0;const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
-if(!best&&KP) return {ok:false,error:'카카오페이 머니 즉시할인 없음'};
-if(!best&&LC) return {ok:false,error:'롯데카드 즉시할인 없음'};
+if(!best&&KP)return{ok:false,error:KK+' 즉시할인 없음'};
+if(!best&&LC)return{ok:false,error:'롯데카드 즉시할인 없음'};
 if(!best){const c=hi(await Q('닫기',/button "닫기"/));if(c>0){await page.click(c);await sleep(600);}}
-else{var want=1;if(!best.on){if(LC&&page.clickNative){await page.clickNative(best.id);}else{await page.click(KP?best.id+1:best.id);} await sleep(1200);}
-const b=hi(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/));if(b<0) return {ok:false,error:'할인혜택 받기 버튼 없음'};
+else{var want=1;if(!best.on){if((LC||KP)&&page.clickNative)await page.clickNative(best.id);else await page.click(best.id);await sleep(1200);}if(KP&&!(await Q(KK,/radio/)).some(l=>+l.slice(1,l.indexOf(']'))===best.id&&/value="on"/.test(l)))return{ok:false,error:KK+' 미선택'};
+const b=hi(await Q('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/));if(b<0)return{ok:false,error:'할인혜택 받기 버튼 없음'};
 await page.click(b);await sleep(2500);
 const ap=hi(await Q('적용하기',/button "적용하기"/));if(ap>0){await page.click(ap);await sleep(3500);}
 }}
 }
-if((KP||typeof want!=='undefined')&&!(await disc())) return {ok:false,error:(KP?'카카오페이 머니 즉시할인':LC?'롯데카드 즉시할인':'장바구니 쿠폰')+'이 주문서에 안 붙음 — 결제하지 않음'};
+if((KP||typeof want!=='undefined')&&!(await disc()))return{ok:false,error:(KP?KK+' 즉시할인':LC?'롯데카드 즉시할인':'장바구니 쿠폰')+' 안 붙음'};
 }
 await page.clickText(mp);
 method=mp;
@@ -86,7 +86,7 @@ if(st&&!/value="[^"]+"/.test(st)){const hn=((await page.get({query:'님로그아
 try{const ra=(await page.get({query:'받는 분 주소로 보내기'})).tree.split('\n').find(l=>/^\[\d+\] radio "받는 분 주소로/.test(l));
 if(ra&&!/value="on"/.test(ra)){await page.click(parseInt(ra.slice(1)));await sleep(1500);}}catch(e){}
 const payId=await page.idOf('결제하기');
-if(payId<0) return {ok:false, error:'결제하기 없음', method};
+if(payId<0)return{ok:false, error:'결제하기 없음', method};
 let pr=String(await page.click(payId));
 const LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/;for(let k=0;k<4;k++){
 let T='',h=0;for(let w=0;w<10;w++){await sleep(1e3);T=String((await page.get({})).tree||'');if(LP.test(T)||DN.test(T))break}
