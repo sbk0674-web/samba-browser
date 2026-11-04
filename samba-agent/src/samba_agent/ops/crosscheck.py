@@ -262,6 +262,9 @@ def margin_findings(row: LedgerRow, order: WaveOrder) -> list[Finding]:
     장부와 삼바웨이브가 같은 값이어도 그 값이 틀리면(구매창 가격 ¥674 를 믿고 실결제 ¥1090 을 낸 득물 건, 2026-10-08)
     기존 대조는 통과했다. 정산금(revenue)보다 원가+배송비가 크면 알린다. 자동으로 되돌리지 않는다 — 사람이 본다.
     """
+    # 포이즌 판매는 부가세 환급이 따로 들어온다 — 원가+배송이 정산금보다 조금 커도 손해가 아니다(사용자 2026-11-04)
+    if str(getattr(order, 'seller', '') or '').lower().startswith('poison'):
+        return []
     revenue = float(getattr(order, 'revenue', 0) or 0)
     if revenue <= 0:
         return []
