@@ -82,18 +82,37 @@ class WaveShipping(BaseModel):
     address: str = ''
     address_detail: str = ''
     postal_code: str = ''
+    # 고객 배송메시지 — 공동현관 출입번호만 뽑아 주문서에 넣는다(사용자 2026-11-04 "공동현관 비번은 입력하고 주문해라")
+    memo: str = ''
 
     def to_script_args(self) -> dict[str, str]:
         """앱 저장 스크립트(<key>_set_shipping)가 받는 모양. 빈 값은 빼지 않는다(덮어쓰기 목적).
 
         phone 키는 없다 — 스크립트는 전화 칸을 비워 두고 그 칸의 요소 번호를 돌려준다.
+        entrance 는 배송메시지에서 뽑은 공동현관 출입번호(없으면 빈 값).
         """
         return {
             'name': self.name,
             'address': self.address,
             'address_detail': self.address_detail,
             'postal_code': self.postal_code,
+            'entrance': entrance_code(self.memo),
         }
+
+
+# 공동현관 출입번호 — '공동현관 #1234', '공현 1234*', '현관 비번 0000#', '출입번호 *1234' 처럼 머리말 뒤의 번호
+_ENTRANCE_RE = re.compile(
+    r'(?:공동\s*현관|공현|현관|출입\s*번호|출입|비밀\s*번호|비번)[^0-9#*]{0,12}?([#*]?\s*\d[\d\s#*]{1,14}[#*]?)'
+)
+
+
+def entrance_code(memo: str | None) -> str:
+    """배송메시지에서 공동현관 출입번호만. 없거나 '자유출입'이면 빈 값."""
+    text = (memo or '').strip()
+    if not text or re.search(r'자유\s*출입|비번\s*없|비밀번호\s*없', text):
+        return ''
+    found = _ENTRANCE_RE.search(text)
+    return re.sub(r'\s+', '', found.group(1)) if found else ''
 
 
 # 소싱처 미등록 상품명 속 소싱처 상품번호 — 따로 떨어진 번호 중 마지막 것(사용자 2026-09-25).

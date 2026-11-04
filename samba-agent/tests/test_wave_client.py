@@ -379,3 +379,22 @@ def test_선택안함은_옵션이_없는_것으로_본다():
     assert WaveOrder(order_number='A1', product_option='옵션:선택안함').option is None
     assert WaveOrder(order_number='A1', product_option='선택 안함').option is None
     assert WaveOrder(order_number='A1', product_option='옵션:230').option == '230'
+
+
+@pytest.mark.parametrize(
+    'memo,code',
+    [
+        ('공동현관 #1234 부재시 문앞', '#1234'),
+        ('공현 1234*', '1234*'),
+        ('현관 비번은 0000# 입니다', '0000#'),
+        ('출입번호 *5678', '*5678'),
+        ('문 앞에 놔주세요', ''),
+        ('공동현관 자유출입', ''),
+        ('', ''),
+    ],
+)
+def test_entrance_code_from_delivery_memo(memo, code):
+    from samba_agent.wave.client import WaveShipping, entrance_code
+
+    assert entrance_code(memo) == code
+    assert WaveShipping(name='a', address='b', memo=memo).to_script_args()['entrance'] == code
