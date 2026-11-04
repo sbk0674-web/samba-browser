@@ -4797,6 +4797,7 @@ class BuyerAgent(AgentBase):
         self._fill_phone(applied)
         if applied.get('edited'):
             self._save_edited_shipping(shipping, {**args, 'gift': bool(applied.get('gift'))})
+            self.note('배송지', '목록 둘째 칸을 덮어씀(새 배송지 추가 없음)')
         else:
             self._confirm_shipping(shipping, args)
         # 결제 직전 주문서 대조용 열쇠(도로명+번호) — 전체 주소는 남기지 않는다
@@ -4832,11 +4833,20 @@ class BuyerAgent(AgentBase):
         self, shipping: dict[str, object], args: dict[str, object]
     ) -> dict[str, object]:
         """배송지 입력 스크립트를 한 번 돌린다."""
+        # 롯데온은 주소록에 새 배송지를 만들지 않는다 — 둘째 칸 '수정'으로 덮어쓴다(사용자 지시).
+        # 수리 AI 가 '새 배송지 추가'로 고쳐 쓰지 않게 목표에 못 박는다(2026-11-04 주소록 누적)
+        lotteon = source_of(self.spec.name).key == 'lotteon'
         return self.script_json(
             source_of(self.spec.name).set_shipping_script,
             args,
             goal=(
-                '주문서 배송지(새 배송지·직접 입력)에 args 의 name·address(·address_detail·postal_code)를 입력하고, '
+                (
+                    '롯데온: 배송지 목록의 둘째 줄 수정 버튼으로 그 칸을 덮어쓴다. 새 배송지 추가·등록은 절대 하지 않는다 — '
+                    '둘째 줄이 없으면 error 로 멈춘다. '
+                    if lotteon
+                    else ''
+                )
+                + '주문서 배송지(새 배송지·직접 입력)에 args 의 name·address(·address_detail·postal_code)를 입력하고, '
                 '입력된 이름·주소를 되읽어 {"name","address"} 로 돌려준다. 전화 칸은 비워 두고 그 요소 번호를 '
                 'phone_field_id(칸 하나) 또는 phone_field_ids(2~3칸, 앞→뒤)로 돌려준다 — 번호는 하네스가 따로 채운다. '
                 '주소 검색 팝업이 있으면 우편번호·주소를 검색해 고른다.'

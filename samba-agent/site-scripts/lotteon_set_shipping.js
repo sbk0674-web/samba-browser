@@ -27,7 +27,7 @@ let ch=null;for(let i=0;i<10&&!add&&!ch;i++){add=await fa();if(!add)ch=await fc(
 if(!add){if(!ch)return{...R,error:'change-button-nf'};await C(ch.id);for(let i=0;i<8&&!add;i++){await sleep(800);add=await fa();}}
 if(!add)return{...R,error:'add-address-button-nf'};
 }
-if(add){const ed=(await E('수정')).filter(e=>B(e)&&e.text==='수정')[1];if(ed){add=ed;R.edited=true;}}let n=n0;if(add){await C(add.id);await sleep(1000);n=null;}
+if(add){let ed=[];for(let i=0;i<8&&ed.length<2;i++){ed=(await E('수정')).filter(e=>B(e)&&e.text==='수정');if(ed.length<2)await sleep(700);}if(ed.length<2)return{...R,error:'second-row-nf'};add=ed[1];R.edited=true;}let n=n0;if(add){await C(add.id);await sleep(1000);n=null;}
 const nameQ=R.gift?'받는 분':'받는 분을 입력';
 for(let i=0;i<6&&!n;i++){n=L(await E(nameQ),e=>X(e)&&/받는 분/.test(e.text));if(!n)await sleep(700);}
 if(!n)return{...R,error:'name-input-nf'};
@@ -57,12 +57,11 @@ for(const q of alts){if(hit)break;if(q&&q!==query)hit=await search(q);}
 if(!hit)return{...R,error:'address-result-nf'};
 await C(hit.id);await sleep(800);
 const lt=hit.text;const mz=lt.match(/\[(\d{5})\]/);R.zip=mz?mz[1]:(A.postal_code||null);
-const dd=await E('상세주소');let d=L(dd,e=>X(e));if(d&&(detail||R.edited))await page.type(d.id,detail,false);if(R.edited){for(const q of ['예: #1234','배송 요청사항']){const x=L(await E(q),e=>X(e));if(x)await page.type(x.id,'',false);}}
+const dd=await E('상세주소');let d=L(dd,e=>X(e));if(d)await page.type(d.id,detail,false);if(R.edited){for(const q of ['예: #1234','배송 요청사항']){const x=L(await E(q),e=>X(e));if(x)await page.type(x.id,'',false);}}
 R.address_detail=detail||null;
 const use=L(dd,e=>B(e)&&e.text==='사용')||L(await E('사용'),e=>B(e)&&e.text==='사용');
 if(use){await C(use.id);await sleep(800);}
-if(!R.gift){const ag=L(await E('수취인정보'),e=>e.role==='checkbox');if(ag&&ag.value!=='on')await C(ag.id);
-const sv=L(await E('저장'),e=>B(e)&&e.text==='저장');if(sv&&!R.edited){await C(sv.id);await sleep(1000);}R.saved=!R.edited;}
+if(!R.gift){const ag=L(await E('수취인정보'),e=>e.role==='checkbox');if(ag&&ag.value!=='on')await C(ag.id);}
 let ad=lt.replace(/^\[\d{5}\]\s*/,'');const ri=ad.indexOf('도로명 ');
 const roadPart=ri>=0?ad.slice(ri+4).trim():ad;let jibPart=ri>=0?ad.slice(0,ri).replace(/^지번\s*/,'').trim():'';
 const SI={'경북':'경상북도','경남':'경상남도','전북':'전북특별자치도','전남':'전라남도','충북':'충청북도','충남':'충청남도'};
