@@ -376,6 +376,13 @@ class GiftFollowup:
         except Exception as exc:  # noqa: BLE001 — 완료된 구매를 되돌리지 않는다
             reason = mask_text(str(exc))[:200]
         task['reason'] = reason
+        if task['state'] == 'pending' and any(
+            word in reason for word in ('폰 화면 사용 중', '다른 하네스 폰 작업', '통화 중')
+        ):
+            # 폰을 사람이 쓰는 중이면 시도로 세지 않고 3분 뒤 다시 본다 — 늘어나는 대기(최대 1시간)로
+            # 선물 수락이 40분씩 밀렸다(실기 2026-11-04 53B45C, 사용자 "선물확인이 최우선")
+            task['attempts'] -= 1
+            task['next_at'] = self.now() + 180
         if task['attempts'] >= 8:
             task['state'] = 'needs_ai'
         self._save(job, task)
