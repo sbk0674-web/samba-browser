@@ -1926,6 +1926,9 @@ class PayerAgent(AgentBase):
         # 카드사를 모르면 스크립트가 추측하지 않고 멈춘다(checkout_enter_ssg)
         if a.handoff.get('card_issuer'):
             payload['issuer'] = str(a.handoff.get('card_issuer'))
+            if str(card or '').startswith('카카오페이'):
+                # 카카오페이 + 카드사 = '카카오페이 카드' 즉시할인(머니 아님) — 롯데온 할인창에서 카드 할인을 고른다
+                payload['kakao_card'] = True
         bought = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source or ''))
         if bought is not None and bought.allow_department:
             payload['allow_department'] = True  # SSG: 신세계백화점(6009) 상품도 결제한다(사용자 2026-09-27)

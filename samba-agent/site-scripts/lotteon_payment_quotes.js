@@ -94,6 +94,13 @@ try{
     if(best&&!best.on){await page.clickNative(best.id);await sleep(1200);}
     const amt=await amtOf();
     if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
+    // 카카오페이 카드 즉시할인 + 현대카드 청구할인(2.7%)이 롯데카드(즉시할인+2%)보다 쌀 수 있다(사용자 2026-11-04)
+    const kc=(await Q('카카오페이 카드',/radio "카카오페이 카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
+    const kmx=kc.length?Math.max(...kc.map(x=>x.id)):0;
+    const kbest=kc.filter(r=>r.id>kmx-20).sort((a,b)=>b.p-a.p)[0];
+    if(kbest){if(!kbest.on){await page.clickNative(kbest.id);await sleep(1200);}
+      const kamt=await amtOf();
+      if(kamt>0)quotes.push({method:'카카오페이',card:'현대카드',cost:base_cost-kamt,discount:'카카오페이 카드'+kbest.p+'% 즉시할인',kakao_card:true});}
     const lr=(await Q('롯데카드',/radio "롯데카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/롯데카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
     const lmx=lr.length?Math.max(...lr.map(x=>x.id)):0;
     const lbest=lr.filter(r=>r.id>lmx-20).sort((a,b)=>b.p-a.p)[0];
