@@ -148,8 +148,12 @@ def gift_check_button(phone: Phone, nodes: list[Node]) -> Node | None:
             time.sleep(1.5)
             nodes = phone.nodes()
             check = next((node for node in nodes if CHECK_BTN in node.text and 150 < node.y < 1510), None)
+            # 막대가 숨어도 접근성 트리에 '홈으로 이동'이 남는다(실기 2026-11-04 54E7E5: 화면엔 빨간 버튼만 보이는데 7번 멈춤).
+            # 버튼 줄 왼쪽 끝(글자 없는 곳)의 실제 색이 버튼 빨강이면 막대가 없는 것 — 그대로 누른다
             if check is not None and overlaps(nodes, check):
-                raise GiftAcceptError('선물 버튼과 SSG 하단 홈 좌표가 겹침 — AI 화면 복구 필요')
+                color = phone.pixel(30, check.y) if hasattr(phone, 'pixel') else None
+                if color is None or not (color[0] > 200 and color[1] < 140 and color[2] < 140):
+                    raise GiftAcceptError('선물 버튼과 SSG 하단 홈 좌표가 겹침 — AI 화면 복구 필요')
     return check
 
 

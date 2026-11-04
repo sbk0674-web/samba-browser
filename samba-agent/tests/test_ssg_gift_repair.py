@@ -65,6 +65,23 @@ def test_bottom_home_overlap_clears_after_swipe(monkeypatch):
     assert phone.taps == []
 
 
+def test_hidden_home_node_ignored_when_button_red_on_screen(monkeypatch):
+    import samba_agent.ops.ssg_gift_search as search
+
+    monkeypatch.setattr(search.time, 'sleep', lambda s: None)
+    nodes = [product(), Node('옵션/배송지 확인', '', '', 360, 1460), Node('', 'SSG.COM 홈으로 이동', '', 360, 1428)]
+    phone = FakePhone(nodes)
+    phone.after_swipe = nodes
+    phone.pixel = lambda x, y: (255, 84, 82)
+    assert gift_check_button(phone, phone.nodes()).y == 1460
+
+    gray = FakePhone(nodes)
+    gray.after_swipe = nodes
+    gray.pixel = lambda x, y: (246, 246, 246)
+    with pytest.raises(GiftAcceptError, match='하단'):
+        gift_check_button(gray, gray.nodes())
+
+
 def test_kakao_browser_close_is_not_an_advertisement():
     from samba_agent.ops.ssg_gift_accept import CLOSE_ID
 

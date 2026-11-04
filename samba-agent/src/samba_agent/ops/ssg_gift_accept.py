@@ -240,6 +240,26 @@ class Phone:
         m = re.search(r'mCurrentFocus=Window\{\S+ \S+ ([\w.]+)/', win)
         return m.group(1) if m else ''
 
+    def pixel(self, x: int, y: int) -> tuple[int, int, int] | None:
+        """화면 한 점의 실제 색 — 접근성 트리에 숨은 요소가 남아 있을 때 눈에 보이는 것을 확인한다. 못 읽으면 None."""
+        try:
+            from io import BytesIO
+
+            from PIL import Image
+
+            done = subprocess.run(
+                [self.adb, *adb_server_args(), '-s', self.serial, 'exec-out', 'screencap', '-p'],
+                capture_output=True,
+                timeout=20,
+                check=False,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            )
+            image = Image.open(BytesIO(done.stdout)).convert('RGB')
+            return image.getpixel((x, y))
+        except Exception as e:  # noqa: BLE001 — 못 읽으면 겹침으로 보고 멈춘다
+            log.warning('화면 색 읽기 실패: %s', e)
+            return None
+
     def tap(self, x: int, y: int) -> None:
         self._run('shell', 'input', 'tap', str(x), str(y))
 
