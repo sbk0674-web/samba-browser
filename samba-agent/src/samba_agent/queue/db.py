@@ -353,6 +353,14 @@ class JobQueue:
         )
         return self._job(self._by_id(job_id))
 
+    def requeue_waiting(self, job_id: int) -> None:
+        """업무시간 대기(after_hours)처럼 실패가 아닌 대기 건을 시도 횟수를 늘리지 않고 다시 큐에 넣는다."""
+        self._db.execute(
+            "UPDATE jobs SET state='queued', error=NULL, updated_at=? "
+            "WHERE id=? AND state='needs_ai' AND error='after_hours'",
+            (_now(), job_id),
+        )
+
     def try_start_resume(self, key: str, *, stage: str | None) -> Job | None:
         """승인 재개 — 읽기(needs_ai·단계 확인)와 running 전환을 한 트랜잭션으로 묶는다.
 

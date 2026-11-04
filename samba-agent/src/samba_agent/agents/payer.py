@@ -1916,7 +1916,7 @@ class PayerAgent(AgentBase):
                 raise AgentFailure(
                     'needs_ai',
                     f'카카오페이 사람 승인은 업무시간({KAKAO_WORK_HOURS[0]}~{KAKAO_WORK_HOURS[1]}시)에만 요청 — 결제하지 않고 대기',
-                    FailReason.UNKNOWN,
+                    FailReason.AFTER_HOURS,
                 )
         payload: dict[str, object] = {'card': card}
         # 현금영수증은 항상 지출증빙용(사용자 2026-09-29 롯데온) — 사업자등록번호는 이 PC 의 local-aliases.json 에만 둔다.

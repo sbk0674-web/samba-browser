@@ -18,4 +18,6 @@ class FailReason(StrEnum):
     PAY_INTERRUPTED = 'pay_interrupted'
     # 한 작업이 시간 상한(SAMBA_JOB_MAX_MINUTES)을 넘겼다 — 결제 전 단계에서만 쓴다. 자동 재접수 대상이 아니다
     TIMEOUT = 'timeout'
+    # 카카오페이 사람 승인 업무시간 밖 — 결제 전 대기. 업무시간이 되면 접수기가 다시 큐에 넣는다
+    AFTER_HOURS = 'after_hours'
     UNKNOWN = 'unknown'

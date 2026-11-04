@@ -485,6 +485,32 @@ def test_bridge_down_으로_멈춘_작업은_5분_뒤_한_번_다시_넣는다(t
     assert q.get('T1').state == 'needs_ai'
 
 
+@pytest.mark.parametrize(('kst_hour', 'requeued'), [(7, False), (8, True), (17, True), (18, False)])
+def test_after_hours_kakao_wait_requeues_in_work_hours(tmp_path, monkeypatch, kst_hour, requeued):
+    import samba_agent.queue.intake as intake_mod
+
+    fixed = datetime(2026, 11, 5, kst_hour, 30, tzinfo=UTC) - timedelta(hours=9)
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed if tz is None else fixed.astimezone(tz)
+
+    monkeypatch.setattr(intake_mod, 'datetime', _Clock)
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    slack = _Slack()
+    intake = Intake(_FakeWave([wave_order('K9', source='LOTTEON')]), q, reg, slack.post_new, slack.post_line, days=7)
+    intake.run_once()
+    job = q.get('K9')
+    q._db.execute('UPDATE jobs SET attempts=1 WHERE id=?', (job.id,))
+    q.finish(job.id, 'needs_ai', error='after_hours')
+    intake.run_once()
+    again = q.get('K9')
+    assert (again.state == 'queued') is requeued
+    assert again.attempts == 1  # 대기는 실패가 아니라 횟수를 늘리지 않는다
+
+
 class _CancelWave(_FakeWave):
     """마켓 취소 정리까지 흉내 낸다."""
 

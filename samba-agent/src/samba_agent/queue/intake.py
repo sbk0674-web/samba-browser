@@ -16,7 +16,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.failures import FailReason
@@ -428,6 +428,17 @@ class Intake:
 
         품절·마진·검증불일치·결제중단은 결론이거나 결제 위험이 있어 여기서 재시도하지 않는다.
         """
+        if job.state == 'needs_ai' and job.error == 'after_hours':
+            # 밤에 카카오페이 승인을 미룬 결제 전 대기 — 업무시간이 되면 횟수와 상관없이 다시 넣는다
+            # (실기 2026-11-05 08:21: 롯데온 4건이 아침까지 그대로 멈춰 있었다)
+            from samba_agent.agents.payer import KAKAO_WORK_HOURS
+
+            hour = datetime.now(UTC).astimezone(timezone(timedelta(hours=9))).hour
+            if not (KAKAO_WORK_HOURS[0] <= hour < KAKAO_WORK_HOURS[1]):
+                return False
+            self._queue.requeue_waiting(job.id)
+            log.info('업무시간 대기 결제를 다시 큐에 넣었다: %s', job.order_no)
+            return True
         if job.state != 'needs_ai' or (job.error or '') not in REQUEUE_NEEDS_HUMAN_ERRORS:
             return False
         if job.attempts >= 1:
