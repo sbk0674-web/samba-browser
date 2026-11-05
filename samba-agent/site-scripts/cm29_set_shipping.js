@@ -47,10 +47,13 @@ const det0 = String(args.address_detail || '').replace(/\s+/g, ' ').trim()
 if (!name || !addr) throw new Error('name/address required')
 const base = addr.replace(/\s*\(.*$/, '').trim()
 const dRest = det0.startsWith(addr) ? det0.slice(addr.length).trim() : (det0.startsWith(base) ? det0.slice(base.length).replace(/^\s*\([^)]*\)/, '').trim() : det0)
+// 건물번호가 상세주소 앞에 떨어져 온 표기('…로11길' + '33, 114-604')는 주소 뒤에 붙인다(실기 2026-11-05)
+const dm = /\s\d+(?:-\d+)?(?:[\s,]|$)/.test(base) ? null : dRest.match(/^(\d+(?:-\d+)?)(?:[\s,]+|$)(.*)$/)
+const qb = dm ? base + ' ' + dm[1] : base, dR = dm ? dm[2].trim() : dRest
 // 건물번호 뒤에 쉼표가 붙는 표기(19-2, 단독주택)도 받는다
-const cut = base.match(/^(.*?\s\d+(?:-\d+)?)(?:[\s,]+|$)(.*)$/)
-const query = cut ? cut[1] : base
-const rest = ((cut ? cut[2].trim() : '') + ' ' + dRest).trim()
+const cut = qb.match(/^(.*?\s\d+(?:-\d+)?)(?:[\s,]+|$)(.*)$/)
+const query = cut ? cut[1] : qb
+const rest = ((cut ? cut[2].trim() : '') + ' ' + dR).trim()
 const F = await pickForm()
 if (F.err) throw new Error(F.err + (F.why ? ': ' + F.why : ''))
 const L = async () => lines((await page.get({})).tree)
