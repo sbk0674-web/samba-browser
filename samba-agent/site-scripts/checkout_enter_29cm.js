@@ -27,7 +27,7 @@ function mismatch(f, e) {
 }
 async function radios() {
   const r = (await page.get({ selector: 'label:has(input[type=radio])' })).tree, ids = lines(r).filter(l => /\] radio(?: "[^"]*")?(?: name=\S+)? value=/.test(l)).map(idOf).sort((x, y) => x - y), tx = text(r).replace(/소득공제용.*$/, '')
-  const K = [['적립', /구매 적립금 받기/], ['선할인', /선할인 받기/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
+  const K = [['적립', /구매 적립금/], ['선할인', /선할인/], ['무신사머니', /무신사머니/], ['무신사페이', /무신사페이/], ['토스페이', /토스페이/], ['카카오페이', /카카오페이/], ['카드', /카드 결제/], ['기타', /다른 결제 방법/]]
   const got = []; let p = 0
   for (const [k, re] of K) { const i = tx.slice(p).search(re); if (i >= 0) { got.push(k); p += i + 1 } }
   return got.length === ids.length ? Object.fromEntries(got.map((k, i) => [k, ids[i]])) : null
