@@ -5,6 +5,7 @@ const S=ms=>sleep(ms),U=()=>page.url(),z=()=>S(1200),K='products/'+pid
 const oo=/order-form/.test(await U())
 if(!oo&&!(await U()).includes(K)){await tabs.open({url:'https://www.musinsa.com/'+K,profile:args.profile||args.account});for(let i=0;i<15&&!(await U()).includes(K);i++)await S(1000)}
 if(!oo)await page.waitFor('구매하기',6e3).catch(()=>{})
+const PN=oo?'':String(await page.title()).replace(/\s+-\s+사이즈.*$|\s*\|\s*무신사$/,'').trim()
 const safe=async(fn,d)=>{for(let i=0;i<3;i++){try{return await fn()}catch{await S(1500)}}return d},
 text=async s=>{const t=(await page.get(s?{selector:s}:{})).tree;return t.slice(t.indexOf('PAGE TEXT'))},
 it=async()=>(await safe(()=>page.get({interactive:true}),{tree:''})).tree.split('\n'),
@@ -139,4 +140,4 @@ if(KM&&nz(sel)===KM){sel+=' '+A;op=op.map(o=>nz(o)===KM?o+' '+A:o)}
 const s0=t.lastIndexOf('결제 수단'),ms=t.slice(s0,s0+400)
 const methods='무신사머니 무신사페이 토스페이 카카오페이 페이코 네이버페이 카드'.split(' ').filter(n=>ms.includes(n))
 if(!op.length)op=sel?[sel.split(/\s+/).pop()]:[]
-return{cost,options:op,methods,selected:sel,chosen:cho||op[0]||'',qty:+(tl.match(/\/\s*(\d+)개/)||[])[1]||null}
+return{product_name:PN,cost,options:op,methods,selected:sel,chosen:cho||op[0]||'',qty:+(tl.match(/\/\s*(\d+)개/)||[])[1]||null}
