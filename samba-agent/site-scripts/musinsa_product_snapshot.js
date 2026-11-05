@@ -18,7 +18,7 @@ CL=/선택 목록 닫기/,DEL=/옵션 삭제/,CM=/^\[(\d+)\] clickable "([^"]+)"
 o1=async L=>{const o=idL(L,OPN);if(o){await ck(o);await z()}}
 const hs=has(ln,/선택 목록 (열기|닫기)/)
 let op=[],cho='',pk=!hs
-if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,note:'soldout'}
+if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,sold_out:true,note:'soldout'}
 const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A)
 const nz=s=>s.toLowerCase().replace(/[\s_·-]/g,'').replace(/xxl/g,'2xl'),w=nz(A)
 const we=w.replace(/블랙|화이트|그레이|베이지|네이비/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy'})[k])
