@@ -4059,8 +4059,8 @@ class BuyerAgent(AgentBase):
         self._current_order_no = a.order.order_no
         self._no_kakao = bool(a.options.get('no_kakao'))
         # 이 주문에서 뺄 결제 제공자(예: ['site'] — 롯데온 L.PAY 비밀번호 창이 안 떠 멈춘 주문, 2026-11-06)
-        excluded = a.options.get('exclude_pay')
-        self._exclude_pay = {str(p) for p in excluded} if isinstance(excluded, list) else set()
+        # 작업 옵션 값은 글자로 온다(Assignment.options: dict[str, str]) — "['site']"·"site,kakao" 모두 받는다
+        self._exclude_pay = set(re.findall(r'[a-z]+', str(a.options.get('exclude_pay') or '')))
         self._coupon_gap_off = False
         self._already_bought(a)
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
