@@ -368,7 +368,10 @@ def order_form_mismatch(
     # (실기 2026-10-21 무신사 지프 맨투맨: 주문 S, 상품명 'M Logo' → ['M','S'] 로 읽혀 멈췄다)
     if ordered_letters and ordered_letters < chosen_letters:
         chosen_letters = chosen_letters - (size_letters(product_name or '') - ordered_letters)
-    if ordered_letters and chosen_letters and ordered_letters != chosen_letters:
+    # 주문이 숫자 사이즈 + FREE 뿐이면(양말 '260MM FREE') FREE 는 사이즈 글자가 아니다 — 숫자 사이즈는 위에서 이미 맞췄다.
+    # 사이트가 '260MM(L)' 처럼 글자를 덧붙여도 같은 옵션이다(실기 2026-11-05 롯데온 노스페이스 양말 4250)
+    numeric_free = bool(sizes) and ordered_letters <= {'FREE', 'ONE'}
+    if ordered_letters and chosen_letters and ordered_letters != chosen_letters and not numeric_free:
         return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {sorted(chosen_letters)} 이 담겼다'
     if ordered_letters and not chosen_letters and not (ordered_letters <= {'FREE', 'ONE'}):
         # 구매가 담긴 옵션을 못 넘긴 경우 — 주문서 화면에 사이즈 글자가 보이는데 주문 사이즈 글자가 하나도 없으면 다른 사이즈다

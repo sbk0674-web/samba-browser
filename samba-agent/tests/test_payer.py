@@ -1771,3 +1771,13 @@ def test_옵션에_FREE_품번이_섞여도_진짜_사이즈_글자로_대조한
     option = 'XL_105 FREE K5123ERL36PNK'
     assert order_form_mismatch('테스트 반팔 티셔츠 XL 105', name, option, 'XL') is None
     assert order_form_mismatch('테스트 반팔 티셔츠 L 100', name, option, 'L') is not None
+
+
+def test_numeric_free_option_allows_site_size_letter():
+    # 양말 '260MM FREE' 주문 ↔ 롯데온 '260MM(L)' — 숫자 사이즈가 같으면 같은 옵션(실기 2026-11-05 4250)
+    from samba_agent.agents.payer import order_form_mismatch
+
+    assert order_form_mismatch(
+        '노스페이스 앵클 삭스 260MM(L) 1개', '노스페이스 앵클 삭스 세트 NY4AS00B', '260MM FREE', '260MM FREE 260MM(L)'
+    ) is None
+    assert order_form_mismatch('지오다노 티셔츠 S', '지오다노 티셔츠', 'M', 'S') is not None
