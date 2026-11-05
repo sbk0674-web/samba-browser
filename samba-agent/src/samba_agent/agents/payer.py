@@ -1463,21 +1463,6 @@ class PayerAgent(AgentBase):
         popups, _active = self._list_tabs_popups()
         self._stop_if_login_popup(popups, a)
         naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
-        if not naver:
-            # ABC마트 네이버페이는 팝업이 아니라 일반 탭(m.pay.naver.com)으로 열린다 — 그 탭으로 옮기지 않으면
-            # 카드 검사가 주문서 탭을 읽어 '현대카드 선택 확인 불가'로 멈췄다(실기 2026-11-06 20261105K28037)
-            try:
-                listed = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
-            except ValueError:
-                listed = []
-            naver = [
-                t
-                for t in (listed if isinstance(listed, list) else [])
-                if isinstance(t, dict)
-                and t.get('id')
-                and _pay_host_provider(str(t.get('url') or '')) == 'naverpay'
-            ]
-        self.note('네이버 결제창 탭', f'{len(naver)}개' + (f' ({naver[-1].get("kind")})' if naver else ''))
         if naver:
             self.tool('switch_tab', id=str(naver[-1]['id']))
         prepared = self._read_naver_card(amount)
