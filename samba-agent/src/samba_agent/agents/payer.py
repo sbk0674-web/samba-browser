@@ -1233,7 +1233,9 @@ class PayerAgent(AgentBase):
             site_name=site_name if site_name != name else '',
             product_no=product_no,
             # 구매가 상품번호로 확인한 상품 페이지에서 연 주문서 탭이면 사이트 상품명으로 대조해도 된다
-            trust_site=bool(order_tab and site_name),
+            # 무신사는 주문서 탭 id 를 안 넘긴다 — 주문 상품번호 페이지에서 읽은 이름이면 같이 믿는다. 다른 상품의 주문서면
+            # 그 이름 토큰이 주문서에 없어 막힌다(실기 2026-11-05 무신사 '카라 셔츠' ↔ 주문서 '와플 롱 슬리브 폴로 티 KQ6866')
+            trust_site=bool(site_name and (order_tab or product_no)),
         )
         if problem:
             raise AgentFailure(
