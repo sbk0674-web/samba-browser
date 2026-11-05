@@ -2,10 +2,10 @@ const ref=String(args.sku||'').trim()
 let pid=(ref.match(/^\d+$/)||ref.match(/musinsa\.com\/products\/(\d+)/)||[]);pid=pid[1]||pid[0]
 if(!pid)return{options:[],note:'invalid'}
 const S=ms=>sleep(ms),U=()=>page.url(),z=()=>S(1200),K='products/'+pid,oo=/order-form/.test(await U())
-if(!oo&&!(await U()).includes(K)){await tabs.open({url:'https://www.musinsa.com/'+K,profile:args.profile||args.account});for(let i=0;i<15&&!(await U()).includes(K);i++)await S(1000)}
-if(!oo)await page.waitFor('구매하기',6e3).catch(()=>{})
+if(!oo&&!(await U()).includes(K)){await tabs.open({url:'https://www.musinsa.com/'+K,profile:args.profile||args.account});for(let i=0;i<15&&!(await U()).includes(K);i++)await z()}
+if(!oo)await page.waitFor('구매하기',6e3).catch(z)
 const PN=oo?'':String(await page.title()).replace(/\s+-\s+사이즈.*$|\s*\|\s*무신사$/,'').trim()
-const safe=async(fn,d)=>{for(let i=0;i<3;i++){try{return await fn()}catch{await S(1500)}}return d},
+const safe=async(fn,d)=>{for(let i=0;i<3;i++){try{return await fn()}catch{await z()}}return d},
 text=async s=>{const t=(await page.get(s?{selector:s}:{})).tree;return t.slice(t.indexOf('PAGE TEXT'))},
 it=async()=>(await safe(()=>page.get({interactive:true}),{tree:''})).tree.split('\n'),
 has=(L,re)=>L.some(l=>re.test(l))
@@ -16,7 +16,7 @@ CL=/선택 목록 닫기/,DEL=/옵션 삭제/,CM=/^\[(\d+)\] clickable "([^"]+)"
 o1=async L=>{const o=idL(L,OPN);if(o){await ck(o);await z()}},hs=has(ln,/선택 목록 (열기|닫기)/)
 let op=[],cho='',pk=!hs
 if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,sold_out:true,note:'soldout'}
-const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.toLowerCase().replace(/[\s_·()-]/g,'').replace(/xxl/g,'2xl'),w=nz(A),we=w.replace(/블랙|화이트|그레이|베이지|네이비/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy'})[k]),cw=we.match(/black|white|grey|beige|navy/g)||[],ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))},osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[],KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz],cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
+const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.toLowerCase().replace(/[\s_·()-]/g,'').replace(/xxl/g,'2xl'),w=nz(A),we=w.replace(/블랙|화이트|그레이|베이지|네이비|아이보리/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy',아이보리:'ivory'})[k]),cw=we.match(/black|white|grey|beige|navy/g)||[],ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))},osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[],KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz],cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
 if(p.length<2||!c||!y||!ch(c))return 0
 return y===osz||y==={s:'sm',m:'md',l:'lg'}[osz]?300:0}
 const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러)/i,SRE=/textbox "(사이즈|size)"/i,
@@ -55,7 +55,7 @@ const cd=sO(L).map(l=>l.match(CM)).filter(Boolean).map(m=>({id:+m[1],name:m[2]})
 const pick=cd.filter(c=>ch(c.name)).sort((a,b)=>nz(b.name).length-nz(a.name).length)[0]||(cd.length===1&&cd[0])
 if(!pick)return
 await(tr?page.clickNative(pick.id):ck(pick.id))
-await S(1500)}}
+await z()}}
 if(hs&&!oo){
 if(!NONE)await pc()
 for(let at=0;at<3&&!pk;at++){
@@ -115,7 +115,7 @@ bi?await ck(bi):await page.clickText('구매하기',0)
 await z()
 const bb=idL(await it(),/button "바로 구매하기"/);bb&&await ck(bb)}
 let t=''
-for(let i=0;i<12;i++){await S(1000)
+for(let i=0;i<12;i++){await z()
 t=await safe(()=>text('body'),'')
 if(/주문 상품/.test(t)&&/총 결제 금액/.test(t))break}
 const cm=t.match(/총 결제 금액\s*(?:\d+%)?\s*([\d,]+)\s*원/),cost=cm?+cm[1].replace(/,/g,''):null,tl=t.slice(t.indexOf('주문 상품')),sm=tl.match(/(\S+(?:\s*·\s*\S+)+)\s*\/\s*\d+개/)||t.match(/주문 상품 \d+개\s*(.+?)\s*\/\s*\d+개/)
