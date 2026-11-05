@@ -2214,6 +2214,7 @@ def test_스케쳐스는_고정_까대기가_아니고_정가로_정한다(reg):
 @pytest.mark.parametrize('source', ['MUSINSA', 'LOTTEON', 'SSG'])
 @pytest.mark.parametrize('sku', [
     '르무통 메이트 블랙', 'LEMOUTON MATE BLACK', 'lemouton mate', '데상트 운동화', 'DESCENTE shoes',
+    '매장정품 노스페이스 THE NORTH FACE NJ5JR66B 남성 무브프리 자켓', '노스 페이스 눕시', 'THE NORTH FACE NUPTSE',
 ])
 def test_지정_브랜드는_항상_까대기다(reg, source, sku):
     from samba_agent.agents.buyer import is_fixed_kkadaegi
