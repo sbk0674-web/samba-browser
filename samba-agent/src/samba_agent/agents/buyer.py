@@ -4628,7 +4628,7 @@ class BuyerAgent(AgentBase):
         """
         # 주문서 탭이 여럿이면 배송지 스크립트가 어느 탭인지 몰라 멈춘다('order forms 2 open — pass args.tab',
         # 실기 2026-09-30 무신사) — 스냅샷이 만든 주문서 탭을 배송지 스크립트에 넘긴다
-        self._ship_tab = str(snap.get('order_tab') or '')
+        self._ship_tab = str(snap.get('order_tab') or '') or self._latest_order_tab(account)
         if self.order_type_of(a.order, snap) == 'kkadaegi':
             if self.office_shipping_blocked:
                 raise AgentFailure('needs_ai', '사무실 호수 확인 대기 — 사무실 배송 선택·구매 중지', FailReason.UNKNOWN)
@@ -4911,6 +4911,38 @@ class BuyerAgent(AgentBase):
         # 마스킹 규칙이 이름을 가리려면 라벨이 앞에 있어야 한다(ops.masking) — 라벨을 붙여서 가린다
         summary = f'수취인 {shipping.get("name", "")} · {shipping.get("address", "")}'
         self.note('배송지', f'반영 완료 — {mask_text(summary)}')
+
+    def _latest_order_tab(self, account: str) -> str:
+        """롯데온 스냅샷은 주문서 탭 번호를 안 돌려준다 — 이 계정의 가장 최근 롯데온 주문서 탭을 앞에 두고 그 번호를 쓴다.
+
+        다른 작업이 남긴 탭(SSG 검색)이 앞에 있으면 배송지 스크립트가 'not-on-lotteon'·'주문 탭/프로필 불일치'로
+        멈췄다(실기 2026-11-05 750632319090733). 롯데온 밖이거나 못 찾으면 '' — 예전처럼 활성 탭을 쓴다.
+        """
+        spec = getattr(self, 'spec', None)
+        if spec is None or source_of(spec.name).key != 'lotteon':
+            return ''
+        try:
+            tabs = json.loads(self.tool('list_tabs'))
+        except (AgentFailure, ValueError):
+            return ''
+        rows = [
+            t
+            for t in (tabs if isinstance(tabs, list) else [])
+            if isinstance(t, dict)
+            and t.get('id')
+            and re.match(
+                r'https://(?:[^/.]+\.)*lotteon\.com/.*order', str(t.get('url') or ''), re.IGNORECASE
+            )
+            and (not account or not t.get('profile') or t.get('profile') == account)
+        ]
+        if not rows:
+            return ''
+        tab_id = str(rows[-1]['id'])
+        try:
+            self.tool('switch_tab', id=tab_id)
+        except AgentFailure:
+            return ''
+        return tab_id
 
     def _close_popups(self) -> None:
         """이 레인의 팝업 창을 닫는다(주소 검색·배송지 폼이 남아 다음 시도를 막는다). 실패는 무시한다."""
