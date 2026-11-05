@@ -485,7 +485,7 @@ def test_bridge_down_으로_멈춘_작업은_5분_뒤_한_번_다시_넣는다(t
     assert q.get('T1').state == 'needs_ai'
 
 
-@pytest.mark.parametrize(('kst_hour', 'requeued'), [(7, False), (8, True), (17, True), (18, False)])
+@pytest.mark.parametrize(('kst_hour', 'requeued'), [(7, True), (8, True), (17, True), (23, True)])
 def test_after_hours_kakao_wait_requeues_in_work_hours(tmp_path, monkeypatch, kst_hour, requeued):
     import samba_agent.queue.intake as intake_mod
 

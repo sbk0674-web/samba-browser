@@ -685,8 +685,8 @@ KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool time
 KAKAO_HUMAN_WAIT_TRIES = 36
 # 사람 승인 요청 횟수 — 3번 요청 뒤에도 안 되면 삼바웨이브 메모(사용자 규칙 2026-11-04)
 KAKAO_HUMAN_ROUNDS = 3
-# 카카오페이 사람 승인은 업무시간(KST 08~18시)에만 요청한다 — 퇴근 뒤 업무폰 요청 금지(사용자 2026-11-04)
-KAKAO_WORK_HOURS = (8, 18)
+# 카카오페이 사람 승인 요청 시간(KST). 2026-11-04 업무시간(8~18시)만 → 2026-11-05 사용자 "야근 많으니 그냥 요청해" 로 종일
+KAKAO_WORK_HOURS = (0, 24)
 
 
 def _as_won(value: object) -> str:
