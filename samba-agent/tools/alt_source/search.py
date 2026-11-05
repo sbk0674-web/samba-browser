@@ -51,7 +51,7 @@ _DANAWA_ROWS_JS = r"""(() => {
     const r = a.closest('li,tr'); const img = r && r.querySelector('img')
     const t = (r ? r.innerText : a.innerText).replace(/\s+/g, ' ')
     const c = (a.href.match(/cmpnyc=(\w+)/) || [])[1], p = (a.href.match(/link_pcode=(\d+)/) || [])[1]
-    const price = +((t.match(/([\d,]{4,})원/) || [])[1] || '0').replace(/,/g, '')
+    const price = +((t.replace(/배송비\s*[\d,]+원/g, '').match(/([\d,]{4,})\s*원/) || [])[1] || '0').replace(/,/g, '')
     out.push({mall: (img && img.alt) || '', code: c, pid: p, price, title: t.slice(0, 120)})
   })
   return JSON.stringify(out)
