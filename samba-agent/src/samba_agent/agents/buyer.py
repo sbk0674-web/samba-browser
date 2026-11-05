@@ -3598,7 +3598,7 @@ class BuyerAgent(AgentBase):
             return None
         other = _as_float(s_snap.get('cost'))
         if fallback:
-            own_txt = '견적 없음(봇 차단)'
+            own_txt = '견적 없음(봇 차단·품절)'
         elif own_bad:
             own_txt = mask_text(f'{account} 견적 불가({own_bad[:60]})')
         else:
@@ -3612,7 +3612,7 @@ class BuyerAgent(AgentBase):
             self._log_cross(a, f'{here} 선택 — {here} {own_txt} vs {sib_src.id} {other:,.0f}원')
             return None
         if fallback:
-            why = f'{here} 봇 차단 — 대체 경로'
+            why = f'{here} 봇 차단·품절 — 대체 경로'
         elif own_bad:
             why = f'{here} 견적 불가 — 대체 경로'
         else:
@@ -4048,7 +4048,10 @@ class BuyerAgent(AgentBase):
                 account, snap = self._pick_cheapest(a, accounts)
         except AgentFailure as e:
             # 이 사이트가 봇 차단(SSG PerimeterX)이면 교차 비교 짝(H몰)만 견적해 산다 — 이 사이트는 다시 열지 않는다
-            if self.sibling is None or BLOCKED_REASON not in e.reason:
+            # 이 사이트 품절도 짝 소싱처에서 같은 상품을 찾아 산다 — 품절이면 바로 취소로 넘겨 이행률이 떨어졌다
+            # (사용자 2026-11-05: 무신사 품절 양말이 롯데온에 재고 있는데 취소됨)
+            sold_out = e.fail_reason is FailReason.OUT_OF_STOCK
+            if self.sibling is None or (BLOCKED_REASON not in e.reason and not sold_out):
                 raise
             self.note(
                 '교차 비교',
@@ -4069,6 +4072,13 @@ class BuyerAgent(AgentBase):
             # 이 사이트가 싸서 골랐는데 주문서·배송지 단계에서 막혔다 — 결제 전이니 교차 비교 짝 견적으로 대체 구매한다
             # (사용자 2026-09-27: SSG 스냅샷·배송지 실패 시 H몰로). 중복 구매 흔적은 대체하지 않는다
             alt = self._cross_alt
+            if alt is None and e.fail_reason is FailReason.OUT_OF_STOCK and self.sibling is not None:
+                # 옵션 단계에서 확정 품절 — 짝 소싱처에 같은 상품이 있으면 그쪽에서 산다(사용자 2026-11-05)
+                self.note('교차 비교', mask_text(f'이 사이트 품절({e.reason[:60]}) — 짝 소싱처만 견적한다'))
+                delegated = self._cross_compare(a, None, None)
+                if delegated is not None:
+                    return delegated
+                raise
             if alt is None or e.fail_reason is FailReason.DUPLICATE:
                 raise
             self._cross_alt = None
