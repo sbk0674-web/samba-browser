@@ -75,6 +75,9 @@ const chosen=async()=>{
 let tree=await get();
 if(/^URL: https:\/\/pay\.naver\.com\/authentication\/pw\/check(?:[?/#]|$)/m.test(tree))return {ok:false,auth_required:true,error:'네이버페이 추가 비밀번호 인증 화면 — 카드 선택·결제 진행하지 않음'};
 if(!/포인트 혜택|네이버페이|Npay/.test(tree))return {ok:false,error:'네이버페이 결제창 미확인'};
+// 결제창이 다 뜨기 전에 '현대'·'다음 결제수단'을 누르면 이미 골라진 현대카드에서 다른 카드로 넘어간다
+// (실기 2026-11-06 ABC 20261105K28037: 화면엔 현대카드 선택됨인데 검사 실패 4번) — 먼저 몇 초 기다리며 본다
+for(let wait=0;wait<8&&!await chosen();wait++)await sleep(700);
 for(let attempt=0;attempt<8&&!await chosen();attempt++){
   const id=await page.idOf('현대');
   if(id>=0){await page.click(id);await sleep(500);if(await chosen())break;}
