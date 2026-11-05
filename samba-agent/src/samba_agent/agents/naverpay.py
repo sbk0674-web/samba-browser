@@ -98,7 +98,9 @@ const amount=text.match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);
 const shown=amount?num(amount[1]):0;
 const gap=EXPECTED_AMOUNT-shown;
 if(!amount||gap<0||gap>100)return {ok:false,error:'네이버 결제액 불일치',shown_amount:shown,expected_amount:EXPECTED_AMOUNT};
-const reward=text.match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);
+// 적립 숫자는 굴러가는 숫자판이라 다 멈추기 전엔 못 읽는다(ABC 모바일 결제창 2026-11-06) — 몇 번 다시 읽는다
+let reward=text.match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);
+for(let i=0;i<6&&!reward;i++){await sleep(800);reward=body(await get()).match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);}
 if(!reward)return {ok:false,error:'현대카드 네이버 적립 미확인'};
 const agree=await page.idOf('동의하고 결제하기');
 if(agree<0)return {ok:false,error:'네이버 결제 동의 버튼 미확인'};
