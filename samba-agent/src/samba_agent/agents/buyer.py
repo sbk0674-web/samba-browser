@@ -4925,24 +4925,30 @@ class BuyerAgent(AgentBase):
             tabs = json.loads(self.tool('list_tabs'))
         except (AgentFailure, ValueError):
             return ''
-        rows = [
+        mine = [
             t
             for t in (tabs if isinstance(tabs, list) else [])
             if isinstance(t, dict)
             and t.get('id')
-            and re.match(
-                r'https://(?:[^/.]+\.)*lotteon\.com/.*order', str(t.get('url') or ''), re.IGNORECASE
-            )
+            and re.match(r'https://(?:[^/.]+\.)*lotteon\.com/', str(t.get('url') or ''))
             and (not account or not t.get('profile') or t.get('profile') == account)
         ]
-        if not rows:
+        # 진단용 — 그때 열린 롯데온 탭의 경로만 남긴다(쿼리·개인정보 없음)
+        self.note(
+            '배송지 탭',
+            ', '.join(re.sub(r'^https://[^/]+|\?.*$', '', str(t.get('url'))) for t in mine)[:200]
+            or '롯데온 탭 없음',
+        )
+        orders = [t for t in mine if re.search(r'order', str(t.get('url') or ''), re.IGNORECASE)]
+        if not mine:
             return ''
-        tab_id = str(rows[-1]['id'])
+        # 주문서 탭이 없으면 롯데온 탭이라도 앞에 둔다 — 활성 탭이 남의 탭(네이버 뉴스)이면 배송지 스크립트가 못 돈다
+        tab_id = str((orders or mine)[-1]['id'])
         try:
             self.tool('switch_tab', id=tab_id)
         except AgentFailure:
             return ''
-        return tab_id
+        return tab_id if orders else ''
 
     def _close_popups(self) -> None:
         """이 레인의 팝업 창을 닫는다(주소 검색·배송지 폼이 남아 다음 시도를 막는다). 실패는 무시한다."""
