@@ -38,7 +38,8 @@ const id = (String(await tabs.open({url: __URL__})).match(/tab (\S+)/) || [])[1]
 if (id) await tabs.switch(id)
 await sleep(__WAIT__)
 const SEL = __SEL__
-const T = String(((await page.get(SEL ? {selector: SEL} : {})) || {}).tree || '')
+const Q = __Q__
+const T = String(((await page.get(SEL ? {selector: SEL} : Q ? {query: Q} : {})) || {}).tree || '')
 if (id) { try { await tabs.close(id) } catch (e) {} }
 return T
 """
@@ -51,11 +52,12 @@ def _bridge() -> BridgeClient:
     ).with_lane(LANE).scoped(['run_js'])
 
 
-def _read(b: BridgeClient, url: str, wait_ms: int, selector: str = '') -> str:
+def _read(b: BridgeClient, url: str, wait_ms: int, selector: str = '', query: str = '') -> str:
     code = (
         _OPEN_READ_JS.replace('__URL__', json.dumps(url))
         .replace('__WAIT__', str(wait_ms))
         .replace('__SEL__', json.dumps(selector))
+        .replace('__Q__', json.dumps(query))
     )
     out = b.call('run_js', code=code, safety='no_pay')
     return str(getattr(out, 'result', out))
@@ -126,9 +128,30 @@ def _danawa(model: str) -> list[dict[str, object]]:
     return rows
 
 
+# 해외 직배송(관부가세·해외 배송비)은 정품 판매처 대체 구매로 쓰지 않는다(사용자 2026-11-05: SSG 아디폼 뮬 해외직배송 링크)
+_OVERSEAS = re.compile(r'해외직배송|해외\s*배송|관부가세|개인통관고유부호|해외직구')
+
+
+def _mark_overseas(b: BridgeClient, rows: list[dict[str, object]], limit: int = 6) -> None:
+    """하네스가 살 수 있는 줄 중 싼 것부터 상품 페이지를 열어 해외 직배송이면 source 를 지운다."""
+    checked: dict[str, bool] = {}
+    for r in sorted((r for r in rows if r['source'] and r['product_url']), key=lambda r: int(r.get('price') or 0) or 10**9):
+        url = str(r['product_url'])
+        if url not in checked:
+            if len(checked) >= limit:
+                break
+            # 큰 상품 페이지는 전체 트리가 잘린다 — 배송 글자 부근만 읽는다
+            text = _read(b, url, 6000, query='배송')
+            checked[url] = bool(_OVERSEAS.search(text))
+        if checked[url]:
+            r['note'] = '해외 직배송 — 제외'
+            r['source'] = None
+
+
 def search(model: str) -> dict[str, object]:
     b = _bridge()
     rows = _naver(b, model) + _danawa(model)
+    _mark_overseas(b, rows)
     seen, uniq = set(), []
     for r in rows:
         k = (r['source'], r['product_url'], r['price'])
