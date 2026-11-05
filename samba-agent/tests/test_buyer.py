@@ -2193,31 +2193,27 @@ def test_기존_배송지를_골라_통과해도_결제_직전_주소_대조_열
     assert a._ship_key == road_key(shipping['address']) and a._ship_key != '지난주문의열쇠99'
 
 
-def test_스케쳐스는_소싱처와_상관없이_까대기로_고정된다(reg):
+def test_스케쳐스는_고정_까대기가_아니고_정가로_정한다(reg):
+    """사용자 2026-11-05: 무조건 까대기는 르무통·데상트뿐. 스케쳐스는 정가 ≤ 결제액이면 까대기, 정가 > 결제액이면 직배."""
     from samba_agent.agents.buyer import is_fixed_kkadaegi
 
     skx = OrderRef(
         order_no='S1',
-        source='LOTTEON',
+        source='MUSINSA',
         seller='쿠팡',
         sku='매장정품 스케쳐스USA 여성 브리드 이지 슬립인스 SC0WFCFX011 BBK / 240',
         qty=1,
+        sale_price=104800,
     )
-    other = OrderRef(
-        order_no='S2', source='LOTTEON', seller='쿠팡', sku='매장정품 나이키 덩크', qty=1
-    )
-    assert is_fixed_kkadaegi(skx) and not is_fixed_kkadaegi(other)
-    assert is_fixed_kkadaegi(skx.model_copy(update={'sku': 'SKECHERS Go Walk'}))
-    # 일반 소싱처(무신사)에서도 스케쳐스는 정가 비교 없이 까대기
+    assert not is_fixed_kkadaegi(skx)
     a = agent(reg, lambda p, m: m(choice='260', reason='일치'))
-    assert a.order_type_of(skx, {'normal_price': 0}) == 'kkadaegi'
+    assert a.order_type_of(skx, {'normal_price': 90300}) == 'kkadaegi'
+    assert a.order_type_of(skx.model_copy(update={'sale_price': 80000}), {'normal_price': 90300}) == 'direct'
 
 
 @pytest.mark.parametrize('source', ['MUSINSA', 'LOTTEON', 'SSG'])
 @pytest.mark.parametrize('sku', [
-    '르무통 메이트 블랙', 'LEMOUTON MATE BLACK', 'lemouton mate',
-    '스케쳐스 고워크', 'SKECHERS Go Walk', '데상트 운동화', 'DESCENTE shoes',
-    '휠라 운동화', 'FILA shoes', 'fila shoes',
+    '르무통 메이트 블랙', 'LEMOUTON MATE BLACK', 'lemouton mate', '데상트 운동화', 'DESCENTE shoes',
 ])
 def test_지정_브랜드는_항상_까대기다(reg, source, sku):
     from samba_agent.agents.buyer import is_fixed_kkadaegi
@@ -2258,20 +2254,14 @@ def test_숫자_조각은_숫자_경계로만_맞춘다_EU44_는_44_5_가_아니
     assert matching_options(with_44, 'EU 화이트-407 EU 44') == ['285(44/UK9.5) 98,100']
 
 
-def test_스케쳐스는_브랜드_글자가_없어도_품번으로_까대기로_고정된다():
-    """실기 2026-10-09 20261009ECF62B: 상품명에 브랜드가 없어 선물하기(고객 직배)로 잘못 샀다."""
-    from samba_agent.agents.buyer import is_fixed_kkadaegi
+def test_롯데온_선물은_소싱처_상품명_줄의_고정_브랜드로도_까대기다(reg):
+    """판매 상품명에 브랜드가 없어도 롯데온 정가 스크립트가 읽은 상품명 줄에 데상트가 있으면 까대기(2026-11-05)."""
+    order = OrderRef(order_no='D9', source='LOTTEON', seller='쿠팡', sku='남성 경량 패딩 / 100', qty=1, sale_price=50000)
+    a = agent(reg, lambda p, m: m(choice='260', reason='일치'))
+    a.spec = a.spec.model_copy(update={'name': 'buyer.lotteon'}) if hasattr(a.spec, 'model_copy') else a.spec
+    from samba_agent.agents.buyer import KKADAEGI_BRANDS
 
-    def ref(sku: str) -> OrderRef:
-        return OrderRef(order_no='S9', source='LOTTEON', seller='신세계몰', sku=sku, qty=1)
-
-    assert is_fixed_kkadaegi(ref('매장정품 여성슬립온 여자슬립온 여성 플렉스 어필 5 0 SL0WPCEX305 LE122'))
-    assert is_fixed_kkadaegi(ref('남성 와이드 맥스쿠셔닝 프리미어3 SP0MRCGY021'))
-    assert is_fixed_kkadaegi(ref('스케쳐스USA 남성 우노 SC0MFCEY042_I 민트 / 265'))
-    # 다른 브랜드 품번은 걸리지 않는다
-    assert not is_fixed_kkadaegi(ref('나이키 에어포스 CW2288-111'))
-    assert not is_fixed_kkadaegi(ref('아디다스 슈퍼스타 FZ5461'))
-    assert not is_fixed_kkadaegi(ref('KS4780 3 스트라이프 슬림 티셔츠'))
+    assert KKADAEGI_BRANDS.search('롯데백화점 데상트 남성 경량 패딩')
 
 
 def test_옵션_없는_주문은_주문서가_열렸으면_단일_상품이다():

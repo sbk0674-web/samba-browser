@@ -132,9 +132,10 @@ def address_districts(text: object) -> set[str]:
     return {k for k in _DISTRICT.findall(raw) if not re.search(r'(특별자치|광역|특별)시$', k)}
 
 
-# 소싱처와 무관하게 사무실 수령으로 고정한 브랜드 — 사용자 지시 2026-10-12
+# 소싱처와 무관하게 무조건 사무실 수령(까대기)인 브랜드 — 르무통·데상트(사용자 2026-11-05, 10-12 목록 정정).
+# 스케쳐스·휠라는 고정이 아니다: 정가 ≤ 고객 결제액이면 까대기, 정가 > 결제액일 때만 선물·직배(정가 비교)
 KKADAEGI_BRANDS = re.compile(
-    r'스케[쳐처]스|skechers|르무통|\blemouton\b|데상트|\bdescente\b|휠라|\bfila\b',
+    r'르무통|\blemouton\b|데상트|\bdescente\b',
     re.IGNORECASE,
 )
 # 상품명에 브랜드 글자가 없어도 품번으로 안다 — 스케쳐스 품번은 S+영문+0+(W|M|G|K)+영문 4자+숫자 3자
@@ -146,7 +147,7 @@ SKECHERS_STYLE_CODE = re.compile(r'(?<![A-Za-z0-9])S[A-Z]0[WMGK][A-Z]{4}\d{3}(?!
 def is_fixed_kkadaegi(order: OrderRef) -> bool:
     """이 주문의 상품이 까대기로 고정된 브랜드인가(상품명에서 본다)."""
     text = str(order.sku or '')
-    return bool(KKADAEGI_BRANDS.search(text) or SKECHERS_STYLE_CODE.search(text))
+    return bool(KKADAEGI_BRANDS.search(text))
 
 
 def road_key(address: object) -> str:
@@ -2253,10 +2254,9 @@ class BuyerAgent(AgentBase):
             if key not in cache:
                 tmp: dict[str, object] = {}
                 self._apply_normal_price(a, account, tmp)
-                cache[key] = tmp.get('normal_price')
+                cache[key] = tmp
                 self._pre_normal = cache
-            if cache.get(key):
-                pre_snap['normal_price'] = cache[key]
+            pre_snap.update({k: v for k, v in dict(cache.get(key) or {}).items() if v})
         if (
             source.gift_unless_poison
             and not is_poison_seller(a.order.seller)
@@ -2787,6 +2787,9 @@ class BuyerAgent(AgentBase):
             self.note('정가', mask_text(f'못 읽음({e.reason[:80]})'))
             return
         price = _as_float(out.get('normal_price'))
+        head = str(out.get('product_head') or '')
+        if head:
+            snap['product_head'] = head
         if price > 0:
             snap['normal_price'] = price
             self.note('정가', f'{price:,.0f}원')
@@ -4473,7 +4476,10 @@ class BuyerAgent(AgentBase):
         """
         source = source_of(self.spec.name)
         forced = source.order_type
-        if not forced and is_fixed_kkadaegi(order):
+        # 판매 상품명에 브랜드가 빠져도(스케쳐스 '남녀 4종 울트라 플렉스 4 0 슬립인') 소싱처 상품명 줄로 고정 브랜드를 안다
+        # (실기 2026-11-05 2026110557B626: 상품명만 보고 선물로 보냈다)
+        head = str(snap.get('product_head') or '') if snap else ''
+        if not forced and (is_fixed_kkadaegi(order) or (head and KKADAEGI_BRANDS.search(head))):
             # 고정 브랜드는 어느 소싱처에서 사든 사무실로 받는다.
             forced = 'kkadaegi'
         if source.gift_unless_poison and not forced:
