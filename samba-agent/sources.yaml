@@ -104,6 +104,7 @@ sources:
     compare_accounts: false
     shipping_confirm: true
     payment_quotes: true  # 2026-09-27 ssg_payment_quotes(SSGPAY 등록 카드·SSG MONEY 충전결제)
+    coupon_download: true  # 2026-11-05 ssg_coupon_download — 쓱데이 등 받아야 쓰는 쿠폰을 먼저 받는다(안 받으면 쿠폰할인 0원)
     mall_item: true  # 2026-09-27 ssg_find_mall_item — 주문 링크가 신세계몰이 아니면 신세계몰 같은 모델 상품으로 산다
     route_compare: true  # 2026-09-27 ssg_route_quotes — 직접·다나와·애드픽(적립) 경로 원가 비교, 가장 싼 경로로 산다
     routes: [danawa, adpick]  # 직접 경로는 신세계몰 상품 주문서(first)로 비교에 들어간다. 사용자 2026-10-01·10-08: SSG 는 다나와 비교검색 기본(신세계몰 줄 ED901 만 — 개인판매자 제외). 애드픽은 적립을 원가에 넣지 않는다

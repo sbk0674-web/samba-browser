@@ -102,6 +102,9 @@ def mock_scripts(responses: dict[str, object], calls: Calls) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)['args']
         name, args = body['name'], json.loads(body.get('args') or '{}')
+        if name == 'ssg_coupon_download' and name not in responses:
+            # 스냅샷 전 쿠폰 받기(2026-11-05) — 이 파일의 시험들은 쿠폰과 무관하다
+            return page(json.dumps({'ok': True, 'clicked': False, 'issued': []}))
         calls.append((name, args))
         if name not in responses:
             raise AssertionError(f'예상치 못한 run_script 호출: {name}')

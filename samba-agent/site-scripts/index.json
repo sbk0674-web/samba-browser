@@ -1051,6 +1051,15 @@
     ]
   },
   {
+    "name": "ssg_coupon_download",
+    "host": "ssg.com",
+    "description": "SSG 상품 페이지 '쿠폰받기' 레이어의 쿠폰 받기를 눌러 쓱데이 등 받아야 쓰는 쿠폰을 먼저 받는다. {ok, clicked, issued, left, note}",
+    "params": [
+      "profile",
+      "sku"
+    ]
+  },
+  {
     "name": "ssg_find_mall_item",
     "host": "ssg.com",
     "description": "SSG 신세계몰 같은 상품 찾기(2026-09-27): 사용자 규칙 — SSG 주문은 신세계몰(6004)·신세계백화점(6009) 상품으로만 산다(이마트 등 금지).",

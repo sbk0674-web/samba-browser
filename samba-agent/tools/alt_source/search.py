@@ -123,8 +123,14 @@ async def search(model: str) -> dict[str, object]:
                     rows.append({'via': 'danawa', 'mall': r.get('mall') or r.get('code'), 'price': r.get('price'),
                                  'title': r.get('title'), 'source': mall[0] if mall else None,
                                  'product_url': mall[1].format(r['pid']) if mall and r.get('pid') else None})
+    except websockets.exceptions.ConnectionClosed as e:
+        # 탭이 도중에 닫히면(사람이 닫음·페이지 충돌) 읽은 데까지만 돌려준다
+        rows.append({'via': 'error', 'mall': None, 'price': 0, 'title': f'웨일 탭 연결 끊김: {e}', 'source': None, 'product_url': None})
     finally:
-        urllib.request.urlopen(f"{CDP}/json/close/{tab['id']}", timeout=10).read()
+        try:
+            urllib.request.urlopen(f"{CDP}/json/close/{tab['id']}", timeout=10).read()
+        except OSError:
+            pass
     rows.sort(key=lambda r: (r['source'] is None, int(r.get('price') or 0) or 10**9))
     return {'model': model, 'offers': rows}
 
