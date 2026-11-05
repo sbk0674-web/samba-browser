@@ -1,25 +1,30 @@
-"""품절·가격 불일치 주문의 대체 판매처 찾기 — 네이버 쇼핑·다나와를 웨일(CDP 9223) 탭 하나로 검색한다(읽기만).
+"""품절·가격 불일치 주문의 대체 판매처 찾기 — 삼바 브라우저(앱 브릿지 'alt-search' 레인)로 네이버 통합검색 쇼핑 칸·다나와를 읽는다.
 
 사용: .venv/Scripts/python.exe tools/alt_source/search.py <품번> [<품번2> ...]
 출력: 판매처·가격·상품명, 하네스가 살 수 있는 소싱처면 source·product_url(작업 옵션에 그대로 넣는다).
 
-- 네이버 쇼핑: 내장 브라우저는 막혀 있고 앱 브라우저는 '접속량 많음'으로 막힌다 — 사람이 쓰는 웨일로 읽는다(2026-11-05)
-- 다나와: 바로가기(loadingBridge) 주소의 link_pcode 가 그 쇼핑몰 상품번호다 — 페이지를 넘기지 않고 주소를 만든다
-- 웨일 탭은 공유 자원이다 — 탭 하나를 새로 열어 쓰고 반드시 닫는다
+- 사용자 웨일 브라우저는 쓰지 않는다(사용자 2026-11-05: 작업 방해 금지)
+- 네이버 쇼핑 검색(search.shopping.naver.com)은 앱 브라우저에서 '접속 제한'으로 막힌다 — 네이버 통합검색의 쇼핑 칸을 읽는다
+- 다나와 바로가기(loadingBridge) 주소의 link_pcode 가 그 쇼핑몰 상품번호다
+- 결제·장바구니는 누르지 않는다. 연 탭은 닫는다
 """
 
-import asyncio
 import json
+import os
 import re
 import sys
 import urllib.parse
-import urllib.request
 
-import websockets
+import httpx
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, 'src'))
 sys.stdout.reconfigure(encoding='utf-8')
-CDP = 'http://127.0.0.1:9223'
 
+from samba_agent.bridge.client import BridgeClient  # noqa: E402
+from samba_agent.settings import load_settings  # noqa: E402
+
+LANE = 'alt-search'
 # 다나와 업체코드 → (하네스 소싱처, 상품 주소 틀)
 DANAWA_MALLS = {
     'ED901': ('SSG', 'https://www.ssg.com/item/itemView.ssg?itemId={}'),
@@ -27,114 +32,113 @@ DANAWA_MALLS = {
     'ED908': ('GSShop', 'https://www.gsshop.com/prd/prd.gs?prdid={}'),
 }
 
-_NAVER_JS = r"""(() => {
-  const out = []
-  const nd = document.getElementById('__NEXT_DATA__')
-  const walk = (o) => { if (!o || typeof o !== 'object') return
-    if (o.productTitle && (o.mallName || o.mallNameOrg)) out.push({title: o.productTitle, mall: o.mallName || o.mallNameOrg, price: +(o.price || o.lowPrice || 0), url: o.mallProductUrl || o.crUrl || o.adcrUrl || ''})
-    for (const k in o) walk(o[k]) }
-  if (nd) { try { walk(JSON.parse(nd.textContent)) } catch (e) {} }
-  return JSON.stringify({title: document.title, items: out})
-})()"""
-
-_DANAWA_JS = r"""(async () => {
-  const sleep = ms => new Promise(r => setTimeout(r, ms))
-  const key = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
-  const M = __M__
-  const hit = [...document.querySelectorAll('a[href*="pcode="]')].map(a => [a.innerText, a.href]).find(([t, h]) => /info\/\?pcode=\d+/.test(h) && key(t).includes(key(M)))
-  return JSON.stringify({pcode_url: hit ? hit[1] : null})
-})()"""
-
-_DANAWA_ROWS_JS = r"""(() => {
-  const out = []
-  document.querySelectorAll('a[href*="loadingBridge"]').forEach(a => {
-    const r = a.closest('li,tr'); const img = r && r.querySelector('img')
-    const t = (r ? r.innerText : a.innerText).replace(/\s+/g, ' ')
-    const c = (a.href.match(/cmpnyc=(\w+)/) || [])[1], p = (a.href.match(/link_pcode=(\d+)/) || [])[1]
-    const price = +((t.replace(/배송비\s*[\d,]+원/g, '').match(/([\d,]{4,})\s*원/) || [])[1] || '0').replace(/,/g, '')
-    out.push({mall: (img && img.alt) || '', code: c, pid: p, price, title: t.slice(0, 120)})
-  })
-  return JSON.stringify(out)
-})()"""
+# 탭을 열어 트리를 읽고 닫는다 — 결과는 트리 글자 그대로
+_OPEN_READ_JS = r"""
+const id = (String(await tabs.open({url: __URL__})).match(/tab (\S+)/) || [])[1]
+if (id) await tabs.switch(id)
+await sleep(__WAIT__)
+const SEL = __SEL__
+const T = String(((await page.get(SEL ? {selector: SEL} : {})) || {}).tree || '')
+if (id) { try { await tabs.close(id) } catch (e) {} }
+return T
+"""
 
 
-def _naver_source(mall: str, url: str) -> tuple[str, str] | None:
-    """네이버 쇼핑 판매처 줄 → 하네스 소싱처·상품 주소. 모르는 판매처면 None."""
-    m = re.search(r'lotteon\.com/p/product/(LE\d+)', url)
-    if m:
-        return 'LOTTEON', f'https://www.lotteon.com/p/product/{m.group(1)}'
-    m = re.search(r'gsshop\.com/.*prdseqnum=(\d+)', url)
-    if m:
-        return 'GSShop', f'https://www.gsshop.com/prd/prd.gs?prdid={m.group(1)}'
-    m = re.search(r'ssg\.com/item/itemView\.ssg\?itemId=(\d+)', url)
-    if m:
-        return 'SSG', f'https://www.ssg.com/item/itemView.ssg?itemId={m.group(1)}'
-    m = re.search(r'musinsa\.com/(?:products|app/goods)/(\d+)', url)
-    if m:
-        return 'MUSINSA', f'https://www.musinsa.com/products/{m.group(1)}'
-    return None
+def _bridge() -> BridgeClient:
+    s = load_settings()
+    return BridgeClient(
+        s.bridge_url, s.bridge_token.get_secret_value(), allowed=(), busy_retries=60, busy_wait_s=5.0
+    ).with_lane(LANE).scoped(['run_js'])
 
 
-async def _tab_eval(ws, url: str, scripts: list[str], wait: float) -> list[str]:
-    n = 0
-
-    async def call(method, params=None):
-        nonlocal n
-        n += 1
-        await ws.send(json.dumps({'id': n, 'method': method, 'params': params or {}}))
-        while True:
-            m = json.loads(await ws.recv())
-            if m.get('id') == n:
-                return m
-
-    await call('Page.navigate', {'url': url})
-    await asyncio.sleep(wait)
-    out = []
-    for js in scripts:
-        r = await call('Runtime.evaluate', {'expression': js, 'returnByValue': True, 'awaitPromise': True})
-        out.append(r['result']['result'].get('value') or '')
-    return out
+def _read(b: BridgeClient, url: str, wait_ms: int, selector: str = '') -> str:
+    code = (
+        _OPEN_READ_JS.replace('__URL__', json.dumps(url))
+        .replace('__WAIT__', str(wait_ms))
+        .replace('__SEL__', json.dumps(selector))
+    )
+    out = b.call('run_js', code=code, safety='no_pay')
+    return str(getattr(out, 'result', out))
 
 
-async def search(model: str) -> dict[str, object]:
-    req = urllib.request.Request(f'{CDP}/json/new?about:blank', method='PUT')
-    tab = json.loads(urllib.request.urlopen(req, timeout=10).read())
+def _key(s: str) -> str:
+    return re.sub(r'[^A-Z0-9]', '', str(s).upper())
+
+
+def _price_after(text: str, title: str) -> int:
+    head = re.sub(r'\s+', ' ', title)[:18]
+    i = text.find(head)
+    if i < 0:
+        return 0
+    m = re.search(r'([\d,]{4,})\s*원', text[i + len(head): i + len(head) + 260])
+    return int(m.group(1).replace(',', '')) if m else 0
+
+
+def _naver(b: BridgeClient, model: str) -> list[dict[str, object]]:
+    tree = _read(b, 'https://search.naver.com/search.naver?where=nexearch&query=' + urllib.parse.quote(model), 7000)
+    head, _, text = tree.partition('PAGE TEXT')
+    text = re.sub(r'\s+', ' ', text)
+    lines = [l for l in head.split('\n') if re.match(r'^\[\d+\] link', l)]
     rows: list[dict[str, object]] = []
-    try:
-        async with websockets.connect(tab['webSocketDebuggerUrl'], max_size=50_000_000) as ws:
-            (naver,) = await _tab_eval(
-                ws, 'https://search.shopping.naver.com/search/all?query=' + urllib.parse.quote(model), [_NAVER_JS], 7
-            )
-            for it in json.loads(naver or '{}').get('items', []):
-                if re.sub(r'[^A-Z0-9]', '', model.upper()) not in re.sub(r'[^A-Z0-9]', '', str(it['title']).upper()):
-                    continue
-                buy = _naver_source(str(it['mall']), str(it['url']))
-                rows.append({'via': 'naver', 'mall': it['mall'], 'price': it['price'], 'title': it['title'],
-                             'source': buy[0] if buy else None, 'product_url': buy[1] if buy else it['url'][:160]})
-            (dn,) = await _tab_eval(
-                ws, 'https://search.danawa.com/dsearch.php?query=' + urllib.parse.quote(model),
-                [_DANAWA_JS.replace('__M__', json.dumps(model))], 5,
-            )
-            pcode_url = json.loads(dn or '{}').get('pcode_url')
-            if pcode_url:
-                (drows,) = await _tab_eval(ws, pcode_url, [_DANAWA_ROWS_JS], 6)
-                for r in json.loads(drows or '[]'):
-                    mall = DANAWA_MALLS.get(str(r.get('code')))
-                    rows.append({'via': 'danawa', 'mall': r.get('mall') or r.get('code'), 'price': r.get('price'),
-                                 'title': r.get('title'), 'source': mall[0] if mall else None,
-                                 'product_url': mall[1].format(r['pid']) if mall and r.get('pid') else None})
-    except websockets.exceptions.ConnectionClosed as e:
-        # 탭이 도중에 닫히면(사람이 닫음·페이지 충돌) 읽은 데까지만 돌려준다
-        rows.append({'via': 'error', 'mall': None, 'price': 0, 'title': f'웨일 탭 연결 끊김: {e}', 'source': None, 'product_url': None})
-    finally:
-        try:
-            urllib.request.urlopen(f"{CDP}/json/close/{tab['id']}", timeout=10).read()
-        except OSError:
-            pass
-    rows.sort(key=lambda r: (r['source'] is None, int(r.get('price') or 0) or 10**9))
-    return {'model': model, 'offers': rows}
+    for i, line in enumerate(lines):
+        m = re.match(r'^\[\d+\] link "([^"]+)" href=(\S+)', line)
+        if not m or _key(model) not in _key(m.group(1)):
+            continue
+        title, url = m.group(1), m.group(2)
+        nxt = re.match(r'^\[\d+\] link "([^"]{1,30})" href=', lines[i + 1]) if i + 1 < len(lines) else None
+        mall = nxt.group(1) if nxt and _key(model) not in _key(nxt.group(1)) else ''
+        source, product_url = None, None
+        le = re.search(r'\b(LE\d{9,})\b', title)
+        if le and ('롯데' in mall or 'lotteon' in url):
+            source, product_url = 'LOTTEON', f'https://www.lotteon.com/p/product/{le.group(1)}'
+        rows.append({'via': 'naver', 'mall': mall, 'price': _price_after(text, title), 'title': title,
+                     'source': source, 'product_url': product_url or url[:160]})
+    return rows
+
+
+def _danawa(model: str) -> list[dict[str, object]]:
+    """다나와는 브라우저 없이 페이지를 받아 읽는다 — 앱 트리는 바로가기 주소를 잘라 쇼핑몰 상품번호가 사라진다."""
+    ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36'}
+    with httpx.Client(timeout=30, follow_redirects=True, headers=ua) as http:
+        html = http.get('https://search.danawa.com/dsearch.php', params={'query': model}).text
+        pcode = None
+        for m in re.finditer(r'href="https://prod\.danawa\.com/info/\?pcode=(\d+)[^"]*"[^>]*>([^<]{4,200})<', html):
+            if _key(model) in _key(m.group(2)):
+                pcode = m.group(1)
+                break
+        if not pcode:
+            m = re.search(r'prod\.danawa\.com/info/\?pcode=(\d+)', html)
+            pcode = m.group(1) if m else None
+        if not pcode:
+            return []
+        html = http.get('https://prod.danawa.com/info/', params={'pcode': pcode, 'keyword': model}).text
+    rows: list[dict[str, object]] = []
+    # 페이지 안 JSON(역슬래시로 감싼 따옴표일 수 있다) — logo·companyCode·linkProductCode·price
+    html = html.replace('\\"', '"')
+    pat = r'"logo":"([^"]+)".{0,200}?"companyCode":"(\w+)","linkProductCode":"([^"]+)".{0,200}?"price":"([\d,]+)'
+    for m in re.finditer(pat, html, re.S):
+        logo, code, pid, price = m.groups()
+        mall = DANAWA_MALLS.get(code)
+        if code in ('EE309', 'TLC16') and pid.startswith('LE'):
+            mall = ('LOTTEON', 'https://www.lotteon.com/p/product/{}')
+        rows.append({'via': 'danawa', 'mall': logo, 'price': int(price.replace(',', '')), 'title': f'{logo} {code}',
+                     'source': mall[0] if mall else None, 'product_url': mall[1].format(pid) if mall else None})
+    return rows
+
+
+def search(model: str) -> dict[str, object]:
+    b = _bridge()
+    rows = _naver(b, model) + _danawa(model)
+    seen, uniq = set(), []
+    for r in rows:
+        k = (r['source'], r['product_url'], r['price'])
+        if k not in seen:
+            seen.add(k)
+            uniq.append(r)
+    uniq.sort(key=lambda r: (r['source'] is None, int(r.get('price') or 0) or 10**9))
+    return {'model': model, 'offers': uniq}
 
 
 if __name__ == '__main__':
     for m in sys.argv[1:]:
-        print(json.dumps(asyncio.run(search(m)), ensure_ascii=False))
+        print(json.dumps(search(m), ensure_ascii=False))
