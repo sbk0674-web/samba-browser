@@ -32,13 +32,15 @@ if(!generic(e.text)){n=nm(e.text);}else{for(let j=i+1;j<L.length;j++){const x=L[
 if(n===null)return;
 if(!generic(e.text)&&!L.slice(i+1,i+5).some(x=>x.role==='button'&&x.text==='수정'))return;
 out.push({id:e.id,text:n});});return out;};
-let r=null,found=0,second=null;
+let r=null,found=0,second=null,dbg='';
 for(let k=0;k<8&&!r;k++){
 if(k)await sleep(1000);
 const L0=await dl();
 const radios=getRadios(L0);
 const tx=String((await page.get({selector:'[role=dialog]'})).tree).split('PAGE TEXT:')[1]||'';
 const rows=parseRows(tx);
+// 원인 확인용(개인정보 없이 개수·일치 여부만) — 2026-11-05 '저장한 배송지 줄 없음' 반복
+dbg=`라디오${radios.length}·줄${rows.length}·이름같은줄${rows.filter(x=>x.name===norm).length}·라디오이름일치${radios.filter((x,i)=>rows[i]&&x.text===rows[i].name).length}`;
 const cands=[];
 for(let i=0;i<radios.length&&i<rows.length;i++){
 if(radios[i].text!==rows[i].name)continue;
@@ -48,7 +50,7 @@ if(cands.length)r=cands[0];
 // 지번 주소('…면 …리 123')는 롯데온이 도로명으로 바꿔 저장해 글자로 못 맞춘다(실기 2026-11-03 4101) — 방금 덮어쓴 둘째 줄이 이름까지 같으면 그 줄이다
 else if(second&&k>=2)r=second;
 }
-if(!found)return{ok:false,note:'저장한 배송지 줄 없음'};
+if(!found)return{ok:false,note:'저장한 배송지 줄 없음('+dbg+')'};
 if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
 await page.click(r.id);await sleep(600);
 const L1=await dl();
