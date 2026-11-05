@@ -1,7 +1,8 @@
 const A=args||{};const name=String(A.name||'').trim().replace(/\*/g,'O');const addr=String(A.address||'').trim();
 if(A.tab)await tabs.switch(String(A.tab));
 const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=(\S+))?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',name:m[4]||'',value:m[5]}));
-const dl=async()=>pe((await page.get({selector:'[role=dialog]',interactive:true})).tree);
+const DSEL='[role=dialog]:has(input[name=deliveryAddress])';
+const dl=async()=>pe((await page.get({selector:DSEL,interactive:true})).tree);
 const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&&e.text==='저장').pop();
 if(!s)return{ok:false,note:'저장 버튼 없음'};
 const ag=pe((await page.get({query:'수취인정보'})).tree).filter(e=>e.role==='checkbox').pop();
@@ -37,7 +38,7 @@ for(let k=0;k<8&&!r;k++){
 if(k)await sleep(1000);
 const L0=await dl();
 const radios=getRadios(L0);
-const tx=String((await page.get({selector:'[role=dialog]'})).tree).split('PAGE TEXT:')[1]||'';
+const tx=String((await page.get({selector:DSEL})).tree).split('PAGE TEXT:')[1]||'';
 const rows=parseRows(tx);
 // 원인 확인용(개인정보 없이 개수·일치 여부만) — 2026-11-05 '저장한 배송지 줄 없음' 반복
 dbg=`라디오${radios.length}·줄${rows.length}·이름같은줄${rows.filter(x=>x.name===norm).length}·라디오이름일치${radios.filter((x,i)=>rows[i]&&x.text===rows[i].name).length}`;
