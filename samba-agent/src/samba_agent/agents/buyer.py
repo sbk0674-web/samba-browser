@@ -1745,6 +1745,8 @@ class BuyerAgent(AgentBase):
     allowed_pay_providers: set[str] | None = None
     # 같은 상품을 같이 비교할 다른 소싱처의 구매 에이전트(무신사 ↔ 29CM). factory 가 잇는다
     sibling: 'BuyerAgent | None' = None
+    # 품절일 때만 같은 상품을 찾아 볼 대체 소싱처(sources.yaml fallback_with)
+    fallbacks: 'list[BuyerAgent]' = []
     # 계정 비교를 레인으로 동시에 돌린다(앱이 레인을 알 때만 main 이 켠다)
     parallel_accounts: bool = False
     # (계정, 시각) — 같은 사이트에서 마지막으로 로그인한 계정
@@ -3629,6 +3631,31 @@ class BuyerAgent(AgentBase):
             pass
         return self._buy_sibling(sib, a3)
 
+    def _sold_out_fallback(self, a: Assignment, e: AgentFailure) -> AgentResult | None:
+        """이 사이트 품절 — 짝(sibling)·대체 소싱처(fallbacks)를 차례로 찾아 같은 상품이 있는 곳에서 산다. 없으면 None.
+
+        품절이면 바로 취소중으로 넘겨 이행률이 떨어졌다(사용자 2026-11-05: 무신사 품절 양말이 롯데온 백화점에 재고).
+        """
+        if a.options.get('no_cross'):
+            return None
+        order = [x for x in (self.sibling, *self.fallbacks) if x is not None]
+        seen: set[int] = set()
+        keep = self.sibling
+        try:
+            for alt in order:
+                if id(alt) in seen:
+                    continue
+                seen.add(id(alt))
+                alt_id = source_of(alt.spec.name).id
+                self.note('품절 대체', mask_text(f'이 사이트 품절({e.reason[:60]}) — {alt_id} 에서 같은 상품을 찾는다'))
+                self.sibling = alt
+                delegated = self._cross_compare(a, None, None)
+                if delegated is not None:
+                    return delegated
+        finally:
+            self.sibling = keep
+        return None
+
     def _buy_sibling(self, sib: 'BuyerAgent', a3: Assignment) -> AgentResult:
         """교차 비교 짝(sib)으로 산다. 이 사이트 근거를 앞에 붙인다."""
         result = sib(a3)
@@ -4051,7 +4078,12 @@ class BuyerAgent(AgentBase):
             # 이 사이트 품절도 짝 소싱처에서 같은 상품을 찾아 산다 — 품절이면 바로 취소로 넘겨 이행률이 떨어졌다
             # (사용자 2026-11-05: 무신사 품절 양말이 롯데온에 재고 있는데 취소됨)
             sold_out = e.fail_reason is FailReason.OUT_OF_STOCK
-            if self.sibling is None or (BLOCKED_REASON not in e.reason and not sold_out):
+            if sold_out and BLOCKED_REASON not in e.reason:
+                delegated = self._sold_out_fallback(a, e)
+                if delegated is not None:
+                    return delegated
+                raise
+            if self.sibling is None or BLOCKED_REASON not in e.reason:
                 raise
             self.note(
                 '교차 비교',
@@ -4072,10 +4104,9 @@ class BuyerAgent(AgentBase):
             # 이 사이트가 싸서 골랐는데 주문서·배송지 단계에서 막혔다 — 결제 전이니 교차 비교 짝 견적으로 대체 구매한다
             # (사용자 2026-09-27: SSG 스냅샷·배송지 실패 시 H몰로). 중복 구매 흔적은 대체하지 않는다
             alt = self._cross_alt
-            if alt is None and e.fail_reason is FailReason.OUT_OF_STOCK and self.sibling is not None:
-                # 옵션 단계에서 확정 품절 — 짝 소싱처에 같은 상품이 있으면 그쪽에서 산다(사용자 2026-11-05)
-                self.note('교차 비교', mask_text(f'이 사이트 품절({e.reason[:60]}) — 짝 소싱처만 견적한다'))
-                delegated = self._cross_compare(a, None, None)
+            if alt is None and e.fail_reason is FailReason.OUT_OF_STOCK:
+                # 옵션 단계에서 확정 품절 — 다른 소싱처에 같은 상품이 있으면 그쪽에서 산다(사용자 2026-11-05)
+                delegated = self._sold_out_fallback(a, e)
                 if delegated is not None:
                     return delegated
                 raise

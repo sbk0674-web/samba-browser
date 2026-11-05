@@ -72,6 +72,8 @@ class Source(BaseModel):
     money_in_pay: bool = False
     # 같은 상품을 같이 비교할 다른 소싱처 id(예: 무신사 ↔ 29CM) — 더 싼 쪽에서 산다(사용자 2026-09-24)
     cross_with: str | None = None
+    # 이 소싱처가 품절일 때만 같은 상품을 찾아 볼 다른 소싱처 id 목록(cross_with 다음 순서) — 품절 취소를 줄인다(사용자 2026-11-05)
+    fallback_with: list[str] = []
     # 이 소싱처는 이 결제 제공자로만 결제한다(예: ABC마트·그랜드스테이지 = naver 네이버페이, 사용자 2026-09-24).
     # 전역 허용 수단(SAMBA_ALLOWED_PAY_PROVIDERS)보다 우선한다
     pay_provider: str | None = None

@@ -8,7 +8,7 @@ await tabs.open({url:src});await sleep(3000)
 const st=await tree('브랜드 상품명 품번 가격')
 const title=(((st.match(/TITLE:\s*([^\n]+)/)||[])[1])||'').split(' - ')[0].trim()
 // 품번(모델코드) 추출: [CODE] / _CODE / 라벨형
-let model=((title.match(/\[([A-Za-z0-9\-]{5,})\]/)||[])[1])||((title.match(/_([A-Za-z]{2}\d{2,}[A-Za-z0-9]{3,})$/)||[])[1])||''
+let model=String(A.model||'').trim()||((title.match(/\[([A-Za-z0-9\-]{5,})\]/)||[])[1])||((title.match(/_([A-Za-z]{2}\d{2,}[A-Za-z0-9]{3,})$/)||[])[1])||''
 if(!model){const m=st.match(/(?:품번|모델\s*번호|상품\s*코드|스타일\s*(?:넘버|번호))\s*[:：]?\s*([A-Za-z0-9\-]{5,})/);if(m)model=m[1]}
 // 상품명 / 색상 분리
 let base=title.replace(/\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim()

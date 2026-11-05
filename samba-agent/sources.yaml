@@ -7,6 +7,7 @@ sources:
   - id: MUSINSA
     key: musinsa
     cross_with: 29CM   # 같은 상품을 29CM 에서도 비교해 싼 쪽에서 산다
+    fallback_with: [LOTTEON]  # 품절이면 롯데온(롯데백화점)에서 같은 품번을 찾아 산다(사용자 2026-11-05)
     order_prep: true   # musinsa_order_prep — 적립금 5만 미만 0원·선할인(플레이북 §7)
     coupon_download: true   # musinsa_coupon_download — 상품 페이지 '쿠폰받기'로 안 받은 쿠폰을 먼저 받는다
     pay_card_quote: true    # musinsa_pay_card_quote — 무신사페이 등록 기본 카드 견적(롯데·현대 청구할인 비교)
@@ -70,6 +71,7 @@ sources:
     easy_pay_card: 롯데카드
     # 같은 상품을 SSG(신세계몰·백화점)에서도 견적해 싼 쪽에서 산다 — 사용자 2026-10-06(나이키 II7406: 롯데온 100,490 vs SSG 79,335)
     cross_with: SSG
+    fallback_with: [MUSINSA]  # 품절이면 무신사에서 같은 품번을 찾아 산다(사용자 2026-11-05)
     buy_accounts: [buyer01]
   # 그랜드스테이지는 ABC마트와 같은 a-rt.com 흐름이다 — 스크립트(key)를 그대로 공유한다
   - id: GrandStage

@@ -76,6 +76,14 @@ def build_agents(
             sib = by_source.get(src.cross_with)
             if isinstance(sib, BuyerAgent) and sib is not ag:
                 ag.sibling = sib
+    # 품절 대체 소싱처(fallback_with) — 등록된 에이전트만 잇는다
+    for n, ag in agents.items():
+        src = reg.source_of(n)
+        if isinstance(ag, BuyerAgent) and src is not None and src.fallback_with:
+            ag.fallbacks = [
+                fb for fb in (by_source.get(x) for x in src.fallback_with)
+                if isinstance(fb, BuyerAgent) and fb is not ag
+            ]
     return agents
 
 
