@@ -1,8 +1,7 @@
 const ref=String(args.sku||'').trim()
-let pid=(ref.match(/^\d+$/)||ref.match(/^https:\/\/(?:www\.)?musinsa\.com\/products\/(\d+)(?:[?#].*)?$/)||[]);pid=pid[1]||pid[0]
+let pid=(ref.match(/^\d+$/)||ref.match(/musinsa\.com\/products\/(\d+)/)||[]);pid=pid[1]||pid[0]
 if(!pid)return{options:[],note:'invalid'}
-const S=ms=>sleep(ms),U=()=>page.url(),z=()=>S(1200),K='products/'+pid
-const oo=/order-form/.test(await U())
+const S=ms=>sleep(ms),U=()=>page.url(),z=()=>S(1200),K='products/'+pid,oo=/order-form/.test(await U())
 if(!oo&&!(await U()).includes(K)){await tabs.open({url:'https://www.musinsa.com/'+K,profile:args.profile||args.account});for(let i=0;i<15&&!(await U()).includes(K);i++)await S(1000)}
 if(!oo)await page.waitFor('구매하기',6e3).catch(()=>{})
 const PN=oo?'':String(await page.title()).replace(/\s+-\s+사이즈.*$|\s*\|\s*무신사$/,'').trim()
@@ -10,26 +9,17 @@ const safe=async(fn,d)=>{for(let i=0;i<3;i++){try{return await fn()}catch{await 
 text=async s=>{const t=(await page.get(s?{selector:s}:{})).tree;return t.slice(t.indexOf('PAGE TEXT'))},
 it=async()=>(await safe(()=>page.get({interactive:true}),{tree:''})).tree.split('\n'),
 has=(L,re)=>L.some(l=>re.test(l))
-const rf=async()=>{for(let i=0;i<3&&/옵션 정보를 불러오지 못/.test(await safe(()=>text(),''));i++){await safe(()=>page.clickText('새로고침',0));await S(2000)}}
+const rf=async()=>{for(let i=0;i<3&&/옵션 정보를 불러오지 못/.test(await safe(text,''));i++){await safe(()=>page.clickText('새로고침',0));await S(2000)}}
 let ln=await it()
-const BUY=/button "(?![^"]*장바구니)[^"]*구매하기/,OPN=/선택 목록 열기/
-const ID=l=>+l.match(/^\[(\d+)\]/)[1],ck=i=>page.click(i),idL=(a,re)=>{const l=a.find(x=>re.test(x));return l&&ID(l)},
+const BUY=/button "(?![^"]*장바구니)[^"]*구매하기/,OPN=/선택 목록 열기/,ID=l=>+l.match(/^\[(\d+)\]/)[1],ck=i=>page.click(i),idL=(a,re)=>{const l=a.find(x=>re.test(x));return l&&ID(l)},
 CL=/선택 목록 닫기/,DEL=/옵션 삭제/,CM=/^\[(\d+)\] clickable "([^"]+)"/,
-o1=async L=>{const o=idL(L,OPN);if(o){await ck(o);await z()}}
-const hs=has(ln,/선택 목록 (열기|닫기)/)
+o1=async L=>{const o=idL(L,OPN);if(o){await ck(o);await z()}},hs=has(ln,/선택 목록 (열기|닫기)/)
 let op=[],cho='',pk=!hs
 if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,sold_out:true,note:'soldout'}
-const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A)
-const nz=s=>s.toLowerCase().replace(/[\s_·-]/g,'').replace(/xxl/g,'2xl'),w=nz(A)
-const we=w.replace(/블랙|화이트|그레이|베이지|네이비/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy'})[k])
-const cw=we.match(/black|white|grey|beige|navy/g)||[]
-const ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))}
-const osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[]
-const KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz]
-const cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
+const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.toLowerCase().replace(/[\s_·-]/g,'').replace(/xxl/g,'2xl'),w=nz(A),we=w.replace(/블랙|화이트|그레이|베이지|네이비/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy'})[k]),cw=we.match(/black|white|grey|beige|navy/g)||[],ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))},osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[],KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz],cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
 if(p.length<2||!c||!y||!ch(c))return 0
 return y===osz||y==={s:'sm',m:'md',l:'lg'}[osz]?300:0}
-const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러(\(Color\))?)"/i,SRE=/textbox "(사이즈|size)"/i,
+const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러)/i,SRE=/textbox "(사이즈|size)"/i,
 si=L=>L.findIndex(l=>SRE.test(l)),af=L=>L.slice(si(L)+1),
 avl=L=>af(L).filter(l=>/clickable "[^"]*(발송 예정|도착보장|도착 예정)/.test(l)).map(ID),
 AR=/clickable "(.*(?:발송 예정|도착보장|도착 예정)|.*\(품절\))"/
@@ -118,6 +108,7 @@ cho=R[best].name
 let l2=await it()
 for(let q=0;q<6&&!(pk=has(l2,DEL));q++){await z();l2=await it()}}}
 if(!pk)return{options:op,note:'nopick'}
+for(let W=+args.qty,k=0,L,i;W>1&&!oo&&k<12;k++){L=await it();i=L.findIndex(l=>/x value="\d/.test(l));if(i<0||+L[i].split('"')[1]>=W)break;await ck(ID(L[i+1]));await z()}
 if(!oo){
 const bi=idL(ln,BUY)
 bi?await ck(bi):await page.clickText('구매하기',0)
@@ -127,9 +118,7 @@ let t=''
 for(let i=0;i<12;i++){await S(1000)
 t=await safe(()=>text('body'),'')
 if(/주문 상품/.test(t)&&/총 결제 금액/.test(t))break}
-const cm=t.match(/총 결제 금액\s*(?:\d+%)?\s*([\d,]+)\s*원/),cost=cm?+cm[1].replace(/,/g,''):null
-const tl=t.slice(t.indexOf('주문 상품'))
-const sm=tl.match(/(\S+(?:\s*·\s*\S+)+)\s*\/\s*\d+개/)||t.match(/주문 상품 \d+개\s*(.+?)\s*\/\s*\d+개/)
+const cm=t.match(/총 결제 금액\s*(?:\d+%)?\s*([\d,]+)\s*원/),cost=cm?+cm[1].replace(/,/g,''):null,tl=t.slice(t.indexOf('주문 상품')),sm=tl.match(/(\S+(?:\s*·\s*\S+)+)\s*\/\s*\d+개/)||t.match(/주문 상품 \d+개\s*(.+?)\s*\/\s*\d+개/)
 let sel=sm?sm[1]:''
 if(sm&&/·/.test(sm[1])){const b=tl.slice(0,tl.indexOf(sm[0])).trim().split(/\s+/),e=[];for(let i=b.length-1;i>=0&&!/_|^·$/.test(b[i])&&nz(b[i])&&ch(b[i]);i--)e.unshift(b[i]);if(e.length)sel=e.concat(sm[1]).join(' ')}
 else if(sel){const b=sel.split(/\s+/),e=[];for(let i=b.length-1;i>=0&&(TK.includes(b[i].toLowerCase())||ch(b[i]));i--)e.unshift(b[i]);sel=e.length?e.join(' '):b[b.length-1]}
@@ -137,7 +126,6 @@ const pn=(A.match(/[A-Z][A-Z0-9]{5,}\s*$/)||[])[0]
 if(sel&&pn&&!sel.includes(pn)&&(sel.toLowerCase().match(/[a-z0-9가-힣]+/g)||[0]).every(x=>TK.includes(x)))sel=A
 if(cs(sel.split(/\s+/).pop()))sel+=' '+A
 if(KM&&nz(sel)===KM){sel+=' '+A;op=op.map(o=>nz(o)===KM?o+' '+A:o)}
-const s0=t.lastIndexOf('결제 수단'),ms=t.slice(s0,s0+400)
-const methods='무신사머니 무신사페이 토스페이 카카오페이 페이코 네이버페이 카드'.split(' ').filter(n=>ms.includes(n))
+const s0=t.lastIndexOf('결제 수단'),ms=t.slice(s0,s0+400),methods='무신사머니 무신사페이 토스페이 카카오페이 페이코 네이버페이 카드'.split(' ').filter(n=>ms.includes(n))
 if(!op.length)op=sel?[sel.split(/\s+/).pop()]:[]
 return{product_name:PN,cost,options:op,methods,selected:sel,chosen:cho||op[0]||'',qty:+(tl.match(/\/\s*(\d+)개/)||[])[1]||null}
