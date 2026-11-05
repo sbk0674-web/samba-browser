@@ -161,3 +161,13 @@ def test_verifier_result_requires_paid_order_identity(actual, status):
     a = assignment().model_copy(update={'expected': expected, 'handoff': {'selected': PINK}})
     result = v._verify(a)
     assert result.status == status
+
+
+def test_numeric_free_order_matches_detail_with_color_or_letter():
+    # 실기 2026-11-05: 무신사 '260MM FREE' ↔ 'BLACK · 260MM', 롯데온 '260MM FREE' ↔ '260MM(L)'
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    assert paid_option_matches('260MM FREE', 'BLACK · 260MM')
+    assert paid_option_matches('260MM FREE', '260MM(L)')
+    assert not paid_option_matches('260MM FREE', 'BLACK · 250MM')
+    assert not paid_option_matches('블랙 260', '화이트 · 260')

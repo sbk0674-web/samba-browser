@@ -39,6 +39,12 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
+    # 주문 옵션이 숫자 사이즈(+FREE)뿐이면 색상 정보가 없다 — 상세에 그 숫자 사이즈가 있으면 같다
+    # (실기 2026-11-05 무신사 4295 '260MM FREE' ↔ 'BLACK · 260MM', 롯데온 4250 '260MM FREE' ↔ '260MM(L)')
+    nums = lambda s: set(re.findall(r'(?<!\d)(\d{2,3})(?=\s*(?:mm)?(?:\(|\b|$))', str(s or '').casefold()))
+    loose = {'free', 'f', 'one', 'onesize', '프리', 'fr'}
+    if nums(wanted) and all(re.fullmatch(r'\d{2,3}(?:mm)?', t) or t in loose for t in want) and nums(wanted) <= nums(actual):
+        return True
     want_set = set(want) | {t.split('(')[0] for t in want if '(' in t}
     if got and all(t in want_set for t in got) and any(_SIZE_ONLY.fullmatch(t) for t in got):
         return True
