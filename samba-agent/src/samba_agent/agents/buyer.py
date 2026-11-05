@@ -1169,8 +1169,9 @@ _CLOSE_LOTTEON_DISCOUNT_JS = (
     "  if (!d) return i ? 'closed' : 'none'\n"
     "  const ids = [...T.matchAll(/^\\[(\\d+)\\] button \"닫기\"/gm)].map(m => parseInt(m[1])).filter(n => n > parseInt(d[1]))\n"
     "  if (!ids.length) return 'no-close-button'\n"
-    "  await page.click(Math.min(...ids))\n"
-    "  await sleep(800)\n"
+    # 합성 클릭으로는 이 창이 안 닫혔다(실기 2026-11-05 15시 'still-open' 반복) — 실제 마우스 클릭을 먼저 쓴다
+    "  try { await page.clickNative(Math.min(...ids)) } catch (e) { await page.click(Math.min(...ids)) }\n"
+    "  await sleep(1000)\n"
     "}\n"
     "return 'still-open'"
 )
