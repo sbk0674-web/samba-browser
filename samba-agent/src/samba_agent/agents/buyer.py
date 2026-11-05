@@ -2492,7 +2492,9 @@ class BuyerAgent(AgentBase):
         후보가 없거나 모두 안 맞으면 사람에게 — 신세계몰이 아닌 곳에서는 사지 않는다.
         """
         source = source_of(self.spec.name)
-        model = model_code_of(a.order.sku)
+        # 대체 판매처로 넘긴 작업은 품번을 옵션으로 준다 — 상품명의 첫 코드가 다른 몰 상품번호(LE…)일 수 있다
+        # (실기 2026-11-05 750467336257563: 'LE1222320716' 으로 신세계몰을 찾아 없다고 멈췄다, 품번은 NS86R62A)
+        model = str(a.options.get('model') or '').strip() or model_code_of(a.order.sku)
         if not model:
             raise AgentFailure(
                 'needs_ai',
