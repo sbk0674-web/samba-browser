@@ -391,7 +391,13 @@ class RecorderAgent(AgentBase):
                 if site_of(a).upper() == 'LOTTEON':
                     detail['reward_verified'] = True
         if site_of(a).upper() == 'LOTTEON' and naver and detail.get('reward_verified') is not True:
-            raise AgentFailure('needs_ai', '롯데온 실제 적립 미확인 — 0원으로 추정하지 않고 원가 확정 보류, 재결제 금지', FailReason.VERIFY_MISMATCH)
+            if not detail.get('payment_verified'):
+                raise AgentFailure('needs_ai', '롯데온 실제 적립 미확인 — 0원으로 추정하지 않고 원가 확정 보류, 재결제 금지', FailReason.VERIFY_MISMATCH)
+            # 네이버 결제창에서 카드·네이버 적립은 확인했고 롯데온 자체 적립만 못 읽었다 — 롯데온 적립 0원(원가를 높게 잡는 쪽)으로
+            # 기록하고 메모에 남긴다. 기록을 멈추면 결제된 주문이 미이행으로 남아 다시 살 위험이 더 크다
+            # (실기 2026-11-05 2026110455EE93·2026110557B626: 결제 뒤 기록에서 멈춰 사람이 넣었다)
+            detail = {**detail, 'reward': 0}
+            self.note('롯데온 적립', '롯데온 자체 적립 미확인 — 0원으로 기록(네이버 적립만 반영)')
         if naver and not detail.get('payment_verified'):
             raise AgentFailure('needs_ai', '네이버 실제 결제수단·적립 미확인 — 원가 확정 보류, 재결제 금지', FailReason.VERIFY_MISMATCH)
         cost = actual_cost(detail)
