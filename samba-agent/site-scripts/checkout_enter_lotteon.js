@@ -35,7 +35,7 @@ const Q=async(q,re)=>(await page.get({query:q})).tree.split('\n').filter(l=>re.t
 const hi=ls=>ls.length?Math.max(...ls.map(l=>parseInt(l.slice(1)))):-1;
 const disc=async()=>{const t=(await page.get({query:'주문할인금액'})).tree;const m=(t.split('PAGE TEXT')[1]||t).match(/주문할인금액\s*할인변경\s*(-?[\d,]+)원/);return m?parseInt(m[1].replace(/[,-]/g,''),10):0;};
 if(!(await disc())){
-const hb=await page.idOf('할인변경');if(hb<0&&KP)return{ok:false,error:'카카오페이 할인변경 버튼 없음'};
+const hb=await page.idOf('할인변경');var nd=hb<0;
 if(hb>=0){await page.click(hb);await sleep(2000);
 const rs=(KP?await Q(KK,new RegExp('radio "'+KK+'\\d+%')):LC?await Q('롯데카드',/radio "롯데카드\s*\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
 const mx=rs.length?Math.max(...rs.map(x=>x.id)):0;const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
@@ -48,7 +48,7 @@ await page.click(b);await sleep(2500);
 const ap=hi(await Q('적용하기',/button "적용하기"/));if(ap>0){await page.click(ap);await sleep(3500);}
 }}
 }
-if((KP||typeof want!=='undefined')&&!(await disc()))return{ok:false,error:(KP?KK+' 즉시할인':LC?'롯데카드 즉시할인':'장바구니 쿠폰')+' 안 붙음'};
+if((KP&&!nd||typeof want!=='undefined')&&!(await disc()))return{ok:false,error:(KP?KK+' 즉시할인':LC?'롯데카드 즉시할인':'장바구니 쿠폰')+' 안 붙음'};
 }
 await page.clickText(mp);
 method=mp;
