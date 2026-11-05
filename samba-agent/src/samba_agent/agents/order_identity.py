@@ -32,6 +32,9 @@ def _tokens(value: object) -> list[str]:
 def paid_option_matches(wanted: object, actual: object) -> bool:
     # 상세의 낱말이 모두 주문 옵션에 있고 그중 사이즈가 있으면 같다 — 주문에만 붙은 수량·품번은 무시한다
     # (실기 2026-11-03 4073 'LYONS BLUE 1개 100' ↔ 'LYONS BLUE · 100', 4039 '… 095(L) NJ3NR86A')
+    # 판매 옵션의 '상세 이미지 참조'·'상세페이지 참고' 는 색상 자리를 비운 안내 글자다 — 값이 아니다
+    # (실기 2026-11-05 4298 '상세 이미지 참조 L' ↔ 'BLACK · L', 11-04 4153·4162·4202·4261 같은 꼴)
+    wanted = re.sub(r'상세\s*(?:이미지|페이지)?\s*(?:참조|참고)', ' ', str(wanted or '')).strip()
     got, want = _tokens(actual), _tokens(wanted)
     # 낱말이 똑같으면 같은 옵션이다 — 'ONE'(원사이즈)처럼 사이즈 꼴이 아닌 값도(실기 2026-11-03 4111 'LIGHT BEIGE ONE 1개' ↔ 'LIGHT BEIGE · ONE')
     if got and sorted(got) == sorted(want):

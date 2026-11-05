@@ -171,3 +171,12 @@ def test_numeric_free_order_matches_detail_with_color_or_letter():
     assert paid_option_matches('260MM FREE', '260MM(L)')
     assert not paid_option_matches('260MM FREE', 'BLACK · 250MM')
     assert not paid_option_matches('블랙 260', '화이트 · 260')
+
+
+def test_detail_reference_placeholder_is_not_an_option_value():
+    # 실기 2026-11-05 4298: '상세 이미지 참조 L' ↔ 'BLACK · L'
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    assert paid_option_matches('상세 이미지 참조 L', 'BLACK · L')
+    assert paid_option_matches('상세페이지 참고 270', 'BLACK · 270')
+    assert not paid_option_matches('상세 이미지 참조 M', 'BLACK · L')
