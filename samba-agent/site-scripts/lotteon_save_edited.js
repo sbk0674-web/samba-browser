@@ -1,6 +1,6 @@
 const A=args||{};const name=String(A.name||'').trim().replace(/\*/g,'O');const addr=String(A.address||'').trim();
 if(A.tab)await tabs.switch(String(A.tab));
-const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=\S+)?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',value:m[4]}));
+const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=(\S+))?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',name:m[4]||'',value:m[5]}));
 const dl=async()=>pe((await page.get({selector:'[role=dialog]',interactive:true})).tree);
 const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&&e.text==='저장').pop();
 if(!s)return{ok:false,note:'저장 버튼 없음'};
@@ -25,7 +25,8 @@ re=/(\S+)\s+(?:기본배송지\s+)?\[(\d{5})\]\s+(.*?)\s+01\d-[\d*]{3,4}-[\d*]{4
 while((m=re.exec(t))){out.push({name:nm(m[1]),seg:nm('['+m[2]+']'+m[3])});}
 return hd?out.slice(1):out;};
 const generic=x=>/^(기본)?배송지$/.test(x);
-const getRadios=L=>{const out=[];L.forEach((e,i)=>{if(e.role!=='radio')return;
+// 주문할인혜택 창(할인 라디오)이 같이 열려 있으면 배송지 라디오와 섞여 순서가 어긋났다(2026-11-05) — 배송지 라디오만 센다
+const getRadios=L=>{const out=[];L.forEach((e,i)=>{if(e.role!=='radio'||(e.name&&e.name!=='deliveryAddress'))return;
 let n=null;
 if(!generic(e.text)){n=nm(e.text);}else{for(let j=i+1;j<L.length;j++){const x=L[j];if(x.role==='radio'||x.role==='button')break;if(x.role==='label'&&!generic(x.text)){n=nm(x.text);break;}}}
 if(n===null)return;
