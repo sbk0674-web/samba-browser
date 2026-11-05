@@ -1,7 +1,9 @@
 const A=args||{};const name=String(A.name||'').trim().replace(/\*/g,'O');const addr=String(A.address||'').trim();
 if(A.tab)await tabs.switch(String(A.tab));
 const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=(\S+))?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',name:m[4]||'',value:m[5]}));
-const DSEL='[role=dialog]:has(input[name=deliveryAddress])';
+const DSEL='[role=dialog]';
+// 화면 요소는 150개까지만 나온다 — 할인 창·배송지 220여 줄이 함께면 배송지 라디오가 잘렸다(2026-11-05 라디오0). 라디오는 이름(deliveryAddress)으로 따로 읽는다
+const RQ=async()=>pe((await page.get({query:'deliveryAddress',interactive:true})).tree).filter(e=>e.role==='radio'&&e.name==='deliveryAddress');
 const dl=async()=>pe((await page.get({selector:DSEL,interactive:true})).tree);
 const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&&e.text==='저장').pop();
 if(!s)return{ok:false,note:'저장 버튼 없음'};
@@ -36,15 +38,14 @@ out.push({id:e.id,text:n});});return out;};
 let r=null,found=0,second=null,dbg='';
 for(let k=0;k<8&&!r;k++){
 if(k)await sleep(1000);
-const L0=await dl();
-const radios=getRadios(L0);
+const radios=(await RQ()).map(e=>({id:e.id,text:generic(e.text)?null:nm(e.text)}));
 const tx=String((await page.get({selector:DSEL})).tree).split('PAGE TEXT:')[1]||'';
 const rows=parseRows(tx);
 // 원인 확인용(개인정보 없이 개수·일치 여부만) — 2026-11-05 '저장한 배송지 줄 없음' 반복
 dbg=`라디오${radios.length}·줄${rows.length}·이름같은줄${rows.filter(x=>x.name===norm).length}·라디오이름일치${radios.filter((x,i)=>rows[i]&&x.text===rows[i].name).length}`;
 const cands=[];
 for(let i=0;i<radios.length&&i<rows.length;i++){
-if(radios[i].text!==rows[i].name)continue;
+if(radios[i].text!==null&&radios[i].text!==rows[i].name)continue;
 if(rows[i].name===norm){found++;if(okRow(rows[i].seg))cands.push(radios[i]);else if(i===1&&!road)second=radios[i];}
 }
 if(cands.length)r=cands[0];
@@ -54,9 +55,8 @@ else if(second&&k>=2)r=second;
 if(!found)return{ok:false,note:'저장한 배송지 줄 없음('+dbg+')'};
 if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
 await page.click(r.id);await sleep(600);
-const L1=await dl();
-if(!L1.some(e=>e.id===r.id&&e.value==='on'))return{ok:false,note:'배송지 줄 선택 안 됨'};
-const ok=L1.filter(e=>e.role==='button'&&/^(선택완료|확인)$/.test(e.text))[0];
+if(!(await RQ()).some(e=>e.id===r.id&&e.value==='on'))return{ok:false,note:'배송지 줄 선택 안 됨'};
+const ok=pe((await page.get({query:'선택완료'})).tree).concat(pe((await page.get({query:'확인'})).tree)).filter(e=>e.role==='button'&&/^(선택완료|확인)$/.test(e.text))[0];
 if(!ok)return{ok:false,note:'확인 버튼 없음'};
 await page.click(ok.id);
 try{await page.waitFor('빠른 선물',8000);}catch(e){await sleep(1800);}
