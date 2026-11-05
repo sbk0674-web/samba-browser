@@ -2,8 +2,8 @@ const A=args||{};const name=String(A.name||'').trim().replace(/\*/g,'O');const a
 if(A.tab)await tabs.switch(String(A.tab));
 const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=(\S+))?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',name:m[4]||'',value:m[5]}));
 const DSEL='[role=dialog]';
-// 화면 요소는 150개까지만 나온다 — 할인 창·배송지 220여 줄이 함께면 배송지 라디오가 잘렸다(2026-11-05 라디오0). 라디오는 이름(deliveryAddress)으로 따로 읽는다
-const RQ=async()=>pe((await page.get({query:'deliveryAddress',interactive:true})).tree).filter(e=>e.role==='radio'&&e.name==='deliveryAddress');
+// 화면 요소는 150개까지만 나온다 — 할인 창·배송지 220여 줄이 함께면 배송지 라디오가 잘렸다(2026-11-05 라디오0). '배송지' 글자로 걸러 읽고 name=deliveryAddress 라디오만 쓴다(앞쪽 줄이면 충분 — 덮어쓰는 칸은 둘째 줄)
+const RQ=async()=>pe((await page.get({query:'배송지',interactive:true})).tree).filter(e=>e.role==='radio'&&e.name==='deliveryAddress');
 const dl=async()=>pe((await page.get({selector:DSEL,interactive:true})).tree);
 const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&&e.text==='저장').pop();
 if(!s)return{ok:false,note:'저장 버튼 없음'};
