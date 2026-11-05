@@ -255,3 +255,19 @@ new (Object.getPrototypeOf(async function(){}).constructor)('args','tabs','page'
     value = json.loads(result.stdout)
     assert value['reward'] == amount
     assert value['reward_verified'] is verified
+
+
+@pytest.mark.parametrize('expected,ok', [(59300, True), (59250, True), (59400, False), (59200, False)])
+def test_naver_amount_allows_only_small_cheaper_gap(expected, ok):
+    # 주문서 72,240 → 네이버 72,190(50원 싸게) 은 같은 결제(실기 2026-11-05). 비싸거나 100원 넘게 다르면 멈춘다
+    harness = r"""
+const page={get:async options=>({tree:options&&options.selector?'[1] radio "현대카드" value="on"':'PAGE TEXT: 네이버페이 결제금액 59,250원 포인트 사용이 불가한 가맹점입니다 포인트 혜택 N592원 적립'}),
+idOf:async text=>text==='동의하고 결제하기'?55:-1,click:async()=>{}};
+new (Object.getPrototypeOf(async function(){}).constructor)('page','sleep','EXPECTED_AMOUNT',process.argv[1])(
+page,async()=>{},Number(process.argv[2])).then(result=>process.stdout.write(JSON.stringify(result)));
+"""
+    completed = subprocess.run(
+        [shutil.which('node'), '-e', harness, NAVER_PREPARE_JS, str(expected)],
+        capture_output=True, text=True, encoding='utf-8', check=True,
+    )
+    assert json.loads(completed.stdout)['ok'] is ok

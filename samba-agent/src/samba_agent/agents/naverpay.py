@@ -89,10 +89,14 @@ const noPoints=/포인트 사용이 불가한 가맹점|포인트 사용 불가|
 const usedPoints=text.match(/(?:포인트 사용|사용 포인트)\s*([\d,]+)원/);
 if(!noPoints&&(!usedPoints||num(usedPoints[1])!==0))return {ok:false,error:'네이버 포인트 사용 여부 미확인 — 결제하지 않음'};
 const amount=text.match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);
-if(!amount||num(amount[1])!==EXPECTED_AMOUNT)return {ok:false,error:'네이버 결제액 불일치'};
+// 네이버 결제창이 주문서보다 조금 싸게 보이는 일이 있다(실기 2026-11-05 롯데온 2026110557B626: 주문서 72,240 → 네이버 72,190).
+// 더 싼 쪽으로 100원 안쪽 차이만 같은 결제로 본다 — 비싸거나 크게 다르면 다른 주문일 수 있어 멈춘다
+const shown=amount?num(amount[1]):0;
+const gap=EXPECTED_AMOUNT-shown;
+if(!amount||gap<0||gap>100)return {ok:false,error:'네이버 결제액 불일치',shown_amount:shown,expected_amount:EXPECTED_AMOUNT};
 const reward=text.match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);
 if(!reward)return {ok:false,error:'현대카드 네이버 적립 미확인'};
 const agree=await page.idOf('동의하고 결제하기');
 if(agree<0)return {ok:false,error:'네이버 결제 동의 버튼 미확인'};
-return {ok:true,agree,card_issuer:'현대카드',payment_kind:'card',naver_reward:num(reward[1]),payment_verified:true};
+return {ok:true,agree,card_issuer:'현대카드',payment_kind:'card',naver_reward:num(reward[1]),naver_amount:shown,payment_verified:true};
 """
