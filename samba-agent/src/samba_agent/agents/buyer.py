@@ -4865,7 +4865,9 @@ class BuyerAgent(AgentBase):
                 FailReason.UNKNOWN,
             )
         self._fill_phone(applied)
-        if applied.get('edited'):
+        # 수정 칸 저장 스크립트(<key>_save_edited)는 롯데온만 있다 — 무신사는 배송지 스크립트가 수정까지 저장한다
+        # (실기 2026-11-05 750492699099163: 'no saved script named musinsa_save_edited' 로 무신사 구매가 멈췄다)
+        if applied.get('edited') and source_of(self.spec.name).key == 'lotteon':
             self._save_edited_shipping(shipping, {**args, 'gift': bool(applied.get('gift'))})
             self.note('배송지', '목록 둘째 칸을 덮어씀(새 배송지 추가 없음)')
         else:
