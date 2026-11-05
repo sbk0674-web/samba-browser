@@ -3,7 +3,8 @@ if(A.tab)await tabs.switch(String(A.tab));
 const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=(\S+))?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',name:m[4]||'',value:m[5]}));
 const DSEL='[role=dialog]';
 // 화면 요소는 150개까지만 나온다 — 할인 창·배송지 220여 줄이 함께면 배송지 라디오가 잘렸다(2026-11-05 라디오0). '배송지' 글자로 걸러 읽고 name=deliveryAddress 라디오만 쓴다(앞쪽 줄이면 충분 — 덮어쓰는 칸은 둘째 줄)
-const RQ=async()=>pe((await page.get({query:'배송지',interactive:true})).tree).filter(e=>e.role==='radio'&&e.name==='deliveryAddress');
+let RQL='';
+const RQ=async()=>{const t=String((await page.get({query:'배송지',interactive:true})).tree||'');const ls=t.split('\n');const D=pe(String((await page.get({selector:DSEL,interactive:true})).tree||''));const rc={};D.forEach(e=>{const k=e.role+(e.role==='button'||e.role==='radio'?':'+e.text.slice(0,6):'');rc[k]=(rc[k]||0)+1});RQL=ls.filter(l=>/radio/.test(l)).slice(0,3).join(' | ').slice(0,120)+' 총'+ls.length+' 창'+JSON.stringify(rc).slice(0,300);return pe(t).filter(e=>e.role==='radio'&&e.name==='deliveryAddress');};
 const dl=async()=>pe((await page.get({selector:DSEL,interactive:true})).tree);
 const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&&e.text==='저장').pop();
 if(!s)return{ok:false,note:'저장 버튼 없음'};
@@ -35,10 +36,10 @@ if(!generic(e.text)){n=nm(e.text);}else{for(let j=i+1;j<L.length;j++){const x=L[
 if(n===null)return;
 if(!generic(e.text)&&!L.slice(i+1,i+5).some(x=>x.role==='button'&&x.text==='수정'))return;
 out.push({id:e.id,text:n});});return out;};
-let r=null,found=0,second=null,dbg='';
+let r=null,found=0,second=null,dbg='',radios0=false;
 for(let k=0;k<8&&!r;k++){
 if(k)await sleep(1000);
-const radios=(await RQ()).map(e=>({id:e.id,text:generic(e.text)?null:nm(e.text)}));
+const radios=(await RQ()).map(e=>({id:e.id,text:generic(e.text)?null:nm(e.text)}));radios0=radios.length>0;
 const tx=String((await page.get({selector:DSEL})).tree).split('PAGE TEXT:')[1]||'';
 const rows=parseRows(tx);
 // 원인 확인용(개인정보 없이 개수·일치 여부만) — 2026-11-05 '저장한 배송지 줄 없음' 반복
@@ -52,6 +53,8 @@ if(cands.length)r=cands[0];
 // 지번 주소('…면 …리 123')는 롯데온이 도로명으로 바꿔 저장해 글자로 못 맞춘다(실기 2026-11-03 4101) — 방금 덮어쓴 둘째 줄이 이름까지 같으면 그 줄이다
 else if(second&&k>=2)r=second;
 }
+// 저장하면 목록 창 없이 바로 주문서로 돌아가는 화면이 생겼다(2026-11-05 라디오0) — 주문서 배송지 칸을 직접 읽어 되돌려 준다
+if(!found&&!radios0){const tx0=(String((await page.get({})).tree).split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ');const m0=tx0.match(/(?:받는 분|배송지)\s+(?:배송지\s+)?(.{0,120}?)\s*(?:변경|배송지 선택하기|배송지 수정하기)/);const seg0=m0?nm(m0[1]):'';if(seg0&&seg0.includes(norm)&&okRow(seg0)){if(A.gift){let q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');if(q&&q.value!=='on'){await page.click(q.id);await sleep(900);q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');}if(!q||q.value!=='on')return{ok:false,note:'빠른 선물 못 켬'};return{ok:true,name,address:addr,gift:true,quick_gift:true};}return{ok:true,name,address:m0[1].replace(/^\[\d{5}\]\s*/,'').replace(/01\d[-\d*]+.*/,'').trim()};}}
 if(!found)return{ok:false,note:'저장한 배송지 줄 없음('+dbg+')'};
 if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
 await page.click(r.id);await sleep(600);

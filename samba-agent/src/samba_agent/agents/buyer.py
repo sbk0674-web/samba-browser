@@ -2244,10 +2244,23 @@ class BuyerAgent(AgentBase):
             args['required_seller'] = (
                 source.required_seller
             )  # 롯데온: 롯데백화점 판매 상품만(사용자 2026-09-27)
+        # 선물/까대기는 정가를 알아야 정한다 — 스냅샷(선물 주문서)을 열기 전에 정가를 먼저 읽는다
+        # (실기 2026-11-05 스케쳐스: 선물로 정한 뒤 정가 90,300 을 읽어 104,800 판매 상품을 고객에게 보냈다)
+        pre_snap: dict[str, object] = {}
+        if source.gift_unless_poison and source.normal_price and not is_poison_seller(a.order.seller):
+            cache: dict[str, object] = getattr(self, '_pre_normal', {})
+            key = f'{a.order.order_no}|{a.order.product_url}'
+            if key not in cache:
+                tmp: dict[str, object] = {}
+                self._apply_normal_price(a, account, tmp)
+                cache[key] = tmp.get('normal_price')
+                self._pre_normal = cache
+            if cache.get(key):
+                pre_snap['normal_price'] = cache[key]
         if (
             source.gift_unless_poison
             and not is_poison_seller(a.order.seller)
-            and self.order_type_of(a.order) == 'gift'
+            and self.order_type_of(a.order, pre_snap or None) == 'gift'
         ):
             # 롯데온: 포이즌 외에는 '선물하기' 주문서로 들어간다(사용자 2026-09-27). 제주·도서산간·배대지처럼 직배·까대기로
             # 판정된 주문은 바로구매 주문서로 연다(실기 2026-09-30 제주 선물 불가)
@@ -2256,7 +2269,7 @@ class BuyerAgent(AgentBase):
             source.gift_unless_poison
             and not is_poison_seller(a.order.seller)
             and self._shipping_fn is not None
-            and self.order_type_of(a.order) == 'direct'
+            and self.order_type_of(a.order, pre_snap or None) == 'direct'
         ):
             # 롯데온 직배 주문서: 기본배송지가 판매자 배송 불가 지역이면 1단계 '계속하기'가 막힌다 — 받는 곳을 미리 알려 줘
             # 스냅샷이 '변경' 목록에서 먼저 고르게 한다(실기 2026-10-07 아디다스 KA4340). 이름·주소만 넘긴다
@@ -4471,6 +4484,11 @@ class BuyerAgent(AgentBase):
                 if is_poison_seller(order.seller) or self._is_forwarder(order)
                 else 'gift'
             )
+            # 선물(고객 직배)은 고객 결제액이 소싱처 정가보다 낮을 때만 — 정가 ≤ 결제액이면 정가 택을 보고 환불 요청이 오니
+            # 사무실(까대기)로 받는다(사용자 2026-11-05: 스케쳐스 정가 90,300 상품을 104,800 에 팔고 고객에게 선물로 보냄)
+            normal0 = _as_float(snap.get('normal_price')) if snap else 0.0
+            if forced == 'gift' and normal0 > 0 and order.sale_price > 0 and normal0 <= order.sale_price:
+                forced = 'kkadaegi'
             if forced == 'gift' and self._gift_blocked_region(order):
                 # 롯데온: '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30) — 그 주소는 직배로 산다
                 forced = 'direct'
