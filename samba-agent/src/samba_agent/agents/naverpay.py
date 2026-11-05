@@ -88,7 +88,8 @@ for(let attempt=0;attempt<8&&!await chosen();attempt++){
 }
 if(!await chosen())return {ok:false,error:'현대카드 선택 확인 불가 — 머니 결제 금지'};
 tree=await get();const text=body(tree);
-const noPoints=/포인트 사용이 불가한 가맹점|포인트 사용 불가|보유 포인트\s*0원/.test(text);
+// 모바일 결제창은 '포인트 사용 가능 0원'으로 보여 준다 — 쓸 수 있는 포인트가 0이면 포인트는 안 쓰인다(ABC 2026-11-06)
+const noPoints=/포인트 사용이 불가한 가맹점|포인트 사용 불가|보유 포인트\s*0원|포인트 사용 가능\s*0원/.test(text);
 const usedPoints=text.match(/(?:포인트 사용|사용 포인트)\s*([\d,]+)원/);
 if(!noPoints&&(!usedPoints||num(usedPoints[1])!==0))return {ok:false,error:'네이버 포인트 사용 여부 미확인 — 결제하지 않음'};
 const amount=text.match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);
