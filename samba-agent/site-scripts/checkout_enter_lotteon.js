@@ -92,7 +92,7 @@ const LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/;for(let k=0;k<4;k++)
 let T='',h=0;for(let w=0;w<10;w++){await sleep(1e3);T=String((await page.get({})).tree||'');if(LP.test(T)||DN.test(T))break}
 if(LP.test(T)||DN.test(T))break;
 const Z=async(q,r)=>(await page.get({query:q})).tree.split('\n').filter(l=>r.test(l)).map(l=>parseInt(l.slice(1)));
-if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const b=await Z('닫기',/button "닫기"/);if(b.length){await page.click(Math.max(...b));await sleep(2000);h=1}}
+if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const b=await Z('닫기',/button "닫기"/);if(b.length){await page.clickNative(Math.max(...b));await sleep(2000);h=1}}
 if(/OVERLAY: "[^"]*할인 결제수단으로만/.test(T)){const b=await Z('적용하기',/button "적용하기"/);if(b.length){await page.click(Math.max(...b));await sleep(2500);h=1}}
 if(/OVERLAY: "혜택이 변경/.test(T)){await sleep(2500);continue}
 if(!h)break;
