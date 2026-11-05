@@ -649,6 +649,12 @@
     ]
   },
   {
+    "name": "lotteon_find_product",
+    "host": "",
+    "description": "품번(model)으로 롯데온을 검색하고 판매처를 롯데백화점(cpCode=le)으로 걸러, 결과에 그 품번이 보이면 첫 롯데백화점 상품(LE…)의 {found, product_url, name, model} 을 돌려준다. 없으면 found:false. 결제·장바구니는 누르지 않는다.",
+    "params": []
+  },
+  {
     "name": "lotteon_normal_price",
     "host": "lotteon.com",
     "description": "롯데온 상품 정가(할인전 가격, 없으면 판매가) — 직배/까대기 판정용. 반환 {normal_price, sale_price, note}",
