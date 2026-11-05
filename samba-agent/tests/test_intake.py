@@ -649,3 +649,19 @@ def test_twin_order_no_는_구분자만_바꾼다():
     assert twin_order_no('20261025100544087:003') == '20261025100544087-003'
     assert twin_order_no('746941046456350') is None
     assert twin_order_no('A-SN241012963') is None
+
+
+def test_kakao_unapproved_requeues_without_kakao(tmp_path):
+    # 사용자 2026-11-05: 카카오 승인을 안 했다고 방치하지 말고 다른 수단으로 다시 산다
+    reg = Registry.load(DEFAULT_ROOT)
+    q = JobQueue(tmp_path / 'jobs.sqlite')
+    slack = _Slack()
+    intake = Intake(_FakeWave([wave_order('K10', source='LOTTEON')]), q, reg, slack.post_new, slack.post_line, days=7)
+    intake.run_once()
+    job = q.get('K10')
+    q._db.execute('UPDATE jobs SET attempts=1 WHERE id=?', (job.id,))
+    q.finish(job.id, 'needs_ai', error='kakao_unapproved')
+    intake.run_once()
+    again = q.get('K10')
+    assert again.state == 'queued' and again.attempts == 1
+    assert again.options.get('no_kakao') is True

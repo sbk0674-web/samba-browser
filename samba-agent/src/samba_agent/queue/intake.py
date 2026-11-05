@@ -428,6 +428,11 @@ class Intake:
 
         품절·마진·검증불일치·결제중단은 결론이거나 결제 위험이 있어 여기서 재시도하지 않는다.
         """
+        if job.state == 'needs_ai' and job.error == 'kakao_unapproved':
+            # 카카오페이 승인이 안 와 결제창을 닫은 주문 — 방치하지 않고 카카오페이를 뺀 수단으로 바로 다시 산다(사용자 2026-11-05)
+            self._queue.requeue_without_kakao(job.id)
+            log.info('카카오페이 미승인 주문을 다른 수단으로 다시 큐에 넣었다: %s', job.order_no)
+            return True
         if job.state == 'needs_ai' and job.error == 'after_hours':
             # 밤에 카카오페이 승인을 미룬 결제 전 대기 — 업무시간이 되면 횟수와 상관없이 다시 넣는다
             # (실기 2026-11-05 08:21: 롯데온 4건이 아침까지 그대로 멈춰 있었다)

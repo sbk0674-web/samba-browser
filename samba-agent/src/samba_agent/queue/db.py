@@ -353,6 +353,19 @@ class JobQueue:
         )
         return self._job(self._by_id(job_id))
 
+    def requeue_without_kakao(self, job_id: int) -> None:
+        """카카오페이 미승인(kakao_unapproved) 작업을 카카오페이를 뺀 수단으로 다시 사게 큐에 넣는다(횟수 안 늘림)."""
+        with self._immediate():
+            row = self._by_id(job_id)
+            if row is None or row['state'] != 'needs_ai' or row['error'] != 'kakao_unapproved':
+                return
+            options = json.loads(row['options'] or '{}')
+            options['no_kakao'] = True
+            self._db.execute(
+                "UPDATE jobs SET state='queued', error=NULL, options=?, updated_at=? WHERE id=?",
+                (json.dumps(options, ensure_ascii=False), _now(), job_id),
+            )
+
     def requeue_waiting(self, job_id: int) -> None:
         """업무시간 대기(after_hours)처럼 실패가 아닌 대기 건을 시도 횟수를 늘리지 않고 다시 큐에 넣는다."""
         self._db.execute(

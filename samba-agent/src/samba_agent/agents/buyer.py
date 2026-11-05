@@ -3036,6 +3036,10 @@ class BuyerAgent(AgentBase):
         allowed = {fixed} if fixed else self.allowed_pay_providers
         if allowed is not None and spec.excluded_pay_providers:
             allowed = set(allowed) - set(spec.excluded_pay_providers)
+        if getattr(self, '_no_kakao', False):
+            # 카카오페이 승인이 안 와 다시 사는 주문 — 카카오페이는 빼고 고른다(사용자 2026-11-05)
+            base = allowed if allowed is not None else {p for p, _ in QUOTE_PROVIDER_KEYWORDS} | {'card'}
+            allowed = set(base) - {'kakao'}
         only = ACCOUNT_PAY_ONLY.get((account or '').split('@')[0].lower())
         if only:
             allowed = set(only) if allowed is None else (set(allowed) & set(only))
@@ -4049,6 +4053,7 @@ class BuyerAgent(AgentBase):
     def _buy(self, a: Assignment) -> AgentResult:
         self.evidence = []
         self._current_order_no = a.order.order_no
+        self._no_kakao = bool(a.options.get('no_kakao'))
         self._coupon_gap_off = False
         self._already_bought(a)
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다

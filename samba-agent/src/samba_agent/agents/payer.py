@@ -978,6 +978,32 @@ class PayerAgent(AgentBase):
                 if any(m in page for m in PAY_SUCCESS_MARKERS):
                     return self._confirm_paid(a, card, paid_by='human')
                 self.tool('wait', ms=KAKAO_HUMAN_WAIT_MS)
+        # 승인이 끝내 안 오면 방치하지 않는다(사용자 2026-11-05) — 카카오페이 결제창을 닫아 늦은 승인을 막고,
+        # 결제 완료 화면이 정말 없는지 한 번 더 본 뒤 카카오페이를 뺀 다른 수단으로 다시 사게 넘긴다
+        try:
+            popups, _active = self._list_tabs_popups()
+            for q in popups:
+                if re.search(r'kakao|kakaopay', str(q.get('url') or ''), re.I) and q.get('id'):
+                    self.tool('close_tab', id=str(q['id']))
+        except AgentFailure:
+            pass
+        self.tool('wait', ms=8000)
+        page = self._success_page(a)
+        if any(m in page for m in PAY_SUCCESS_MARKERS):
+            return self._confirm_paid(a, card, paid_by='human')
+        if self._wave is not None:
+            try:
+                self._wave.add_memo(
+                    a.order.wave_key,
+                    f'카카오페이 승인 {KAKAO_HUMAN_ROUNDS}회 미승인 [카카오페이 {amount}] — 결제창 닫음·결제 안 됨 확인, 다른 수단으로 다시 구매',
+                )
+            except Exception:  # noqa: BLE001
+                self.note('카카오페이', '삼바웨이브 메모 남기기 실패')
+        raise AgentFailure(
+            'needs_ai',
+            f'카카오페이 승인 {KAKAO_HUMAN_ROUNDS}회 미승인 — 결제창 닫음, 결제 완료 화면 없음. 카카오페이 빼고 다시 산다',
+            FailReason.KAKAO_UNAPPROVED,
+        )
         memo = (
             f'카카오페이 결제 사람 승인 {KAKAO_HUMAN_ROUNDS}회 요청했으나 완료 안 됨 [카카오페이 {amount}] '
             '— 소싱처 주문내역 확인 전 재결제 금지'

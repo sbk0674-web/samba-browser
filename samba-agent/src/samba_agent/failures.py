@@ -20,4 +20,6 @@ class FailReason(StrEnum):
     TIMEOUT = 'timeout'
     # 카카오페이 사람 승인 업무시간 밖 — 결제 전 대기. 업무시간이 되면 접수기가 다시 큐에 넣는다
     AFTER_HOURS = 'after_hours'
+    # 카카오페이 사람 승인을 3번 요청했는데 안 됨 — 결제창을 닫고 결제 안 됨을 확인했다. 카카오페이 빼고 다시 산다
+    KAKAO_UNAPPROVED = 'kakao_unapproved'
     UNKNOWN = 'unknown'
