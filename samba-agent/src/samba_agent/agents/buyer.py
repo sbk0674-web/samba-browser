@@ -132,10 +132,12 @@ def address_districts(text: object) -> set[str]:
     return {k for k in _DISTRICT.findall(raw) if not re.search(r'(특별자치|광역|특별)시$', k)}
 
 
-# 소싱처와 무관하게 무조건 사무실 수령(까대기)인 브랜드 — 르무통·데상트·노스페이스(사용자 2026-11-05, 10-12 목록 정정).
-# 스케쳐스·휠라는 고정이 아니다: 정가 ≤ 고객 결제액이면 까대기, 정가 > 결제액일 때만 선물·직배(정가 비교)
+# 소싱처와 무관하게 무조건 사무실 수령(까대기)인 브랜드 — 르무통·데상트·노스페이스·코오롱스포츠·뉴발란스
+# (사용자 2026-11-05, 10-12 목록 정정). 스케쳐스·휠라는 고정이 아니다: 정가 ≤ 고객 결제액이면 까대기,
+# 정가 > 결제액일 때만 선물·직배(정가 비교)
 KKADAEGI_BRANDS = re.compile(
-    r'르무통|\blemouton\b|데상트|\bdescente\b|노스\s*페이스|north\s*face',
+    r'르무통|\blemouton\b|데상트|\bdescente\b|노스\s*페이스|north\s*face'
+    r'|코오롱\s*스포츠|kolon\s*sport|뉴\s*발란스|new\s*balance',
     re.IGNORECASE,
 )
 # 상품명에 브랜드 글자가 없어도 품번으로 안다 — 스케쳐스 품번은 S+영문+0+(W|M|G|K)+영문 4자+숫자 3자
