@@ -157,12 +157,16 @@ export function parseScan(
       Number.isFinite(c.lastAt) && c.lastAt > 0 && c.accountId === accountId && c.roomId === m[1] &&
       c.lastMessage === lastMessage && c.lastAtText === timeText && c.unread >= unread)
     // 확인했던 같은 메시지의 날짜는 유지한다. 메시지가 바뀌면 예전 날짜를 새 글에 붙이지 않는다.
-    const listAt = parseKoreanTime(timeText, now)
+    const clockOnly = /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(timeText.trim())
+    const clockAt = clockOnly ? parseKoreanTime(`오늘 ${timeText.trim()}`, now) : 0
+    const listAt = clockOnly
+      ? clockAt > now.getTime() ? clockAt - 86_400_000 : clockAt
+      : parseKoreanTime(timeText, now)
     const preciseClock = /T\d{2}:\d{2}|(?:오전|오후)\s*\d{1,2}:\d{2}/
     const listPrecise = listAt > 0 && preciseClock.test(timeText)
     // 본문에서 확인한 정밀 날짜를 대략적인 목록 날짜로 덮지 않는다.
     // 같은 일·주·월·년 상대 표기도 처음 읽은 값을 유지해 조회마다 앞으로 밀리지 않게 한다.
-    const retained = !messageAt && known && (!listAt ||
+    const retained = !messageAt && known && (clockOnly || !listAt ||
       known.lastAtSource === 'message' && known.lastAtPrecise === true && !listPrecise ||
       known.lastAtSource === 'list' && /^\d+\s*(?:일|주|달|개월|년)\s*전$/.test(timeText.trim()))
       ? known : undefined

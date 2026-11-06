@@ -19,7 +19,8 @@ export function withNativeListOrder(channels: readonly DaangnChannelDto[], now =
     const clockOnly = /^(오전|오후)\s*\d{1,2}:\d{2}$/.test(lastAtText)
     const today = clockOnly && (!Number.isFinite(channel.lastAt) || channel.lastAt <= 0)
       ? parseKoreanTime(`오늘 ${lastAtText}`, now) : 0
-    if (today > 0) return { ...channel, listOrder, lastAtText, lastAt: today, lastAtSource: 'list', lastAtPrecise: true }
+    const observed = today > now.getTime() ? today - 86_400_000 : today
+    if (observed > 0) return { ...channel, listOrder, lastAtText, lastAt: observed, lastAtSource: 'list', lastAtPrecise: true }
     return listOrder === channel.listOrder && lastAtText === channel.lastAtText
       ? channel : { ...channel, listOrder, lastAtText }
   })

@@ -9,6 +9,12 @@ const channel = (accountId: number, roomId: string, lastAt: number, listOrder?: 
 })
 const all = { accountId: null, unreadOnly: false }
 describe('native chronology when list dates are absent', () => {
+  it('anchors an evening clock before 09:23 to yesterday and preserves it on the next scan', () => {
+    const raw={me:null,rows:[{href:'/room/evening',timeText:'오후 10:17',lastMessage:'same'}]}
+    const first=parseScan(raw,1,new Date('2026-11-06T09:23:00+09:00')).channels
+    expect(first[0].lastAt).toBe(Date.parse('2026-11-05T22:17:00+09:00'))
+    expect(parseScan(raw,1,new Date('2026-11-07T09:23:00+09:00'),first).channels[0].lastAt).toBe(first[0].lastAt)
+  })
   const rows = [channel(1,'latest',1000,0),channel(1,'pandori',0,1),channel(1,'kkongchi',0,2),channel(1,'yesterday',500,3)]
   it('keeps undated clock rows between their actual native neighbors without inventing dates', () => {
     expect(filterChannels(rows,all).map(x=>x.roomId)).toEqual(['latest','pandori','kkongchi','yesterday'])
@@ -40,7 +46,7 @@ describe('native chronology when list dates are absent', () => {
   it('records order from the actual scan rather than room ID or a fabricated timestamp', () => {
     const out=parseScan({me:null,rows:[{href:'/room/z',timeText:'오전 07:57'},{href:'/room/a',timeText:'1일 전'}]},1,new Date('2026-11-03T04:00:00Z'))
     expect(out.channels.map(x=>x.listOrder)).toEqual([0,1])
-    expect(out.channels[0].lastAt).toBe(0)
+    expect(out.channels[0].lastAt).toBe(Date.parse('2026-11-03T07:57:00+09:00'))
   })
   it('supports an already-running old main process without changing message dates or the input', () => {
     const old=[channel(1,'latest',Date.parse('2026-11-03T09:50:00+09:00')),channel(2,'other',Date.parse('2026-11-03T10:00:00+09:00')),channel(1,'clock',0),channel(1,'yesterday',Date.parse('2026-11-02T10:00:00+09:00'))]
