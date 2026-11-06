@@ -21,18 +21,16 @@ if(p.length<2||!c||!y||!ch(c))return 0
 return y===osz||y==={s:'sm',m:'md',l:'lg'}[osz]?300:0}
 const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러)/i,SRE=/textbox "(사이즈|size)"/i,
 si=L=>L.findIndex(l=>SRE.test(l)),af=L=>L.slice(si(L)+1),
-avl=L=>af(L).filter(l=>/clickable "[^"]*(발송 예정|도착보장|도착 예정)/.test(l)).map(ID),
+avl=L=>af(L).filter(l=>/clickable "([^"]*(발송 예정|도착보장|도착 예정)|\d{2,3}")/.test(l)).map(ID),
 AR=/clickable "(.*(?:발송 예정|도착보장|도착 예정)|.*\(품절\))"/
 const rd1=async()=>{
 let dt=await text('[class*=dropdown]')
 dt=/도착보장|발송 예정|도착 예정/.test(dt)?dt.replace(/^PAGE TEXT:\s*/,''):''
 const head=dt||(await text()).split(/장바구니\s+(?:\S+\s+)?구매하기/)[0]
-let st=-1,m,pm
-const pr=/(?<![\d,+])[\d,]+원/g
+let st=-1,m,pm,pr=/(?<![\d,+])[\d,]+원/g
 while((pm=pr.exec(head)))if(!/(예정|도착보장|출발)\s*$/.test(head.slice(pm.index-30,pm.index)))st=pm.index+pm[0].length
 if(st<0)st=head.lastIndexOf('LV.')+1
-let seg=dt||head.slice(st)
-const mi=seg.lastIndexOf('더보기')
+let seg=dt||head.slice(st),mi=seg.lastIndexOf('더보기')
 if(mi>=0&&/발송|도착/.test(seg.slice(mi)))seg=seg.slice(mi+3)
 else seg=seg.replace(/^.*?LV\.\d+\s*\S+\s*/,m=>m.length<200?'':m)
 const re=new RegExp('(.+?)\\s*(?:(?:\\S+\\([^)]*\\)\\s+(?:이내\\s+)?)?(?:발송 예정|도착보장|도착 예정|출발)(?:\\s*오늘출발)?|\\(품절\\))','g'),R=[]
@@ -47,12 +45,10 @@ R.push({id:+m[1],name:!so&&/도착|발송|배송|출고/.test(m[2])?'(옵션'+(R
 return R}
 const sO=L=>{const a=L.findIndex(l=>CRE.test(l)),b=si(L);return L.slice(a+1,b>a?b:a+8)}
 const pc=async()=>{for(let tr=0;tr<2;tr++){
-let L=await it()
-const ci=L.findIndex(l=>CRE.test(l))
+let L=await it(),ci=L.findIndex(l=>CRE.test(l))
 if(ci<0||/textbox "[^"]+" value="[^"]+"/.test(L[ci]))return
 if(!has(sO(L),CL)){await o1(sO(L));L=await it()}
-const cd=sO(L).map(l=>l.match(CM)).filter(Boolean).map(m=>({id:+m[1],name:m[2]}))
-const pick=cd.filter(c=>ch(c.name)).sort((a,b)=>nz(b.name).length-nz(a.name).length)[0]||(cd.length===1&&cd[0])
+const cd=sO(L).map(l=>l.match(CM)).filter(Boolean).map(m=>({id:+m[1],name:m[2]})),pick=cd.filter(c=>ch(c.name)).sort((a,b)=>nz(b.name).length-nz(a.name).length)[0]||(cd.length===1&&cd[0])
 if(!pick)return
 await(tr?page.clickNative(pick.id):ck(pick.id))
 await z()}}
@@ -68,8 +64,7 @@ const ids=L=>af(L).filter(l=>AR.test(l)).map(ID)
 let ri=ids(ln),R=await safe(rd1,[])
 if(!R.length||R.length<ri.length){R=rd2(ln);ri=R.map(r=>r.id)}
 op=R.filter(r=>!/선택\s?안함$/.test(r.name)).map(r=>r.name+(r.so?' (품절)':''))
-const txo=!ri.length&&R.length&&!R.some(r=>/^\(옵션\d+\)$/.test(r.name))
-const ot=KM&&!R.some(r=>/\d{2,3}/.test(r.name))?KM:osz
+const txo=!ri.length&&R.length&&!R.some(r=>/^\(옵션\d+\)$/.test(r.name)),ot=KM&&!R.some(r=>/\d{2,3}/.test(r.name))?KM:osz
 let best=-1,bs=0
 R.forEach((r,i)=>{
 if(r.so)return
@@ -92,15 +87,15 @@ await ck(tids[k])
 }else{
 const all=[]
 let tg=0
-const soM=R.some(r=>r.so),idf=soM?avl:ids
-const bx=soM||ri.length<R.length?best-sb:best
+const soM=R.some(r=>r.so),idf=soM?avl:ids,bx=soM||ri.length<R.length?best-sb:best
 for(let k=0;k<20&&!tg;k++){
 const cur=idf(ln)
 cur.forEach(i=>all.includes(i)||all.push(i))
 all.sort((a,b)=>a-b)
 if(all.length>bx&&cur.includes(all[bx]))tg=all[bx]
-if(tg||!cur.length)break
-try{await page.scroll('down',cur[cur.length-1])}catch{break}
+const an=(cur.length?cur:ids(ln)).at(-1)
+if(tg||!an)break
+try{await page.scroll('down',an)}catch{break}
 ln=await it()}
 if(!tg)break
 await ck(tg)}
