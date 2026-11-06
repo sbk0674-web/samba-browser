@@ -16,7 +16,7 @@ CL=/선택 목록 닫기/,DEL=/옵션 삭제/,CM=/^\[(\d+)\] clickable "([^"]+)"
 o1=async L=>{const o=idL(L,OPN);if(o){await ck(o);await z()}},hs=has(ln,/선택 목록 (열기|닫기)/)
 let op=[],cho='',pk=!hs
 if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,sold_out:true,note:'soldout'}
-const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.toLowerCase().replace(/[\s_·()-]/g,'').replace(/xxl/g,'2xl'),w=nz(A),we=w.replace(/블랙|화이트|그레이|베이지|네이비|아이보리/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy',아이보리:'ivory'})[k]),cw=we.match(/black|white|grey|beige|navy/g)||[],ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))},osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[],KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz],cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
+const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.toLowerCase().replace(/[\s_·()-]/g,'').replace(/xxl/g,'2xl'),w=nz(A),we=w.replace(/블랙|화이트|그레이|베이지|네이비|아이보리|샌드|크림/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy',아이보리:'ivory',샌드:'sand',크림:'cream'})[k]),cw=we.match(/black|white|grey|beige|navy/g)||[],ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))},osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[],KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz],cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
 if(p.length<2||!c||!y||!ch(c))return 0
 return y===osz||y==={s:'sm',m:'md',l:'lg'}[osz]?300:0}
 const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러)/i,SRE=/textbox "(사이즈|size)"/i,
@@ -68,8 +68,7 @@ const txo=!ri.length&&R.length&&!R.some(r=>/^\(옵션\d+\)$/.test(r.name)),ot=KM
 let best=-1,bs=0
 R.forEach((r,i)=>{
 if(r.so)return
-const n=nz(r.name).replace(/^0+(?=[a-z])/,'')
-let s=cs(r.name)||(n&&n===ot?500:n&&(n.length<3?TK.includes(n):w.includes(n))?100+n.length:(r.name.replace(/mm$/i,'').match(/\w+/g)||[]).filter(t=>TK.includes(t.toLowerCase())).length)
+let n=nz(r.name).replace(/^0+(?=[a-z])/,''),s=cs(r.name)||(n&&n===ot?500:n&&(n.length<3?TK.includes(n):w.includes(n))?100+n.length:(r.name.replace(/mm$/i,'').match(/\w+/g)||[]).filter(t=>TK.includes(t.toLowerCase())).length)
 const lw=nz(r.name.split(/\s+/).pop())
 if(SZT.test(ot)&&SZT.test(lw))s=lw===ot?s+50:0
 if(s<1&&(R.length==1||/^(free|f|프리)/.test(n)&&/프리|free/.test(w)))s=150
@@ -78,15 +77,13 @@ if(s>bs){bs=s;best=i}})
 if(best<0||bs<1)break
 const sb=R.slice(0,best).filter(r=>r.so).length
 if(txo){
-const k=best-sb
-let L3=await it()
+let k=best-sb,L3=await it()
 if(!has(L3,CL)){await o1(af(L3));L3=await it()}
 const tids=avl(L3)
 if(!tids[k])break
 await ck(tids[k])
 }else{
-const all=[]
-let tg=0
+let all=[],tg=0
 const soM=R.some(r=>r.so),idf=soM?avl:ids,bx=soM||ri.length<R.length?best-sb:best
 for(let k=0;k<20&&!tg;k++){
 const cur=idf(ln)
