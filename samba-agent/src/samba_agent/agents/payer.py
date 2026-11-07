@@ -274,8 +274,15 @@ NAVER_AFTER_PASSWORD_TRIES = 8
 
 # 상품명에서 대조에 쓰지 않는 흔한 말(브랜드·계절·분류) — 이것만 겹쳐서는 같은 상품이라고 보지 않는다
 _GENERIC_WORDS = frozenset(
-    ['매장정품', '정품', '봄신발', '가을신발', '여름신발', '겨울신발', '신발', '운동화', '스니커즈', '스니커', '남성', '여성', '남녀공용', '공용', '커플', '키즈', '아동', '나이키', '아디다스', '뉴발란스', '푸마', '반스', '컨버스', '리복', '아식스', '휠라', '스케쳐스', '크록스', '머렐', '노스페이스', 'NIKE', 'ADIDAS', 'PUMA', 'VANS', 'CONVERSE', 'REEBOK', 'ASICS', 'FILA', 'SKECHERS', 'CROCS', 'MERRELL', '캐주얼화', '스포츠화', '조깅화', '러닝화', '슬리퍼', '샌들', '모자', '가방', '티셔츠', '블랙', '화이트', '그레이', '네이비', 'BLACK', 'WHITE', 'GREY', 'GRAY', 'NAVY']
+    ['매장정품', '정품', '봄신발', '가을신발', '여름신발', '겨울신발', '신발', '운동화', '스니커즈', '스니커', '남성', '여성', '남녀공용', '공용', '커플', '키즈', '아동', '나이키', '아디다스', '뉴발란스', '푸마', '반스', '컨버스', '리복', '아식스', '휠라', '스케쳐스', '크록스', '머렐', '노스페이스', 'NIKE', 'ADIDAS', 'PUMA', 'VANS', 'CONVERSE', 'REEBOK', 'ASICS', 'FILA', 'SKECHERS', 'CROCS', 'MERRELL', '캐주얼화', '스포츠화', '조깅화', '러닝화', '슬리퍼', '샌들', '모자', '가방', '티셔츠', '의류', '블랙', '화이트', '그레이', '네이비', 'BLACK', 'WHITE', 'GREY', 'GRAY', 'NAVY']
 )
+
+
+# 마켓 상품명과 사이트 상품명이 같은 물건을 다른 말로 부른다(실기 2026-11-08 롯데온 마켓 '조끼' ↔ 주문서 '베스트')
+_NAME_SYNONYMS: dict[str, tuple[str, ...]] = {
+    '조끼': ('베스트', 'vest'),
+    '베스트': ('조끼', 'vest'),
+}
 
 
 def _name_words(product_name: str) -> list[str]:
@@ -382,7 +389,7 @@ def order_form_mismatch(
     if len(pno) >= 6 and _has_number(text, pno):
         return None
     words = _name_words(product_name)
-    if not words or any(w.lower() in low for w in words):
+    if not words or any(w.lower() in low or any(x in low for x in _NAME_SYNONYMS.get(w, ())) for w in words):
         return None
     site_words = _name_words(site_name)
     if site_words and _mostly_found(words, site_name) and _mostly_found(site_words, text):
