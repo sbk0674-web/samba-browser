@@ -60,7 +60,7 @@ if(!sel.includes(want.replace('카드',''))){
 for(const o of ['textbox','label']){const g=await page.get({query:'카드'});const re=o==='textbox'?/^\[(\d+)\] textbox "카드(를 선택|선택)/:/^\[(\d+)\] label "카드선택"/;const l=g.tree.split('\n').find(x=>re.test(x));if(!l)continue;await page.click(parseInt(l.slice(1)));await sleep(600);const f=(await page.get({query:want})).tree.split('\n').find(x=>/^\[\d+\] (option|listitem|clickable|button|link) /.test(x)&&x.includes(want));if(f){await page.click(parseInt(f.slice(1)));await sleep(900);break}}
 sel='';for(let k=0;k<6&&!sel;k++){const P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await sleep(700);}
 }
-if(!sel.includes(want.replace('카드','')))return {ok:false,error:'L.PAY 카드 '+want+' 아님: '+(sel||'없음'),method};
+if(!sel.includes(want.replace('카드','')))return{ok:false,error:'L.PAY 카드 '+want+' 아님: '+(sel||'없음'),method};
 method='간편결제/'+sel;
 }
 }
@@ -86,20 +86,20 @@ if(ra&&!/value="on"/.test(ra)){await page.click(parseInt(ra.slice(1)));await sle
 const payId=await page.idOf('결제하기');
 if(payId<0)return{ok:false,error:'결제하기 없음',method};
 let pr=String(await page.click(payId));
-const LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/,tr=[];for(let k=0;k<4;k++){
-let T='',h=0;for(let w=0;w<10;w++){await sleep(1e3);T=(await AT());if(LP.test(T)||DN.test(T))break}
+const LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/;for(let k=0;k<4;k++){
+let T='',h=0;for(let w=0;w<20;w++){await sleep(1e3);T=await AT();if(LP.test(T)||DN.test(T)||/OVERLAY: "[^"]*(주문할인|할인 결제|혜택이)/.test(T))break}
 if(LP.test(T)||DN.test(T))break;
 const Z=async(q,r)=>(await page.get({query:q})).tree.split('\n').filter(l=>r.test(l)).map(l=>parseInt(l.slice(1)));
-if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const P=l=>+l.match(/(\d+)%/)[1],q=(await page.get({query:'%'})).tree.split('\n').filter(l=>/^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x,y)=>P(y)-P(x)),r=q.slice(0,1).map(l=>parseInt(l.slice(1)));tr.push('r'+q.map(P));if(r.length){await page.clickNative(r[0]);await sleep(1200);const g=await Z('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/);if(g.length){await page.click(g[0]);await sleep(2500);h=1}}
+if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const P=l=>+l.match(/(\d+)%/)[1],q=(await page.get({query:'%'})).tree.split('\n').filter(l=>/^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x,y)=>P(y)-P(x)),r=q.slice(0,1).map(l=>parseInt(l.slice(1)));if(r.length){await page.clickNative(r[0]);await sleep(1200);const g=await Z('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/);if(g.length){await page.click(g[0]);await sleep(2500);h=1}}
 if(!h){const b=await Z('닫기',/button "닫기"/);if(b.length){await page.clickNative(Math.max(...b));await sleep(2000);h=1}}}
 if(/OVERLAY: "[^"]*할인 결제수단으로만/.test(T)){const b=await Z('적용하기',/button "적용하기"/);if(b.length){await page.click(Math.max(...b));await sleep(2500);h=1}}
 if(/OVERLAY: "혜택이 변경/.test(T)){await sleep(2500);continue}
 if(!h)break;
 const a=await page.idOf('결제하기');if(a<0)break;pr=String(await page.click(a))}
 await sleep(3000);
-if(/OVERLAY: "[^"]*주문할인혜택/.test((await AT())))return{ok:false,error:'할인창 남음 '+tr,method};
+if(/OVERLAY: "[^"]*주문할인혜택/.test((await AT())))return{ok:false,error:'할인창 남음',method};
 if(/네이버페이/.test(method)){
-return {ok:false,naver_card_required:true,error:'네이버 카드 검증 필요',method,receipt};
+return{ok:false,naver_card_required:true,error:'네이버 카드 검증 필요',method,receipt};
 }
 try{const T=(await AT());if(/^URL: [^\n]*orderSheet/.test(T)){const m=T.match(/사업자등록번호[^\n]{0,25}입력해 ?주세요/);if(m)after='주문서에서 막힘: '+m[0];
 }}catch(e){}
@@ -107,4 +107,4 @@ if(after)return{ok:false,error:after,method,receipt};
 const tbs=await tabs.list();
 const popup=tbs.find(t=>t.kind==='popup');
 const DT=(await AT());
-return { ok:true, method, receipt, popup_url: popup? popup.url : null, keypad_in_tab: LP.test(DT) };
+return{ok:true, method, receipt, popup_url: popup? popup.url : null, keypad_in_tab: LP.test(DT) };
