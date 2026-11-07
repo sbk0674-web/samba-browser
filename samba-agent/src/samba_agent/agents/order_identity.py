@@ -25,7 +25,8 @@ def _tokens(value: object) -> list[str]:
     # 옵션 이름표 '[SIZE]S'·'[COLOR]블랙' 의 이름표는 값이 아니다(실기 2026-11-04 29CM 4131 '그레이 S' ↔ '[SIZE]S')
     text = re.sub(r'\[(?:size|color|colour|사이즈|색상|컬러|옵션)\]', ' ', text)
     # 원사이즈 표기 ONE·OS·F·프리는 FREE 와 같다(실기 2026-11-04 롯데온 4133 'WHS(WHITE SAND) FREE' ↔ 'ONE')
-    one = {'one', 'onesize', 'os', 'f', '프리', 'fr'}
+    # 무신사 모자의 OSFM(One Size Fits Most)도 원사이즈다(실기 2026-11-07 뉴에라 '블랙 프리 사이즈' ↔ 'OSFM')
+    one = {'one', 'onesize', 'os', 'osfm', 'f', '프리', 'fr'}
     return ['free' if t in one else t for t in re.split(r'[\s/:,·]+', text) if t]
 
 
