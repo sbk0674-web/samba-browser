@@ -93,7 +93,9 @@ tree=await get();const text=body(tree);
 const noPoints=/포인트 사용이 불가한 가맹점|포인트 사용 불가|보유 포인트\s*0원|포인트 사용 가능\s*0원|포인트 사용 가능\s*[\d,]+원\s*사용\s*결제 수단/.test(text);
 const usedPoints=text.match(/(?:포인트 사용|사용 포인트)\s*([\d,]+)원/);
 if(!noPoints&&(!usedPoints||num(usedPoints[1])!==0))return {ok:false,error:'네이버 포인트 사용 여부 미확인 — 결제하지 않음'};
-const amount=text.match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);
+// 결제금액도 굴러가는 숫자판으로 뜰 때가 있다('결제금액 0 1 2 … 9 698 19 원' — 실기 2026-11-08 롯데온 21315222858723299) — 멈출 때까지 다시 읽는다
+let amount=text.match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);
+for(let i=0;i<10&&!amount;i++){await sleep(800);amount=body(await get()).match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);}
 // 네이버 결제창이 주문서보다 조금 싸게 보이는 일이 있다(실기 2026-11-05 롯데온 2026110557B626: 주문서 72,240 → 네이버 72,190).
 // 더 싼 쪽으로 100원 안쪽 차이만 같은 결제로 본다 — 비싸거나 크게 다르면 다른 주문일 수 있어 멈춘다
 const shown=amount?num(amount[1]):0;
