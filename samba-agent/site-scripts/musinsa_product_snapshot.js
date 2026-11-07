@@ -20,7 +20,7 @@ const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.t
 if(p.length<2||!c||!y||!ch(c))return 0
 return y===osz||y==={s:'sm',m:'md',l:'lg'}[osz]?300:0}
 const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러)/i,SRE=/textbox "(사이즈|size)"/i,
-si=L=>L.findIndex(l=>SRE.test(l)),af=L=>L.slice(si(L)+1),
+si=L=>L.findIndex(l=>SRE.test(l)),af=L=>{const a=L.slice(si(L)+1),e=a.findIndex(l=>/button "(좋아요|장바구니|[^"]*구매하기)/.test(l));return e<0?a:a.slice(0,e)},
 avl=L=>af(L).filter(l=>/clickable "([^"]*(발송 예정|도착보장|도착 예정)|\d{2,3}")/.test(l)).map(ID),
 AR=/clickable "(.*(?:발송 예정|도착보장|도착 예정)|.*\(품절\))"/
 const rd1=async()=>{
@@ -37,8 +37,8 @@ const re=new RegExp('(.+?)\\s*(?:(?:\\S+\\([^)]*\\)\\s+(?:이내\\s+)?)?(?:발�
 while((m=re.exec(seg))){let nm=m[1].replace(/재입고 알림|마지막 \d+개|\d+개 남음/g,'').trim().replace(/^.*?추가\s*적립\s*/,'').replace(/\s*\(\+[\d,]+원\)$/,'');if(dt&&R.some(r=>r.name===nm))continue;R.push({name:nm,so:/\(품절\)/.test(m[0])})}
 if(dt&&R.length>1){const n0=R[0].name,r=R.slice(1).map(x=>x.name).find(x=>n0.endsWith(' '+x));if(r)R[0].name=r;return R.filter((r,j)=>R.findIndex(x=>x.name===r.name)===j)}
 return R}
-const rd2=L=>{const R=[],e=L.findIndex((l,i)=>i>si(L)&&/button "(좋아요|장바구니|[^"]*구매하기)/.test(l))
-for(const l of L.slice(si(L)+1,e<0?L.length:e)){const m=l.match(CM)
+const rd2=L=>{const R=[]
+for(const l of af(L)){const m=l.match(CM)
 if(!m||/^(\d+개 남음|마지막 \d+개)$/.test(m[2]))continue
 const so=/\(품절\)/.test(m[2])
 R.push({id:+m[1],name:!so&&/도착|발송|배송|출고/.test(m[2])?'(옵션'+(R.length+1)+')':m[2].replace(/\(품절\)/,'').trim(),so})}
