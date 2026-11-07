@@ -4146,6 +4146,10 @@ class BuyerAgent(AgentBase):
                 raise
             if alt is None or e.fail_reason is FailReason.DUPLICATE:
                 raise
+            # 페이지 읽기 경합(page busy)은 잠깐의 앱 상태라 다시 하면 된다 — 비싼 짝 소싱처로 갈아타지 않는다
+            # (실기 2026-11-07 무신사 32,150 → 29CM 46,325 대체 3번, 29CM 금고 잠김으로 멈춤)
+            if 'page busy' in e.reason or '페이지 읽기 경합' in e.reason:
+                raise
             self._cross_alt = None
             sib, a3, other = alt
             sib_id = source_of(sib.spec.name).id
