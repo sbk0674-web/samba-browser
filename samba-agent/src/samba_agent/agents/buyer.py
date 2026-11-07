@@ -891,7 +891,8 @@ def size_numbers(text: str) -> set[str]:
 
 
 _SIZE_LETTER_RE = re.compile(
-    r'(?<![A-Za-z])(XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|FREE|ONE)(?![A-Za-z])'
+    # 앞에 숫자가 붙은 '2XS' 의 XS 만 따로 잡지 않는다(실기 2026-11-07 29CM: 주문 '… 2XS' 에 XS 를 결제)
+    r'(?<![A-Za-z0-9])(XXXS|XXS|2XS|3XS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|FREE|ONE)(?![A-Za-z])'
 )
 
 
@@ -908,7 +909,7 @@ def size_letters(text: str) -> set[str]:
     return {_SIZE_LETTER_SAME.get(x, x) for x in _SIZE_LETTER_RE.findall(upper)}
 
 
-_SIZE_LETTER_SAME = {'XXL': '2XL', 'XXXL': '3XL'}
+_SIZE_LETTER_SAME = {'XXL': '2XL', 'XXXL': '3XL', 'XXS': '2XS', 'XXXS': '3XS'}
 
 
 def size_letter_options(options: list[str], wanted: str | None) -> list[str]:
