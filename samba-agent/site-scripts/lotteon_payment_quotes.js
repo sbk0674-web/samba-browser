@@ -121,7 +121,9 @@ try{
     const cs=(await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>parseInt(l.slice(1)));
     if(cs.length){await page.clickNative(Math.max(...cs));await sleep(1200);
       const ca=await amtOf();
-      if(ca>0)for(const q of quotes)if(q.cost!=null&&q.method!=='카카오페이'){q.cost-=ca;q.discount='장바구니 쿠폰';}
+      // 할인창은 '1개만 선택' — 카드 즉시할인(롯데카드·카카오페이)과 장바구니 쿠폰은 겹치지 않는다(실기 2026-11-07 롯데온 노스페이스:
+      // 롯데카드 10%+쿠폰 15% 를 겹쳐 91,414 로 잘못 견적 → L.PAY 가 골라짐). 즉시할인이 없는 수단에만 쿠폰을 뺀다
+      if(ca>0)for(const q of quotes)if(q.cost!=null&&q.method!=='카카오페이'&&!q.discount){q.cost-=ca;q.discount='장바구니 쿠폰';}
     }
     const cl=(await Q('닫기',/button "닫기"/)).map(l=>parseInt(l.slice(1))).sort((a,b)=>b-a);
     for(const c of cl.slice(0,2)){await page.click(c);await sleep(400);}
