@@ -1,6 +1,6 @@
 const ref=String(args.sku||'').trim()
 let pid=(ref.match(/^\d+$/)||ref.match(/musinsa\.com\/products\/(\d+)/)||[]);pid=pid[1]||pid[0]
-if(!pid)return{options:[],note:'invalid'}
+if(!pid)return{options:[],note:'bad'}
 const S=ms=>sleep(ms),U=()=>page.url(),z=()=>S(1200),K='products/'+pid,oo=/order-form/.test(await U())
 if(!oo&&!(await U()).includes(K)){await tabs.open({url:'https://www.musinsa.com/'+K,profile:args.profile||args.account});for(let i=0;i<15&&!(await U()).includes(K);i++)await z()}
 if(!oo)await page.waitFor('구매하기',6e3).catch(z)
@@ -15,11 +15,11 @@ const BUY=/button "(?![^"]*장바구니)[^"]*구매하기/,OPN=/선택 목록 �
 CL=/선택 목록 닫기/,DEL=/옵션 삭제/,CM=/^\[(\d+)\] clickable "([^"]+)"/,
 o1=async L=>{const o=idL(L,OPN);if(o){await ck(o);await z()}},hs=has(ln,/선택 목록 (열기|닫기)/)
 let op=[],cho='',pk=!hs
-if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,sold_out:true,note:'soldout'}
+if(!oo&&!has(ln,BUY)&&!hs&&has(ln,/button "(일시)?품절"/))return{options:op,sold_out:true,note:'so'}
 const A=String(args.size||'').trim(),NONE=!A||/^\(?없음\)?$/.test(A),nz=s=>s.toLowerCase().replace(/[\s_·()-]/g,'').replace(/xxl/g,'2xl'),w=nz(A),we=w.replace(/블랙|화이트|그레이|베이지|네이비|아이보리|샌드|크림/g,k=>({블랙:'black',화이트:'white',그레이:'grey',베이지:'beige',네이비:'navy',아이보리:'ivory',샌드:'sand',크림:'cream'})[k]),cw=we.match(/black|white|grey|beige|navy/g)||[],ch=n=>{n=nz(n);return n&&(w.includes(n)||we.includes(n)||cw.some(c=>n.includes(c)))},osz=nz(A.split(/\s+/).pop()),TK=A.toLowerCase().match(/[a-z0-9가-힣]+/g)||[],KM={95:'s',100:'m',105:'l',110:'xl',115:'2xl',60:'xs',65:'s',70:'m',75:'l'}[+osz],cs=nm=>{const p=nm.split('-').map(nz),c=p[0],y=p.slice(1).join('')
 if(p.length<2||!c||!y||!ch(c))return 0
 return y===osz||y==={s:'sm',m:'md',l:'lg'}[osz]?300:0}
-const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러)/i,SRE=/textbox "(사이즈|size)"/i,
+const SZT=/^(xs|s|m|l|xl|2xl|f|free|\d{2,3})$/,CRE=/textbox "(색상|컬러|color)/i,SRE=/textbox "(사이즈|size|[a-z]+)"/i,
 si=L=>L.findIndex(l=>SRE.test(l)),af=L=>{const a=L.slice(si(L)+1),e=a.findIndex(l=>/button "(좋아요|장바구니|[^"]*구매하기)/.test(l));return e<0?a:a.slice(0,e)},
 avl=L=>af(L).filter(l=>/clickable "([^"]*(발송 예정|도착보장|도착 예정)|\d{2,3}")/.test(l)).map(ID),
 AR=/clickable "(.*(?:발송 예정|도착보장|도착 예정)|.*\(품절\))"/
