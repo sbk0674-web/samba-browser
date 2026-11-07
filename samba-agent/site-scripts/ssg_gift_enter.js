@@ -22,6 +22,10 @@ let parts = opt ? [opt] : []
 if (selN > 1 && opt.includes('/')) {
   const raw = opt.split('/').map(nz).filter(Boolean)
   parts = raw.length > 2 ? [raw.slice(0, -1).join('/'), raw[raw.length - 1]] : raw
+} else if (selN > 1 && / /.test(opt)) {
+  // 주문서 옵션이 '색 사이즈'(띄어쓰기)로 올 때 — 마지막 낱말을 사이즈 칸으로(2026-11-07 다이나핏 '블랙(Z1) 270')
+  const k = opt.lastIndexOf(' ')
+  parts = [opt.slice(0, k), opt.slice(k + 1)]
 }
 for (const opt of parts) {
   const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l))
