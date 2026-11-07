@@ -59,7 +59,7 @@ NAVER_PREPARE_JS = r"""
 const get=async options=>String((await page.get(options||{})).tree||'');
 // Npay's rolling digits expose full 0..9 strips before the final amount.
 // Remove only complete strips immediately before a won amount; never guess digits.
-const body=tree=>(tree.split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ').replace(/(?:\b0 1 2 3 4 5 6 7 8 9(?:\s*,)?\s+)+(?=[\d,]+\s*원)/g,'');
+const body=tree=>(tree.split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ').replace(/(?:\b0 1 2 3 4 5 6 7 8 9(?:\s*,)?\s+)+(?=[\d,][\d,\s]*원)/g,'');
 const num=value=>Number(String(value).replace(/,/g,''));
 const chosen=async()=>{
   // 실제 결제창에는 선택 표시 속성이 없다 — 화면 글자 '결제 수단 ○○ 선택됨' 이 있으면 그것만 믿는다(실기 2026-11-02).
@@ -94,13 +94,16 @@ const noPoints=/포인트 사용이 불가한 가맹점|포인트 사용 불가|
 const usedPoints=text.match(/(?:포인트 사용|사용 포인트)\s*([\d,]+)원/);
 if(!noPoints&&(!usedPoints||num(usedPoints[1])!==0))return {ok:false,error:'네이버 포인트 사용 여부 미확인 — 결제하지 않음'};
 // 결제금액도 굴러가는 숫자판으로 뜰 때가 있다('결제금액 0 1 2 … 9 698 19 원' — 실기 2026-11-08 롯데온 21315222858723299) — 멈출 때까지 다시 읽는다
-let amount=text.match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);
-for(let i=0;i<10&&!amount;i++){await sleep(800);amount=body(await get()).match(/(?:총 결제금액|결제금액)\s*([\d,]+)\s*원/);}
+// 숫자판이 멈춘 뒤에도 끝자리가 '698 19 원'처럼 띄어져 남는다 — 숫자 조각을 이어 붙여 읽는다
+const AMT=/(?:총 결제금액|결제금액)\s*(\d[\d,]*(?:\s+\d[\d,]*)*)\s*원/;
+let amount=text.match(AMT);
+for(let i=0;i<10&&!amount;i++){await sleep(800);amount=body(await get()).match(AMT);}
+if(amount)amount=[amount[0],amount[1].replace(/\s+/g,'')];
 // 네이버 결제창이 주문서보다 조금 싸게 보이는 일이 있다(실기 2026-11-05 롯데온 2026110557B626: 주문서 72,240 → 네이버 72,190).
 // 더 싼 쪽으로 100원 안쪽 차이만 같은 결제로 본다 — 비싸거나 크게 다르면 다른 주문일 수 있어 멈춘다
 const shown=amount?num(amount[1]):0;
 const gap=EXPECTED_AMOUNT-shown;
-if(!amount||gap<0||gap>100)return {ok:false,error:'네이버 결제액 불일치',shown_amount:shown,expected_amount:EXPECTED_AMOUNT};
+if(!amount||gap<0||gap>100)return {ok:false,error:'네이버 결제액 불일치(화면 '+shown+' / 주문서 '+EXPECTED_AMOUNT+')',shown_amount:shown,expected_amount:EXPECTED_AMOUNT};
 // 적립 숫자는 굴러가는 숫자판이라 다 멈추기 전엔 못 읽는다(ABC 모바일 결제창 2026-11-06) — 몇 번 다시 읽는다
 let reward=text.match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);
 for(let i=0;i<6&&!reward;i++){await sleep(800);reward=body(await get()).match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);}
