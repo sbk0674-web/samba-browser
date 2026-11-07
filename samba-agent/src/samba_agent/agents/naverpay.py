@@ -103,7 +103,9 @@ if(amount)amount=[amount[0],amount[1].replace(/\s+/g,'')];
 // 더 싼 쪽으로 100원 안쪽 차이만 같은 결제로 본다 — 비싸거나 크게 다르면 다른 주문일 수 있어 멈춘다
 const shown=amount?num(amount[1]):0;
 const gap=EXPECTED_AMOUNT-shown;
-if(!amount||gap<0||gap>100)return {ok:false,error:'네이버 결제액 불일치(화면 '+shown+' / 주문서 '+EXPECTED_AMOUNT+')',shown_amount:shown,expected_amount:EXPECTED_AMOUNT};
+// 네이버 결제창이 즉시할인을 붙여 주문서보다 3~4% 싸게 보이기도 한다(실기 2026-11-08 롯데온 21315222858723299: 주문서 72,500 → 네이버 69,819).
+// 더 싼 쪽으로 5% 안쪽(최소 100원)만 같은 결제로 본다 — 비싸거나 그보다 크게 다르면 멈춘다
+if(!amount||gap<0||gap>Math.max(100,Math.floor(EXPECTED_AMOUNT*0.05)))return {ok:false,error:'네이버 결제액 불일치(화면 '+shown+' / 주문서 '+EXPECTED_AMOUNT+')',shown_amount:shown,expected_amount:EXPECTED_AMOUNT};
 // 적립 숫자는 굴러가는 숫자판이라 다 멈추기 전엔 못 읽는다(ABC 모바일 결제창 2026-11-06) — 몇 번 다시 읽는다
 let reward=text.match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);
 for(let i=0;i<6&&!reward;i++){await sleep(800);reward=body(await get()).match(/포인트 혜택\s*[^\d]{0,20}([\d,]+)\s*원\s*적립/);}
