@@ -2244,7 +2244,8 @@ class BuyerAgent(AgentBase):
             args['allow_department'] = (
                 True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
             )
-        if source.required_seller:
+        # 사용자가 직접 고른 상품 링크(작업 옵션 any_seller)는 판매자 제한 없이 산다(사용자 2026-11-07 롯데온 프레씨유 링크)
+        if source.required_seller and not a.options.get('any_seller'):
             args['required_seller'] = (
                 source.required_seller
             )  # 롯데온: 롯데백화점 판매 상품만(사용자 2026-09-27)
