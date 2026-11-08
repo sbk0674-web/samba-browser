@@ -651,8 +651,8 @@ def test_twin_order_no_는_구분자만_바꾼다():
     assert twin_order_no('A-SN241012963') is None
 
 
-def test_kakao_unapproved_requeues_without_kakao(tmp_path):
-    # 사용자 2026-11-05: 카카오 승인을 안 했다고 방치하지 말고 다른 수단으로 다시 산다
+def test_kakao_unapproved_requeues_with_kakao_after_wait(tmp_path):
+    # 사용자 2026-11-08: 최저가(카카오페이)가 아니면 사지 않는다 — 미승인이면 메모 남기고 20분 뒤 카카오페이로 다시 요청
     reg = Registry.load(DEFAULT_ROOT)
     q = JobQueue(tmp_path / 'jobs.sqlite')
     slack = _Slack()
@@ -662,6 +662,9 @@ def test_kakao_unapproved_requeues_without_kakao(tmp_path):
     q._db.execute('UPDATE jobs SET attempts=1 WHERE id=?', (job.id,))
     q.finish(job.id, 'needs_ai', error='kakao_unapproved')
     intake.run_once()
+    assert q.get('K10').state == 'needs_ai'  # 20분 전에는 다시 요청하지 않는다
+    q._db.execute("UPDATE jobs SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?", (job.id,))
+    intake.run_once()
     again = q.get('K10')
     assert again.state == 'queued' and again.attempts == 1
-    assert again.options.get('no_kakao') is True
+    assert not again.options.get('no_kakao')

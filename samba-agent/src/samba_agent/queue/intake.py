@@ -25,6 +25,9 @@ from samba_agent.wave.client import WaveClient, WaveError, WaveOrder, flag_text
 
 log = logging.getLogger(__name__)
 
+# 카카오페이 미승인 주문을 다시 요청하기까지 기다리는 시간(분)
+KAKAO_RETRY_MINUTES = 20
+
 # 소싱처를 끝내 못 찾은 주문을 취소중으로 정리하기까지 기다리는 시간 — 추정·접두어 연결·판매자상품코드 읽기가 돌 틈을 준다
 UNLINKED_CANCEL_AFTER = timedelta(minutes=60)
 
@@ -429,9 +432,27 @@ class Intake:
         품절·마진·검증불일치·결제중단은 결론이거나 결제 위험이 있어 여기서 재시도하지 않는다.
         """
         if job.state == 'needs_ai' and job.error == 'kakao_unapproved':
-            # 카카오페이 승인이 안 와 결제창을 닫은 주문 — 방치하지 않고 카카오페이를 뺀 수단으로 바로 다시 산다(사용자 2026-11-05)
-            self._queue.requeue_without_kakao(job.id)
-            log.info('카카오페이 미승인 주문을 다른 수단으로 다시 큐에 넣었다: %s', job.order_no)
+            # 카카오페이 승인이 안 와 결제창을 닫은 주문 — 더 비싼 수단으로 넘기지 않는다(사용자 2026-11-08: 최저가 아니면 사지 말라).
+            # 20분 뒤 카카오페이로 다시 산다(결제 요청을 다시 보낸다).
+            # 사람이 승인하지 못한 것은 삼바 주문 메모에 한 번 남긴다(사용자 2026-11-08)
+            noted: set[int] = self.__dict__.setdefault('_kakao_noted', set())
+            if job.id not in noted:
+                try:
+                    self._wave.add_memo(
+                        job.order_no,
+                        '[하네스] 카카오페이 결제요청 미승인 — 사람 승인 필요(최저가라 다른 결제수단으로 사지 않고 20분마다 다시 요청)',
+                    )
+                    noted.add(job.id)
+                except Exception as exc:  # noqa: BLE001 — 메모 실패가 재요청을 막으면 안 된다
+                    log.warning('카카오페이 미승인 메모 실패(무시): %s %s', job.order_no, exc)
+            try:
+                age = datetime.now(UTC) - datetime.fromisoformat(str(job.updated_at))
+            except ValueError:
+                age = timedelta(0)
+            if age < timedelta(minutes=KAKAO_RETRY_MINUTES):
+                return False
+            self._queue.requeue_waiting(job.id, error='kakao_unapproved')
+            log.info('카카오페이 미승인 주문을 카카오페이로 다시 큐에 넣었다: %s', job.order_no)
             return True
         if job.state == 'needs_ai' and job.error == 'after_hours':
             # 밤에 카카오페이 승인을 미룬 결제 전 대기 — 업무시간이 되면 횟수와 상관없이 다시 넣는다
