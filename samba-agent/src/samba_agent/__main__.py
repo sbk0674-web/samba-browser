@@ -11,6 +11,7 @@ import os
 import signal
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -577,6 +578,17 @@ def main() -> None:
         for agent in agents.values():
             if isinstance(agent, PayerAgent):
                 agent.money_balance_alert = money_alerts.observe
+
+        # 야간(00~07시)에 미뤄 둔 잔액 알림을 아침에 보낸다 — 결제가 없어도 5분마다 확인(사용자 2026-11-08)
+        def _flush_money_alerts() -> None:
+            while True:
+                try:
+                    money_alerts.flush()
+                except Exception as exc:  # noqa: BLE001 — 알림 실패가 하네스를 멈추면 안 된다
+                    log.warning('무신사머니 미발송 알림 확인 실패: %s', type(exc).__name__)
+                time.sleep(300)
+
+        threading.Thread(target=_flush_money_alerts, name='money-alert-flush', daemon=True).start()
 
     # 자동 수집 — 삼바웨이브 클라이언트가 있고 켜져 있을 때만 돈다. 슬랙이 없으면 스레드 없이 큐에만 쌓인다
     intake: Intake | None = None

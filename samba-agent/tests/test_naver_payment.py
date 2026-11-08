@@ -199,7 +199,7 @@ def test_naver_password_then_unknown_screen_never_claims_unpaid():
 
 
 @pytest.mark.parametrize(
-    'selectable,amount,ok', [(True, 59250, True), (False, 59250, False), (True, 60000, False)]
+    'selectable,amount,ok', [(True, 59250, True), (False, 59250, False), (True, 63000, False)]
 )
 def test_browser_selection_guard_never_agrees_or_uses_money(selectable, amount, ok):
     harness = r"""
@@ -257,9 +257,9 @@ new (Object.getPrototypeOf(async function(){}).constructor)('args','tabs','page'
     assert value['reward_verified'] is verified
 
 
-@pytest.mark.parametrize('expected,ok', [(59300, True), (59250, True), (59400, False), (59200, False)])
+@pytest.mark.parametrize('expected,ok', [(59300, True), (59250, True), (59400, True), (62000, True), (62500, False), (59200, False)])
 def test_naver_amount_allows_only_small_cheaper_gap(expected, ok):
-    # 주문서 72,240 → 네이버 72,190(50원 싸게) 은 같은 결제(실기 2026-11-05). 비싸거나 100원 넘게 다르면 멈춘다
+    # 네이버가 주문서보다 싸게 보이는 건 5% 안쪽까지 같은 결제(실기 2026-11-05 50원, 2026-11-08 즉시할인 2,681원). 비싸거나 5% 넘게 다르면 멈춘다
     harness = r"""
 const page={get:async options=>({tree:options&&options.selector?'[1] radio "현대카드" value="on"':'PAGE TEXT: 네이버페이 결제금액 59,250원 포인트 사용이 불가한 가맹점입니다 포인트 혜택 N592원 적립'}),
 idOf:async text=>text==='동의하고 결제하기'?55:-1,click:async()=>{}};

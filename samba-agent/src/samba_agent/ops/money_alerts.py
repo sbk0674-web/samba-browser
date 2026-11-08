@@ -71,6 +71,30 @@ class MoneyBalanceAlerts:
         self.send = send
         self.now = now or (lambda: datetime.now(KST))
 
+    def flush(self) -> int:
+        """야간에 미뤄 둔 알림을 보낸다 — 저장된 잔액의 구간이 마지막 발송 구간과 다르면 지금 보낸다.
+
+        사용자 2026-11-08: 밤에 61만원대로 떨어진 계정 알림이 아침 이후에도 안 왔다(그 뒤 결제가 없어서).
+        """
+        if self.now().astimezone(KST).hour < 7:
+            return 0
+        try:
+            with sqlite3.connect(self.path, timeout=30) as db:
+                db.execute(
+                    'CREATE TABLE IF NOT EXISTS money_alerts (account TEXT PRIMARY KEY, band INTEGER, balance INTEGER NOT NULL)'
+                )
+                rows = db.execute('SELECT account, band, balance FROM money_alerts').fetchall()
+        except (OSError, sqlite3.Error) as exc:
+            log.warning('무신사머니 알림 상태 읽기 실패: %s', type(exc).__name__)
+            return 0
+        sent = 0
+        for account, band, balance in rows:
+            now_band = money_band(balance)
+            if account in ACCOUNTS and now_band is not None and now_band != band:
+                if self.observe(account, [{'method': '무신사머니', 'balance': balance}]):
+                    sent += 1
+        return sent
+
     def observe(self, account: str, quotes: list[object]) -> bool:
         if account not in ACCOUNTS:
             return False
