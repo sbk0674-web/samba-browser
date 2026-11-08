@@ -4499,9 +4499,17 @@ class BuyerAgent(AgentBase):
         # 판매 상품명에 브랜드가 빠져도(스케쳐스 '남녀 4종 울트라 플렉스 4 0 슬립인') 소싱처 상품명 줄로 고정 브랜드를 안다
         # (실기 2026-11-05 2026110557B626: 상품명만 보고 선물로 보냈다)
         head = str(snap.get('product_head') or '') if snap else ''
+        normal_first = _as_float(snap.get('normal_price')) if snap else 0.0
         if not forced and (is_fixed_kkadaegi(order) or (head and KKADAEGI_BRANDS.search(head))):
-            # 고정 브랜드는 어느 소싱처에서 사든 사무실로 받는다.
+            # 고정 5개 브랜드는 사무실로 받는다 — 단 손님 결제액이 정가보다 낮으면 선물하기(사용자 2026-11-08)
             forced = 'kkadaegi'
+            if (
+                source.gift_unless_poison
+                and normal_first > 0
+                and 0 < order.sale_price < normal_first
+                and not self._gift_blocked_region(order)
+            ):
+                forced = 'gift'
         if source.gift_unless_poison and not forced:
             # 롯데온·SSG: 포이즌·라자다 배대지는 사무실 수령(까대기), 그 밖은 전부 선물하기 — 정가 비교 없이 정해진다
             # (사용자 2026-09-27 롯데온, 2026-09-29 SSG "까대기 제외하고 선물하기")
@@ -4510,11 +4518,8 @@ class BuyerAgent(AgentBase):
                 if is_poison_seller(order.seller) or self._is_forwarder(order)
                 else 'gift'
             )
-            # 선물(고객 직배)은 고객 결제액이 소싱처 정가보다 낮을 때만 — 정가 ≤ 결제액이면 정가 택을 보고 환불 요청이 오니
-            # 사무실(까대기)로 받는다(사용자 2026-11-05: 스케쳐스 정가 90,300 상품을 104,800 에 팔고 고객에게 선물로 보냄)
-            normal0 = _as_float(snap.get('normal_price')) if snap else 0.0
-            if forced == 'gift' and normal0 > 0 and order.sale_price > 0 and normal0 <= order.sale_price:
-                forced = 'kkadaegi'
+            # 고정 5개 브랜드가 아니면 정가와 상관없이 무조건 선물하기(사용자 2026-11-08 — 11-05 정가 비교 규칙 폐기:
+            # 프레데터 축구화 정가 87,200 ≤ 결제 91,900 이라 사무실로 받아 손님 주문이 취소됐다)
             if forced == 'gift' and self._gift_blocked_region(order):
                 # 롯데온: '선물하기 주문은 제주/도서산간 지역은 배송이 불가'(실기 2026-09-30) — 그 주소는 직배로 산다
                 forced = 'direct'
