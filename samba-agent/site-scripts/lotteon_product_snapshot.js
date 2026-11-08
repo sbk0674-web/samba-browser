@@ -1,7 +1,7 @@
 const so=t=>/\[품절\]|\s품절$/.test(t);
 const cl=t=>t.replace(/\(?\s*품절임박\s*\)?/g,'').replace(/\d+\s*개\s*남음/g,'').replace(/\[?품절\]?/g,'').replace(/\s(\d{1,3},\d{3}|\d{4,})(?=\s|$)/g,' ').replace(/\s+/g,' ').trim();
 const nm=s=>s.toLowerCase().replace(/[\s()·\-\/,]/g,'');const bz=k=>k.replace(/\([^)]*\)/g,'');const TK=s=>String(s||'').split(/[\s·]+/).filter(Boolean);
-const WF=/화이트|white|아이보리|크림/i;const SM={xs:'080',s:'085',m:'090',l:'095',xl:'100',xxl:'105'};
+const WF=/화이트|white|아이보리|크림/i;const BC='블랙|black,화이트|white|아이보리|ivory|크림,네이비|navy,그레이|gr[ae]y,베이지|beige,브라운|brown,레드|red,블루|blue,그린|green,핑크|pink'.split(','),cc=x=>BC.map((q,i)=>new RegExp(q,'i').test(x)?i:-1).filter(i=>i>=0),xc=(a,b)=>{const p=cc(a),q=cc(b);return p.length&&q.length&&!p.some(i=>q.includes(i))};const SM={xs:'080',s:'085',m:'090',l:'095',xl:'100',xxl:'105'};
 const CODE=k=>/^(?=.*\d)(?=.*[A-Za-z])\w{5,}$/.test(k);
 function pe(t){const o=[];for(const l of t.split('\n')){const m=l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?/);if(m)o.push({id:parseInt(m[1]),role:m[2],text:m[3]||''});}return o;}
 const gr=async s=>pe((await page.get({selector:s})).tree);
@@ -57,7 +57,7 @@ if(args.size&&!m&&opts.some(o=>so(o.text)&&sc(o.text,args.size)>=85)){r.note='si
 const isCol=/색상|컬러|color/i.test(lab(combo));
 if(isCol)cs=true;
 if(!m&&live.length===1&&(!(wc&&isCol)||!/[가-힣]{2,}|[A-Za-z]{3,}/.test(cl(live[0].text)))){m=live[0];fb=true;}
-if(!m&&isCol&&live.length===1&&(opts.length===lA.length||WF.test(cl(live[0].text))&&WF.test(args.size||'')))m=live[0];
+if(!m&&isCol&&live.length===1&&!xc(args.size,live[0].text)&&(opts.length===lA.length||WF.test(cl(live[0].text))&&WF.test(args.size||'')))m=live[0];
 if(!m&&wc&&isCol){r.note=NO+'색상';pc=false;break;}
 if(!m&&!args.size)m=live[0];
 if(m){picked.push(cl(m.text));pw=m.text;await page.click(m.id);await sleep(700);}
