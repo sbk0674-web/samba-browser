@@ -162,25 +162,8 @@ describe('당근 마지막 메시지 날짜 근거', () => {
 })
 
 describe('날짜 표시', () => {
-  it('정밀하게 확인한 오늘 시각을 오래된 상대 날짜로 표시하지 않는다', () => {
-    expect(view.lastAtLabel('2일 전', Date.parse('2026-11-03T08:58:00+09:00'),
-      Date.parse('2026-11-03T09:30:00+09:00'), true)).toBe('08:58')
-    expect(view.lastAtLabel('2일 전', Date.parse('2026-11-03T00:00:00+09:00'),
-      Date.parse('2026-11-03T09:30:00+09:00'), false)).toBe('2일 전')
-  })
-  const label = (text: string, at: number) => {
-    const fn = (view as unknown as Record<string, (...args: unknown[]) => string>).lastAtLabel
-    expect(fn, '화면 날짜 표시 함수를 직접 검증한다').toBeTypeOf('function')
-    return fn(text, at, now.getTime())
-  }
-  it('당근 목록의 오늘 시간은 시간만 표시한다', () => {
-    expect(label('오후 03:52', 0)).toBe('오후 03:52')
-  })
-  it('KST 어제와 오늘을 구분한다', () => {
-    expect(label('오후 03:52', yesterday)).toBe('어제 오후 03:52')
-    expect(label('15:45', today)).toBe('15:45')
-  })
-  it('그제보다 오래된 메시지는 무조건 어제라고 하지 않는다', () => {
-    expect(label('15:52', Date.parse('2026-10-28T15:52:00+09:00'))).toBe('2026.10.28 15:52')
+  it.each(['어제 오후 09:23', '1일 전', '오후 03:52', '2일 전'])('원본 표기를 유지한다: %s', text => {
+    expect(view.lastAtLabel(text, Date.parse('2026-11-08T12:00:00+09:00'),
+      Date.parse('2026-11-09T15:00:00+09:00'), true)).toBe(text)
   })
 })

@@ -26,24 +26,9 @@ export function withNativeListOrder(channels: readonly DaangnChannelDto[], now =
   })
 }
 
-/** 오늘은 시간만, 확인된 이전 날짜는 날짜와 시간을 표시한다. */
-export function lastAtLabel(text: string, lastAt: number, now = Date.now(), precise = false): string {
-  // 본문에서 확인한 오늘 시각에 목록의 오래된 '2일 전'을 계속 붙이지 않는다.
-  if (precise && Number.isFinite(lastAt) && lastAt > 0 &&
-      !/^(?:(?:오전|오후)\s*)?\d{1,2}:\d{2}$/.test(text.trim())) {
-    const stamp = new Date(lastAt + 9 * 3_600_000)
-    text = `${String(stamp.getUTCHours()).padStart(2, '0')}:${String(stamp.getUTCMinutes()).padStart(2, '0')}`
-  }
-  if (!/^(?:(?:오전|오후)\s*)?\d{1,2}:\d{2}$/.test(text.trim())) return text
-  if (!Number.isFinite(lastAt) || lastAt <= 0) return text
-  const kstDay = (at: number): number => Math.floor((at + 9 * 3_600_000) / 86_400_000)
-  const days = kstDay(now) - kstDay(lastAt)
-  if (days === 0) return text
-  if (days === 1) return `어제 ${text}`
-  const date = new Date(lastAt + 9 * 3_600_000)
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(date.getUTCDate()).padStart(2, '0')
-  return `${date.getUTCFullYear()}.${mm}.${dd} ${text}`
+/** 당근 원본 목록의 날짜 표기를 그대로 표시한다. */
+export function lastAtLabel(text: string, _lastAt?: number, _now?: number, _precise?: boolean): string {
+  return text
 }
 
 /** 통합 목록에 보일 채널 — 안읽음만/전체, 계정 필터, 최근순 */
