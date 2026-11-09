@@ -4808,6 +4808,15 @@ class BuyerAgent(AgentBase):
                 )
                 if 'none' not in closed:
                     self.note('배송지', f'주문할인혜택 창 닫기: {closed[:40]}')
+                if 'still-open' in closed or 'no-close-button' in closed:
+                    # run_js 클릭으로 안 닫히는 날이 있다(실기 2026-11-09 4735 두 번 'still-open' → 배송지 저장 실패).
+                    # 결제 단계에서 통한 방식 그대로 — 찾기 도구의 덮개 안내(close ids)로 닫기 버튼을 누른다
+                    box = str(self.tool('find_elements', query='주문할인혜택'))
+                    hit = re.search(r'OVERLAY: "[^"]*주문할인혜택[^"]*".*?close ids: \[(\d+)', box, re.S)
+                    if hit:
+                        self.tool('click', id=int(hit.group(1)))
+                        self.tool('wait', ms=1200)
+                    self.note('배송지', f'주문할인혜택 창 찾기 닫기: {hit.group(1) if hit else "덮개 안내 없음"}')
             except AgentFailure as e:
                 self.note('배송지', f'주문할인혜택 창 닫기 실패({e.reason[:60]})')
         if not overwrite and self._select_existing_shipping(dict(shipping), account):
