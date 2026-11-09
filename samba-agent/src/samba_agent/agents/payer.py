@@ -1579,11 +1579,11 @@ class PayerAgent(AgentBase):
                     self.note('키패드 입력', '현재 계정 탭이 주문 완료 화면 — 기존 결제 검증으로 진행')
                     return NO_KEYPAD_PAID
             self._stop_if_login_popup(popups, a)
-            if str(a.handoff.get('buy_source') or a.order.source).upper() == 'LOTTEON' and attempt < 6:
+            if str(a.handoff.get('buy_source') or a.order.source).upper() == 'LOTTEON':
                 try:
                     cleared = str(self.tool('run_js', code=LOTTEON_DISCOUNT_OVERLAY_JS))
-                    if 'applied' in cleared or 'no-button' in cleared or 'closed' in cleared:
-                        self.note('주문할인 창', cleared[:40])
+                    if attempt == 0 or 'none' not in cleared:
+                        self.note('주문할인 창', mask_text(cleared[:80]))
                 except AgentFailure as e:
                     self.note('주문할인 창', mask_text(f'처리 실패: {e.reason}'[:120]))
             targets = [str(p['id']) for p in reversed(popups) if p.get('id')] or ['']
