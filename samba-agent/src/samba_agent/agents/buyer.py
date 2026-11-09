@@ -4611,7 +4611,12 @@ class BuyerAgent(AgentBase):
         # (실기 2026-11-05 2026110557B626: 상품명만 보고 선물로 보냈다)
         head = str(snap.get('product_head') or '') if snap else ''
         normal_first = _as_float(snap.get('normal_price')) if snap else 0.0
-        if not forced and (is_fixed_kkadaegi(order) or (head and KKADAEGI_BRANDS.search(head))):
+        head_brand = KKADAEGI_BRANDS.search(head) if head else None
+        if head_brand and not is_fixed_kkadaegi(order):
+            # 판매 상품명엔 없는데 소싱처 화면 글(가격 앞 250자)에서 브랜드를 찾았다 — 근거를 남긴다
+            # (실기 2026-11-09 4735 다이나핏 패딩이 까대기로 사졌다: 어느 글자가 걸렸는지 기록이 없었다)
+            self.note('배송 종류 근거', mask_text(f'상품명 줄 브랜드 [{head_brand.group(0)}] … {head[-120:]}'))
+        if not forced and (is_fixed_kkadaegi(order) or head_brand):
             # 고정 5개 브랜드는 사무실로 받는다 — 단 손님 결제액이 정가보다 낮으면 선물하기(사용자 2026-11-08)
             forced = 'kkadaegi'
             if (
@@ -4633,7 +4638,8 @@ class BuyerAgent(AgentBase):
             # 프레데터 축구화 정가 87,200 ≤ 결제 91,900 이라 사무실로 받아 손님 주문이 취소됐다)
             if (
                 forced == 'gift'
-                and is_price_check_brand(order, head)
+                # 정가 비교 브랜드는 판매 상품명(품번 포함)으로만 본다 — 화면 글(head)엔 다른 상품 글자가 섞인다(4735)
+                and is_price_check_brand(order)
                 and normal_first > 0
                 and normal_first <= order.sale_price
             ):
