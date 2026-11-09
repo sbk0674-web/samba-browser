@@ -2349,3 +2349,28 @@ def test_키마스터_조회가_탭_불일치로_거절되면_그_사이트_탭�
     agent.tool = tool
     assert agent._payable_providers('edelvise06') == {'site', 'naver', 'kakao'}
     assert ('switch_tab', {'id': 't2'}) in calls
+
+
+@pytest.mark.parametrize('source', ['LOTTEON', 'SSG'])
+def test_롯데온_SSG_스케쳐스는_정가_이하로_팔면_까대기_비싸게_사면_선물(reg, source):
+    """실기 2026-11-09 3481883950 엣지라이더: 정가 63,360 ≤ 결제 88,700 인데 선물로 샀다(11-08 수정이 정가 비교까지 지움)."""
+    skx = OrderRef(
+        order_no='S2',
+        source=source,
+        seller='GS샵',
+        sku='매장정품 스케쳐스 SKECHERS 여성 엣지라이더 SL0WPCFY353 여성운동화',
+        qty=1,
+        sale_price=88700,
+    )
+    spec = reg[f'buyer.{source.lower()}']
+    a = BuyerAgent(
+        spec, BridgeClient(URL, 'a' * 64, allowed=spec.tools, busy_wait_s=0.0), lambda _p, _m: '{}'
+    )
+    assert a.order_type_of(skx, {'normal_price': 63360}) == 'kkadaegi'
+    assert a.order_type_of(skx.model_copy(update={'sale_price': 60000}), {'normal_price': 63360}) == 'gift'
+    # 브랜드 글자 없이 품번만 있어도 스케쳐스다
+    bare = skx.model_copy(update={'sku': '여성 엣지라이더 SL0WPCFY353'})
+    assert a.order_type_of(bare, {'normal_price': 63360}) == 'kkadaegi'
+    # 아디다스는 정가 비교 안 함 — 무조건 선물(11-08 프레데터)
+    adi = skx.model_copy(update={'sku': '아디다스 프레데터 축구화', 'sale_price': 91900})
+    assert a.order_type_of(adi, {'normal_price': 87200}) == 'gift'
