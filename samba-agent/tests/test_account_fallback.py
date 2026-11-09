@@ -109,10 +109,9 @@ def test_구매_한도에_걸린_계정은_빼고_다음으로_싼_계정으로_
     )
     account, snap = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
     assert account == 'buyer02'  # 한도 계정 다음으로 싼 계정(동률이면 앞 계정)
-    # 결제가 최저를 찾으려 남은 계정도 모두 주문서로 견적한다(사용자 2026-11-09)
-    assert calls == ACCOUNTS
-    # 이긴 계정이 마지막으로 연 계정이 아니므로 그 주문서를 다시 연다
-    assert snap.get('resnap') is True
+    # 산 계정의 주문서까지만 만든다 — 마지막으로 연 계정이라 다시 만들지 않는다
+    assert calls == ['buyer01', 'buyer02']
+    assert snap.get('resnap') is not True
 
 
 @respx.mock
@@ -217,7 +216,7 @@ def test_결제_항목_없는_계정이_뽑히면_다음_계정으로_잇는다(
     )
     account, _ = buyer._pick_cheapest(assignment(buyer), ACCOUNTS)
     assert account == 'buyer02'  # 결제 항목 없는 최저 계정은 빠지고 그다음으로 싼 계정
-    assert calls[:2] == ['buyer01', 'buyer02']
+    assert calls == ['buyer01', 'buyer02']
 
 
 def test_계정_사유_판정() -> None:

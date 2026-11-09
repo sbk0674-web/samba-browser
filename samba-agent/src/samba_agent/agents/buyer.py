@@ -3983,18 +3983,6 @@ class BuyerAgent(AgentBase):
                 got = self._payable_only(self._audit_quotes(a, got))
                 if got:
                     quotes = self._prefer_points_user(a, got, ranked or [], tried)
-                    # 화면가(빠른 비교)는 결제수단 할인(페이코·현대카드 청구할인 등)을 모른다 — 화면가가 조금 비싼
-                    # 계정도 결제가가 더 쌀 수 있어 남은 계정도 주문서로 견적해 함께 견준다
-                    # (사용자 2026-11-09 "무조건 결제가가 가장 싼 걸로")
-                    rest = [x for x in (ranked or []) if x not in tried]
-                    if rest:
-                        tried.extend(rest)
-                        try:
-                            more = self._payable_only(self._audit_quotes(a, self._quote_batch(a, rest)))
-                        except AgentFailure as e:
-                            self.note('계정 비교', mask_text(f'{", ".join(rest)}: 견적 불가({e.reason[:60]})'))
-                            more = []
-                        quotes = [*quotes, *more]
                     break
                 unpayable = True  # 결제 항목 없음도 계정 사유다 — 다음 계정으로 잇는다
                 continue
