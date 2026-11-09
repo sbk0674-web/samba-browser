@@ -1245,6 +1245,18 @@ _CLOSE_LOTTEON_DISCOUNT_JS = (
     '}\n'
     "return 'still-open'"
 )
+# 배송지 단계 '주문할인혜택' 창 — 닫기로 안 닫히면 할인율 큰 칸(롯데카드 우선)을 고르고 '…원 할인혜택 받기'를 누른다.
+# 결제 확정 버튼은 누르지 않는다(payer.LOTTEON_DISCOUNT_OVERLAY_JS 와 같은 동작, 덮개 줄 검사만 뺐다)
+_APPLY_LOTTEON_DISCOUNT_JS = r"""
+const tab = __TAB__
+if (tab) { try { await tabs.switch(tab) } catch (e) {} }
+const P = l => +(l.match(/(\d+)%/) || [0, 0])[1] + (/롯데카드/.test(l) ? 99 : 0)
+const q = String((await page.get({ query: '%' })).tree || '').split(String.fromCharCode(10)).filter(l => /^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x, y) => P(y) - P(x))
+if (q.length) { await page.clickNative(parseInt(q[0].slice(1))); await sleep(1200) }
+const g = String((await page.get({ query: '할인혜택 받기' })).tree || '').split(String.fromCharCode(10)).filter(l => /button "[\d,]+원 할인혜택 받기"/.test(l)).map(l => parseInt(l.slice(1)))
+if (g.length) { await page.click(g[0]); await sleep(2500); return 'applied' }
+return 'no-button'
+"""
 # 레인 보기에서는 제 레인이 연 탭만 보인다 — 전부 닫으면 그 레인 탭만 닫힌다
 _CLOSE_LANE_TABS_JS = (
     'for (const t of await tabs.list()) { try { await tabs.close(t.id) } catch (e) {} } return "ok"'
@@ -4816,13 +4828,16 @@ class BuyerAgent(AgentBase):
                     self.note('배송지', f'주문할인혜택 창 닫기: {closed[:40]}')
                 if 'still-open' in closed or 'no-close-button' in closed:
                     # run_js 클릭으로 안 닫히는 날이 있다(실기 2026-11-09 4735 두 번 'still-open' → 배송지 저장 실패).
-                    # 결제 단계에서 통한 방식 그대로 — 찾기 도구의 덮개 안내(close ids)로 닫기 버튼을 누른다
-                    box = str(self.tool('find_elements', query='주문할인혜택'))
-                    hit = re.search(r'OVERLAY: "[^"]*주문할인혜택[^"]*".*?close ids: \[(\d+)', box, re.S)
-                    if hit:
-                        self.tool('click', id=int(hit.group(1)))
-                        self.tool('wait', ms=1200)
-                    self.note('배송지', f'주문할인혜택 창 찾기 닫기: {hit.group(1) if hit else "덮개 안내 없음"}')
+                    # 앱은 이 창을 '결제 창 — 닫지 말 것'으로 분류해 닫기 안내(close ids)를 주지 않는다(실기 2026-11-09
+                    # 증거화면 752002719825932). 결제 단계와 같이 할인율 큰 칸을 고르고 '할인혜택 받기'로 창을 넘긴다
+                    applied = str(
+                        self.tool(
+                            'run_js',
+                            code=_APPLY_LOTTEON_DISCOUNT_JS.replace('__TAB__', json.dumps(self._ship_tab)),
+                            safety='no_pay',
+                        )
+                    )
+                    self.note('배송지', f'주문할인혜택 받기: {applied[:40]}')
             except AgentFailure as e:
                 self.note('배송지', f'주문할인혜택 창 닫기 실패({e.reason[:60]})')
         if not overwrite and self._select_existing_shipping(dict(shipping), account):
