@@ -3922,24 +3922,21 @@ class BuyerAgent(AgentBase):
             )
             return quotes
         cost = _as_float(snap.get('cost'))
-        # 원가가 가장 싼 계정을 먼저 고르고, 원가가 같을 때만 보유 적립금이 많은 쪽 — 적립금으로 고르다가
-        # 더 싼 계정(페이코·현대카드 청구할인 등)을 버렸다(실기 2026-11-06~09 135건 중 12건, 사용자 지적)
-        if not got:
-            self.note('계정 전환', f'같은 값 계정 견적 없음 — {acc} 로 산다')
+        # 원가가 더 비싸지 않은 것만 — 적립금은 원가에 더하므로 원가 자체가 같아야 바꾸는 뜻이 있다
+        same = [(b, s) for b, s in got if _as_float(s.get('cost')) <= cost]
+        if not same:
+            self.note('계정 전환', f'같은 값 계정이 더 비싸거나 견적 없음 — {acc} 로 산다')
             return quotes
-        acc2, snap2 = min(
-            [(acc, snap), *got],
-            key=lambda q: (_as_float(q[1].get('cost')), -_as_float(q[1].get('points_balance'))),
-        )
-        if acc2 == acc:
-            self.note('계정 전환', f'{acc} 원가 {cost:,.0f}원이 가장 싸다 — 그대로 산다')
-            return quotes
-        self.note(
-            '계정 선택',
-            f'{acc2} — 원가 {_as_float(snap2.get("cost")):,.0f}원으로 가장 싸다'
-            f'(보유 적립금 {_as_float(snap2.get("points_balance")):,.0f}원)',
-        )
-        return [(acc2, snap2)]
+        acc2, snap2 = max(same, key=lambda q: _as_float(q[1].get('points_balance')))
+        if _as_float(snap2.get('points_balance')) > balance:
+            self.note(
+                '계정 선택',
+                f'{acc2} — 원가 같고 보유 적립금 {_as_float(snap2.get("points_balance")):,.0f}원'
+                f'(사용 {_as_float(snap2.get("points_used")):,.0f}원)으로 가장 많다',
+            )
+            return [(acc2, snap2)]
+        self.note('계정 전환', f'{acc} 적립금 {balance:,.0f}원이 가장 많다 — 그대로 산다')
+        return quotes
 
     def _pick_cheapest(self, a: Assignment, accounts: list[str]) -> tuple[str, dict[str, object]]:
         """계정마다 견적을 내고 원가가 가장 낮은 계정(같으면 앞 계정)과 그 스냅샷을 고른다.
