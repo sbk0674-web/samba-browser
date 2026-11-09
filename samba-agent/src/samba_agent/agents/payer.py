@@ -1580,6 +1580,17 @@ class PayerAgent(AgentBase):
                     return NO_KEYPAD_PAID
             self._stop_if_login_popup(popups, a)
             if str(a.handoff.get('buy_source') or a.order.source).upper() == 'LOTTEON':
+                # 남은 '배송지 선택' 창이 키패드를 가린다 — run_js 화면 글에는 덮개 줄이 없어 찾기 도구의 덮개 안내로 닫는다
+                # (실기 2026-11-09 4658: '[키패드 없음 창] OVERLAY: "배송지 선택" ... close ids: [326, …]')
+                try:
+                    box = str(self.tool('find_elements', query='배송지 선택'))
+                    hit = re.search(r'OVERLAY: "배송지 선택".*?close ids: \[(\d+)', box)
+                    if hit:
+                        self.tool('click', id=int(hit.group(1)))
+                        self.tool('wait', ms=1200)
+                        self.note('배송지 선택 창', f'키패드를 가려 닫음({hit.group(1)})')
+                except AgentFailure as e:
+                    self.note('배송지 선택 창', mask_text(f'닫기 실패: {e.reason}'[:120]))
                 try:
                     cleared = str(self.tool('run_js', code=LOTTEON_DISCOUNT_OVERLAY_JS))
                     if attempt == 0 or 'none' not in cleared:
