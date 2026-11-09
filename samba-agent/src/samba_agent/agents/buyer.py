@@ -5029,7 +5029,10 @@ class BuyerAgent(AgentBase):
         if not saved.get('ok') or not shipping_matches(shipping, saved):
             raise AgentFailure(
                 'needs_ai',
-                f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:80])}',
+                # 원인을 알 수 있게 되읽은 값의 모양(개인정보 가림)을 같이 남긴다(2026-11-09 선물 주문 3건 note 빈칸)
+                f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:80])} '
+                f'[ok={saved.get("ok")} 이름일치={shipping_matches(shipping, saved)} '
+                f'되읽음={mask_text(str({k: saved.get(k) for k in ("name", "address", "gift", "debug", "dbg") if k in saved})[:160])}]',
                 FailReason.UNKNOWN,
             )
 
