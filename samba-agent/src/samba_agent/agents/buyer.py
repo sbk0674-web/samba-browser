@@ -1254,8 +1254,16 @@ const P = l => +(l.match(/(\d+)%/) || [0, 0])[1] + (/롯데카드/.test(l) ? 99 
 const q = String((await page.get({ query: '%' })).tree || '').split(String.fromCharCode(10)).filter(l => /^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x, y) => P(y) - P(x))
 if (q.length) { await page.clickNative(parseInt(q[0].slice(1))); await sleep(1200) }
 const g = String((await page.get({ query: '할인혜택 받기' })).tree || '').split(String.fromCharCode(10)).filter(l => /button "[\d,]+원 할인혜택 받기"/.test(l)).map(l => parseInt(l.slice(1)))
-if (g.length) { await page.click(g[0]); await sleep(2500); return 'applied' }
-return 'no-button'
+// 합성 클릭으로는 창이 그대로였다(실기 2026-11-09 752002719825932 'applied' 뒤에도 덮개) — 실제 마우스 클릭을 쓴다
+if (g.length) { try { await page.clickNative(g[0]) } catch (e) { await page.click(g[0]) } await sleep(2500) }
+const T = String((await page.get({ query: '할인혜택 받기' })).tree || '')
+if (!/원 할인혜택 받기/.test(T)) return g.length ? 'applied' : 'none'
+// 아직 남아 있으면 창의 '닫기'(받기 버튼 바로 뒤 번호)를 실제 클릭으로 누른다
+const all = String((await page.get({})).tree || '').split(String.fromCharCode(10))
+const bi = all.findIndex(l => /button "[\d,]+원 할인혜택 받기"/.test(l))
+const close = all.slice(bi + 1, bi + 6).find(l => /^\[\d+\] button "닫기"/.test(l))
+if (close) { try { await page.clickNative(parseInt(close.slice(1))) } catch (e) {} await sleep(1500) }
+return /원 할인혜택 받기/.test(String((await page.get({ query: '할인혜택 받기' })).tree || '')) ? 'still-open' : 'closed'
 """
 # 레인 보기에서는 제 레인이 연 탭만 보인다 — 전부 닫으면 그 레인 탭만 닫힌다
 _CLOSE_LANE_TABS_JS = (
