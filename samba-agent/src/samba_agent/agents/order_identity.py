@@ -53,7 +53,10 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     loose = {'free', 'f', 'one', 'onesize', '프리', 'fr'}
     if nums(wanted) and all(re.fullmatch(r'\d{2,3}(?:mm)?', t) or t in loose for t in want) and nums(wanted) <= nums(actual):
         return True
+    # 'BLK(BLACK)'·'095(L)' 처럼 괄호 앞뒤 둘 다 같은 값이다 — 상세가 'BLACK · 095' 로 괄호 안쪽만 보여도 같다
+    # (실기 2026-11-09 무신사 4696 'BLK(BLACK) 095(L) NJ3NR86A' ↔ 'BLACK · 095' 를 다르다고 막았다)
     want_set = set(want) | {t.split('(')[0] for t in want if '(' in t}
+    want_set |= {t.split('(', 1)[1].rstrip(')') for t in want if '(' in t}
     if got and all(t in want_set for t in got) and any(_SIZE_ONLY.fullmatch(t) for t in got):
         return True
     # 색상이 상품에 묶인 사이트는 주문 상세에 사이즈만 보인다 — 사이즈뿐인 값은 주문 옵션 안에 그 사이즈가 있으면 같다.

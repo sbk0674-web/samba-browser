@@ -180,3 +180,13 @@ def test_detail_reference_placeholder_is_not_an_option_value():
     assert paid_option_matches('상세 이미지 참조 L', 'BLACK · L')
     assert paid_option_matches('상세페이지 참고 270', 'BLACK · 270')
     assert not paid_option_matches('상세 이미지 참조 M', 'BLACK · L')
+
+
+def test_괄호_안쪽만_보이는_상세도_같은_옵션():
+    # 실기 2026-11-09 무신사 4696: 'BLK(BLACK) 095(L) NJ3NR86A' ↔ 상세 'BLACK · 095'
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    wanted = 'BLK(BLACK) 095(L) NJ3NR86A'
+    assert paid_option_matches(wanted, 'BLACK · 095')
+    assert not paid_option_matches(wanted, 'WHITE · 095')
+    assert not paid_option_matches(wanted, 'BLACK · 100')
