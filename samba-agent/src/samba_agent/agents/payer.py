@@ -699,6 +699,9 @@ KAKAO_WORK_HOURS = (0, 24)
 # 창이 있으면 할인율 가장 큰 칸(간편결제=롯데카드 우선)을 고르고 '할인혜택 받기'를 누른다. 결제 확정 버튼은 누르지 않는다
 LOTTEON_DISCOUNT_OVERLAY_JS = r"""
 const T=String((await page.get({})).tree||'');
+// 배송지 고를 때 연 '배송지 선택' 창이 닫히지 않고 남아 비밀번호 키패드를 가린다(실기 2026-11-09 4658) — 닫기만 누른다
+const bc=T.match(/OVERLAY: "배송지 선택"[^\n]*close ids: \[(\d+)/);
+if(bc){await page.click(+bc[1]);await sleep(1200);return 'closed-address';}
 if(!/OVERLAY: "[^"]*주문할인혜택/.test(T))return 'none';
 const P=l=>+(l.match(/(\d+)%/)||[0,0])[1]+(/롯데카드/.test(l)?99:0);
 const q=String((await page.get({query:'%'})).tree||'').split(String.fromCharCode(10)).filter(l=>/^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x,y)=>P(y)-P(x));
@@ -1579,7 +1582,7 @@ class PayerAgent(AgentBase):
             if str(a.handoff.get('buy_source') or a.order.source).upper() == 'LOTTEON' and attempt < 6:
                 try:
                     cleared = str(self.tool('run_js', code=LOTTEON_DISCOUNT_OVERLAY_JS))
-                    if 'applied' in cleared or 'no-button' in cleared:
+                    if 'applied' in cleared or 'no-button' in cleared or 'closed' in cleared:
                         self.note('주문할인 창', cleared[:40])
                 except AgentFailure as e:
                     self.note('주문할인 창', mask_text(f'처리 실패: {e.reason}'[:120]))
