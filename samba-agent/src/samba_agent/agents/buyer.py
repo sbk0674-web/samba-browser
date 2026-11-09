@@ -174,6 +174,22 @@ def shipping_for_source(shipping: dict[str, object], source: str) -> dict[str, o
     return {**shipping, 'name': ' '.join(normalized.split())}
 
 
+def join_jibun(shipping: dict[str, object]) -> dict[str, object]:
+    """주소가 동·리 이름에서 끝나고 상세주소가 번지로 시작하면 번지를 주소로 옮긴다.
+
+    쿠팡 등은 '인천 부평구 부개3동' + '69-4 2층' 처럼 번지를 상세주소에 넣어 준다 — 동 이름만으로 주소를 검색하면
+    같은 우편번호의 엉뚱한 건물(길주남로 105-1)이 골라져 오배송됐다(실기 2026-11-05 롯데온 선물 749628328640517).
+    행정동 숫자('부개3동')는 주소 검색이 쓰는 법정동('부개동')으로 바꾼다.
+    """
+    addr = str(shipping.get('address') or '').strip()
+    det = str(shipping.get('address_detail') or '').strip()
+    m = re.match(r'(\d+(?:-\d+)?)(?![\d-])[,\s]*(.*)$', det)
+    if not m or not re.search(r'[가-힣0-9](?:동|리|가)$', addr):
+        return shipping
+    base = re.sub(r'([가-힣])\d+동$', r'\g<1>동', addr)
+    return {**shipping, 'address': f'{base} {m.group(1)}', 'address_detail': m.group(2).strip()}
+
+
 def shipping_matches(expected: dict[str, object], applied: dict[str, object]) -> bool:
     """넣은 배송지와 사이트가 되읽어 준 배송지가 같은 곳인가.
 
@@ -194,6 +210,16 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
         r'(\d+)\s*호', f'{applied.get("address") or ""} {applied.get("address_detail") or ""}'
     )
     if want_ho and got_ho and want_ho[-1] not in got_ho:
+        return False
+    # 지번 주소(…동 69-4)로 넣었으면 되읽은 주소에도 그 번지가 있어야 한다 — 같은 우편번호라도 다른 건물일 수 있다
+    # (실기 2026-11-05 롯데온 선물: 부개동 69-4 대신 길주남로 105-1 로 들어갔는데 우편번호가 같아 통과했다)
+    jibun = re.search(
+        r'[가-힣](?:동|리|가)\s+(\d+(?:-\d+)?)(?![\d-])', str(join_jibun(expected).get('address') or '')
+    )
+    if jibun and not re.search(
+        r'(?<![\d-])' + re.escape(jibun.group(1)) + r'(?![\d-])',
+        f'{applied.get("address") or ""} {applied.get("address_detail") or ""}',
+    ):
         return False
     # 우편번호가 양쪽에 있고 같으면 같은 곳이다 — 지번(41-11)을 도로명(14번길 11)으로 되읽는 사이트(실기: 롯데온)는
     # 숫자 토큰이 달라진다
@@ -4882,6 +4908,8 @@ class BuyerAgent(AgentBase):
 
     def _apply_shipping(self, a: Assignment, shipping: dict[str, object], account: str) -> None:
         """이름·주소를 배송지 스크립트로 넣고 되읽어 대조한다. 원문은 이 함수 밖으로 나가지 않는다."""
+        # 동 이름 + 번지 상세주소는 번지를 주소로 옮겨 검색한다(오배송 방지 2026-11-09)
+        shipping = join_jibun(shipping)
         # 이름·주소만 넘긴다 — phone 키는 출처가 어디든 버린다
         args: dict[str, object] = {
             f: shipping[f] for f in SHIPPING_ARG_FIELDS if shipping.get(f) is not None
