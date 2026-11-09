@@ -17,6 +17,15 @@ def color_code_conflict(wanted: object, actual: object) -> bool:
 _SIZE_ONLY = re.compile(r'^(?:\d{2,3}(?:\([a-z0-9]+\))?|\d?x{0,3}[sml]|free|f)$', re.IGNORECASE)
 
 
+_KO_COLOR = {
+    '블랙': 'black', '검정': 'black', '화이트': 'white', '흰색': 'white', '그레이': 'grey', '회색': 'grey',
+    '베이지': 'beige', '네이비': 'navy', '아이보리': 'ivory', '샌드': 'sand', '크림': 'cream', '코코아': 'cocoa',
+    '초코': 'choco', '체스트넛': 'chestnut', '브라운': 'brown', '카키': 'khaki', '블루': 'blue', '그린': 'green',
+    '핑크': 'pink', '레드': 'red', '차콜': 'charcoal', '퍼플': 'purple', '옐로우': 'yellow', '오렌지': 'orange',
+    '민트': 'mint', '실버': 'silver', '골드': 'gold', 'gray': 'grey',
+}
+
+
 def _tokens(value: object) -> list[str]:
     """옵션 글자를 낱말로 — 주문 옵션에만 붙는 수량('1개')은 뺀다."""
     text = re.sub(r'(?<!\S)\d+\s*개(?!\S)', ' ', str(value or '').casefold())
@@ -27,7 +36,10 @@ def _tokens(value: object) -> list[str]:
     # 원사이즈 표기 ONE·OS·F·프리는 FREE 와 같다(실기 2026-11-04 롯데온 4133 'WHS(WHITE SAND) FREE' ↔ 'ONE')
     # 무신사 모자의 OSFM(One Size Fits Most)도 원사이즈다(실기 2026-11-07 뉴에라 '블랙 프리 사이즈' ↔ 'OSFM')
     one = {'one', 'onesize', 'os', 'osfm', 'f', '프리', 'fr'}
-    return ['free' if t in one else t for t in re.split(r'[\s/:,·]+', text) if t]
+    # 한글 색은 영문 선택지와 같은 색이다(실기 2026-11-09 무신사 4730 '코코아 230' ↔ 'COCOA · 230', '블랙' ↔ 'BLACK')
+    return [
+        'free' if t in one else _KO_COLOR.get(t, t) for t in re.split(r'[\s/:,·]+', text) if t
+    ]
 
 
 def paid_option_matches(wanted: object, actual: object) -> bool:

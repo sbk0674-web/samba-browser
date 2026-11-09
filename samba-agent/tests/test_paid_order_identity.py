@@ -190,3 +190,13 @@ def test_괄호_안쪽만_보이는_상세도_같은_옵션():
     assert paid_option_matches(wanted, 'BLACK · 095')
     assert not paid_option_matches(wanted, 'WHITE · 095')
     assert not paid_option_matches(wanted, 'BLACK · 100')
+
+
+def test_한글_색과_영문_선택지는_같은_옵션():
+    # 실기 2026-11-09 무신사 4730 '코코아 230' ↔ 'COCOA · 230'
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    assert paid_option_matches('EU 코코아 EU 36 · KR 230', 'COCOA · 230')
+    assert paid_option_matches('블랙 270', 'BLACK · 270')
+    assert not paid_option_matches('블랙 270', 'WHITE · 270')
+    assert not paid_option_matches('코코아 230', 'COCOA · 240')

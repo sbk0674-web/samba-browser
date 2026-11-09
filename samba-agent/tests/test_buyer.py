@@ -2374,3 +2374,14 @@ def test_롯데온_SSG_스케쳐스는_정가_이하로_팔면_까대기_비싸�
     # 아디다스는 정가 비교 안 함 — 무조건 선물(11-08 프레데터)
     adi = skx.model_copy(update={'sku': '아디다스 프레데터 축구화', 'sale_price': 91900})
     assert a.order_type_of(adi, {'normal_price': 87200}) == 'gift'
+
+
+def test_무신사_한글_색은_영문_선택지_표기로_넘긴다():
+    """실기 2026-11-09 4730: 'EU 코코아 EU 36 · KR 230' 이 COCOA 선택지를 못 골랐다."""
+    from samba_agent.agents.buyer import musinsa_color_en, snapshot_args
+
+    assert musinsa_color_en('EU 코코아 EU 36 · KR 230') == 'EU COCOA EU 36 · KR 230'
+    assert musinsa_color_en('블랙 270') == '블랙 270'
+    order = OrderRef(order_no='C1', source='MUSINSA', seller='쿠팡', sku='클로그', option='코코아 230', qty=1)
+    assert json.loads(snapshot_args('buyer.musinsa', order))['size'] == 'COCOA 230'
+    assert json.loads(snapshot_args('buyer.lotteon', order))['size'] == '코코아 230'

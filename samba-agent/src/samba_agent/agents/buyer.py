@@ -1059,6 +1059,23 @@ def _sold_out(option: str) -> bool:
     return _SOLD_OUT_RE.search(option) is not None
 
 
+# 무신사 선택지는 영문 색(COCOA·CHOCO)인데 주문 옵션은 한글('EU 코코아 EU 36 · KR 230')이다. 스냅샷 스크립트는
+# 블랙·화이트 등 8색만 영문으로 바꾼다(앱 스크립트 8,000자 한도라 사전을 못 늘림) — 나머지 색은 여기서 바꿔 넘긴다
+# (실기 2026-11-09 4730 락피쉬 클로그: COCOA 230 재고가 있는데 '옵션 불일치 []' 로 멈췄다)
+_MUSINSA_COLOR_EN = {
+    '코코아': 'COCOA', '초코': 'CHOCO', '체스트넛': 'CHESTNUT', '브라운': 'BROWN', '카키': 'KHAKI',
+    '블루': 'BLUE', '그린': 'GREEN', '핑크': 'PINK', '레드': 'RED', '차콜': 'CHARCOAL', '퍼플': 'PURPLE',
+    '옐로우': 'YELLOW', '오렌지': 'ORANGE', '민트': 'MINT', '실버': 'SILVER', '골드': 'GOLD',
+}
+
+
+def musinsa_color_en(option: str) -> str:
+    """주문 옵션의 한글 색 낱말(8 기본색 밖)을 무신사 영문 선택지 표기로 바꾼다. 나머지 글자는 그대로."""
+    return re.sub(
+        '|'.join(_MUSINSA_COLOR_EN), lambda m: _MUSINSA_COLOR_EN[m.group(0)], str(option or '')
+    )
+
+
 def snapshot_args(agent_name: str, order: OrderRef, account: str | None = None) -> str:
     """run_script 에 넘길 JSON 문자열. 옵션이 있으면 size 로, 계정이 있으면 account 로 같이 준다.
 
@@ -1066,7 +1083,9 @@ def snapshot_args(agent_name: str, order: OrderRef, account: str | None = None) 
     """
     args: dict[str, object] = {'sku': product_ref(agent_name, order), 'qty': order.qty}
     if order.option:
-        args['size'] = order.option
+        args['size'] = (
+            musinsa_color_en(order.option) if 'musinsa' in agent_name else order.option
+        )
     account = account or order.account
     if account:
         # 계정별 탭 프로필 — 세션(쿠키)이 계정마다 따로라 다른 계정으로 로그인된 채 사는 일이 없다
