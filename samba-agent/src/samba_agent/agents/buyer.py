@@ -2898,6 +2898,20 @@ class BuyerAgent(AgentBase):
         except AgentFailure as e:
             self.note('주문서 정리', mask_text(f'{account}: 열린 주문서 못 닫음({e.reason[:60]})'))
 
+    def _close_lotteon_sheets(self, account: str) -> None:
+        """이 계정 프로필의 롯데온 주문서 탭을 모두 닫는다 — 결제 단계는 브라우저 전체에서 이 계정 주문서가 하나일 때만
+        결제한다(payer). 레인 안 탭만 닫는 _close_order_tabs 로는 남아 '주문서 탭 2개'로 멈췄다(실기 2026-11-10)."""
+        try:
+            for t in json.loads(self.tool('list_tabs')):
+                if (
+                    isinstance(t, dict)
+                    and 'orderSheet' in str(t.get('url') or '')
+                    and str(t.get('profile') or '') == str(account)
+                ):
+                    self.tool('close_tab', id=str(t.get('id')))
+        except (AgentFailure, ValueError) as e:
+            self.note('주문서 정리', mask_text(f'{account}: 롯데온 주문서 못 닫음({str(e)[:60]})'))
+
     def _close_product_tabs(self, account: str, product_url: str) -> None:
         """이 레인에 남은 그 상품 탭을 닫는다(같은 스크립트를 재시도했으면 여럿일 수 있다). 못 닫아도 이어 간다."""
         if not product_url.startswith('http'):
@@ -4499,7 +4513,7 @@ class BuyerAgent(AgentBase):
                 # 샵백 경로로 3번 'cost not read', 바로 열면 정상(실기 2026-11-10 752400788766783)
                 self.note('옵션 재선택', '진입 경로 주문서 가격 못 읽음 — 바로 들어가 다시 연다')
                 # 앞 시도의 주문서 탭을 닫는다 — 남기면 결제 단계가 '주문서 탭 2개'로 멈춘다(실기 2026-11-10 752400788766783)
-                self._close_order_tabs(account)
+                self._close_lotteon_sheets(account)
                 snap = self._snapshot_once(a, account)
             pno = (re.search(r'/p/product/([A-Z]{2}\d+)', a.order.product_url or '') or [None, ''])[1]
             if (
@@ -4512,7 +4526,7 @@ class BuyerAgent(AgentBase):
                 # 롯데ON 몰 상품 화면의 '선물하기'는 "롯데백화점몰에서 구매" 확인창을 띄우고, 하네스 브라우저는 확인창을
                 # 자동 취소해 아무 일도 없다(실기 2026-11-10 752400788766783 4회). 롯데백화점몰 주소로 열면 바로 된다
                 self.note('옵션 재선택', '선물하기 막힘 — 롯데백화점몰(mall_no=2) 주소로 다시 연다')
-                self._close_order_tabs(account)
+                self._close_lotteon_sheets(account)
                 snap = self._snapshot_once(
                     a, account, {'sku': f'https://www.lotteon.com/p/product/{pno}?mall_no=2'}
                 )
