@@ -3365,6 +3365,17 @@ class BuyerAgent(AgentBase):
         # 걸러내기 전 원본 견적(주문서가 보여 준 수단·스크립트가 읽은 줄)도 남긴다 — L.PAY 롯데카드 줄이
         # 주문서에 없었는지, 읽다 실패했는지, 걸러졌는지 구분한다(사용자 2026-10-06 롯데온 노스페이스)
         self.note('견적 원본', f'주문서 {offered} / 읽은 줄 {_quote_rows_brief(list(raw_quotes))}')
+        # 29CM 주문서의 페이코 줄은 즉시할인(2,000원)이 빠진 값으로 보이지만 실제 결제엔 적용되지 않았다 —
+        # 견적이 4번 연속 1,946원(=2,000×카드할인) 싸게 나왔다(실기 2026-11-10 29CM 21315224007853299 외 3건).
+        # 페이코 줄은 기본 결제액보다 싸게 잡지 않는다
+        base = _as_float(out.get('base_cost'))
+        if src.key == 'cm29' and base > 0:
+            raw_quotes = [
+                {**q, 'cost': base}
+                if isinstance(q, dict) and '페이코' in str(q.get('method') or '') and 0 < _as_float(q.get('cost')) < base
+                else q
+                for q in raw_quotes
+            ]
         # 애드픽 적립은 견적 원가에 더하지 않는다(사용자 2026-09-27: 제휴 적립은 원가 밖)
         quotes = cheapest_quotes(
             raw_quotes,
