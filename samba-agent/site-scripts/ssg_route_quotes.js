@@ -25,7 +25,7 @@ const tree = async o => { for (let i = 0; i < 3; i++) { if (dead) return ''; try
 const text = async () => nz((await tree()).split('PAGE TEXT:')[1])
 const ids = t => t.split('\n').filter(l => /^\[\d+\]/.test(l))
 const hrefOf = l => (l.match(/href=(\S+)/) || [])[1] || ''
-const mallOk = u => /shinsegaemall\.ssg\.com/.test(u) || /[?&]siteNo=6004(?!\d)/.test(u) || (args.allow_department === true && (/department\.ssg\.com/.test(u) || /[?&]siteNo=6009(?!\d)/.test(u)))
+const mallOk = u => args.any_mall === true || /shinsegaemall\.ssg\.com|[?&]siteNo=6004(?!\d)/.test(u) || (args.allow_department === true && /department\.ssg\.com|[?&]siteNo=6009(?!\d)/.test(u))
 const readSsg = async () => {
 try { await TO(page.waitFor(/바로구매|품절|입고알림/, 8000), 9000) } catch (e) {}
 const url = await TO(page.url(), 5000, ''), t = await text()
@@ -67,7 +67,7 @@ await sleep(2500)
 const pc = [...new Set(ids(await tree({ selector: 'a[href*="prod.danawa.com/info/?pcode="]' })).map(l => (hrefOf(l).match(/pcode=(\d+)/) || [])[1]).filter(Boolean))].slice(0, 1)
 let hit = null, direct = null
 if (!pc.length) {
-const rows = ids(await tree({ selector: 'a[href*="cmpny_c=ED901"]' })).filter(l => (l.match(/link "([^"]*)"/) || [])[1] || '').filter(l => l.includes(item))
+const rows = ids(await tree({ selector: 'a[href*="cmpny_c="]' })).filter(l => (l.match(/link "([^"]*)"/) || [])[1] || '').filter(l => l.includes(item))
 const rid = [...new Set(rows.map(l => (l.match(/^\[(\d+)\]/) || [])[1]))].slice(0, 3)
 const base = (await tabs.list()).map(t => t.id), first = opened[0]
 for (const r of rid) {
@@ -92,11 +92,12 @@ for (const p of pc) {
 if (late()) break
 await open('https://prod.danawa.com/info/?pcode=' + p)
 await sleep(3000)
-const rows = ids(await tree({ selector: `a[href*="link_pcode=${item}"][href*="cmpnyc=ED901"]` }))
+const rows = ids(await tree({ selector: `a[href*="link_pcode=${item}"]` }))
 if (!rows.length) { await closeAll(); continue }
 const cate = (hrefOf(rows[0]).match(/cate1=\d+&cate2=\d+&cate3=\d+&cate4=\d+/) || [])[0] || ''
 const prices = rows.map(l => (l.match(/"([\d,]{4,})원"/) || [])[1]).filter(Boolean).map(num)
-hit = { pcode: p, cmpnyc: 'ED901', listed: prices.length ? Math.min(...prices) : null, entry_url: `https://prod.danawa.com/bridge/loadingBridge.html?${cate ? cate + '&' : ''}pcode=${p}&cmpnyc=ED901&link_pcode=${item}` }
+const cm = (hrefOf(rows[0]).match(/cmpnyc=(\w+)/) || [])[1] || 'ED901'
+hit = { pcode: p, cmpnyc: cm, listed: prices.length ? Math.min(...prices) : null, entry_url: `https://prod.danawa.com/bridge/loadingBridge.html?${cate ? cate + '&' : ''}pcode=${p}&cmpnyc=${cm}&link_pcode=${item}` }
 await closeAll()
 }
 await closeAll()

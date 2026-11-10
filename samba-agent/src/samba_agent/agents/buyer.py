@@ -2756,6 +2756,9 @@ class BuyerAgent(AgentBase):
         }
         if source.allow_department:
             args['allow_department'] = True
+        # 다나와·애드픽 경로는 같은 SSG 상품번호(itemId)만 고른다 — 몰(신세계몰 줄)로 또 거르지 않는다
+        # (사용자 2026-11-10 "다나와에서 찾는데 신세계몰로 제한하는게 말이되냐")
+        args['any_mall'] = True
         self.step(f'{self.spec.name}: 진입 경로 견적({", ".join(wanted)})')
         try:
             out = self.script_json(
