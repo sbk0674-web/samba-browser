@@ -4490,6 +4490,15 @@ class BuyerAgent(AgentBase):
                 mask_text(f'[{a.order.option}] → [{picked.choice}] 로 주문서를 다시 연다'),
             )
             snap = self._snapshot(a, account)
+            if (
+                snap.get('cost') is None
+                and not snap.get('methods')
+                and source_of(self.spec.name).entry_route
+            ):
+                # 진입 경로(샵백) 주문서에서 가격을 못 읽으면 바로 들어가 한 번 더 본다 — 롯데온 쉘던 자켓 095(L)는
+                # 샵백 경로로 3번 'cost not read', 바로 열면 정상(실기 2026-11-10 752400788766783)
+                self.note('옵션 재선택', '진입 경로 주문서 가격 못 읽음 — 바로 들어가 다시 연다')
+                snap = self._snapshot_once(a, account)
             if snap.get('cost') is None and not snap.get('methods'):
                 raise AgentFailure(
                     'needs_ai',
