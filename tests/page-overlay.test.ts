@@ -305,6 +305,24 @@ describe('클릭 기준값 비교', () => {
   })
 })
 
+describe('수량 스테퍼 — 숫자만 바뀌어도 한 번만 누른다', () => {
+  it('옆 입력칸 값이 1→2 로 바뀌면 변화로 보고 폴백하지 않는다(무신사 202611106DF487)', async () => {
+    document.body.innerHTML =
+      '<div><button id="m">-</button><input id="q" readonly value="1"><button id="p">+</button></div>'
+    buildSnapshot()
+    const q = document.getElementById('q') as HTMLInputElement
+    let presses = 0
+    document.getElementById('p')!.addEventListener('click', () => {
+      presses += 1
+      q.value = String(Number(q.value) + 1)
+    })
+    const id = 3 // buildSnapshot 번호: - =1, 입력칸=2, + =3
+    expect(await performClick(id)).toBe('ok')
+    expect(presses).toBe(1)
+    expect(q.value).toBe('2')
+  })
+})
+
 describe('새 탭을 여는 버튼 — 화면이 그대로여도 다시 누르지 않는다', () => {
   it('메인이 새 탭 열림을 알리면 폴백 없이 한 번으로 끝난다(SAMBA-WAVE 원문링크)', async () => {
     const { notePopupOpened } = await import('../src/preload/page-core')

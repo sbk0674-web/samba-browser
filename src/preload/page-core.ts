@@ -615,6 +615,11 @@ export interface ClickBaseline {
    * 토글 버튼(SAMBA-WAVE 까대기)은 이것 말고는 변화가 없다 — 놓치면 폴백이 다시 눌러 도로 꺼진다
    */
   state: string
+  /**
+   * 대상 요소 바로 위 상자 안 입력칸 값들. 수량 '+' 버튼(스테퍼)은 1→2 처럼 숫자만 바뀌어 글자 길이가 그대로다 —
+   * 놓치면 폴백(Enter·좌표)이 두 번 더 눌러 수량이 3씩 오른다(실기 2026-11-10 무신사 202611106DF487 2개→4개)
+   */
+  near: string
 }
 
 /** 최대 이만큼 지켜본 뒤에도 변화가 없으면 실패로 본다 */
@@ -643,7 +648,10 @@ export function readClickBaseline(el: HTMLElement): ClickBaseline {
     active: document.activeElement,
     expanded: el.getAttribute('aria-expanded') ?? '',
     className: el.getAttribute('class') ?? '',
-    state: TOGGLE_STATE_ATTRS.map((a) => el.getAttribute(a) ?? '').join('|')
+    state: TOGGLE_STATE_ATTRS.map((a) => el.getAttribute(a) ?? '').join('|'),
+    near: Array.from(el.parentElement?.querySelectorAll('input') ?? [])
+      .map((i) => (i as HTMLInputElement).value)
+      .join('|')
   }
 }
 
@@ -656,7 +664,8 @@ export function baselineChanged(before: ClickBaseline, after: ClickBaseline): bo
     before.active !== after.active ||
     before.expanded !== after.expanded ||
     before.className !== after.className ||
-    before.state !== after.state
+    before.state !== after.state ||
+    before.near !== after.near
   )
 }
 
