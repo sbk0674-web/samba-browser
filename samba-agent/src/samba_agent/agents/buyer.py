@@ -3777,6 +3777,12 @@ class BuyerAgent(AgentBase):
             self.note('교차 비교', mask_text(f'{sib_src.id} 견적 실패({e.reason[:60]}) — {stay}'))
             return None
         other = _as_float(s_snap.get('cost'))
+        sale = _as_float(a.order.sale_price)
+        if sale > 0 and other > sale * 2:
+            # 짝 사이트 원가가 판매가의 두 배를 넘으면 같은 상품이 아니다(묶음·다른 상품) — 대체로 쓰지 않는다
+            # (실기 2026-11-10 무신사 품절 아디다스 양말 KR8960 37,500원 → 롯데온 정가 139,000원 상품을 골랐다)
+            self.note('교차 비교', f'{sib_src.id} {other:,.0f}원 — 판매가 {sale:,.0f}원의 두 배 넘음, 다른 상품으로 보고 버림')
+            return None
         if fallback:
             own_txt = '견적 없음(봇 차단·품절)'
         elif own_bad:
