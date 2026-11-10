@@ -223,3 +223,10 @@ def test_주문에만_붙은_품번은_빼고_본다():
     assert paid_option_matches('다크네이비 FREE NE3BR61', '다크네이비')
     assert not paid_option_matches('다크네이비 FREE NE3BR61', '블랙')
     assert not paid_option_matches('블랙 270 NS87R61A', '블랙')
+
+
+def test_상세_색번호_괄호는_빼고_본다():
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    assert paid_option_matches('블랙 3XL', '블랙(001) / 3XL')
+    assert not paid_option_matches('블랙 3XL', '화이트(100) / 3XL')

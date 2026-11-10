@@ -57,6 +57,10 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
+    # 상세가 '블랙(001) / 3XL' 처럼 색 뒤에 색번호를 붙이면 괄호 앞만 본다(실기 2026-11-10 21315224120343299)
+    base = [_KO_COLOR.get(t.split('(')[0], t.split('(')[0]) if '(' in t else t for t in got]
+    if base != got and base and sorted(base) == sorted(want):
+        return True
     # 주문 옵션에만 붙은 품번('NE3BR61')은 값이 아니다 — 빼고 다시 본다(실기 2026-11-10 752308665073673
     # '다크네이비 FREE NE3BR61' ↔ '다크네이비')
     codes = {t for t in want if re.fullmatch(r'(?=.*\d)(?=.*[a-z])[a-z0-9]{6,}', t)}
