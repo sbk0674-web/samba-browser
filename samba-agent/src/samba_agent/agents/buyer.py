@@ -1071,8 +1071,12 @@ _MUSINSA_COLOR_EN = {
 
 def musinsa_color_en(option: str) -> str:
     """주문 옵션의 한글 색 낱말(8 기본색 밖)을 무신사 영문 선택지 표기로 바꾼다. 나머지 글자는 그대로."""
+    # 바꾸지 않고 옆에 덧붙인다 — 한글 이름 선택지('03브라운')도 그대로 맞아야 한다
+    # (실기 2026-11-10 20261109101655987:002 지오다노: 'BROWN' 으로 바꿔 '03브라운 / S' 를 못 골랐다)
     return re.sub(
-        '|'.join(_MUSINSA_COLOR_EN), lambda m: _MUSINSA_COLOR_EN[m.group(0)], str(option or '')
+        '|'.join(_MUSINSA_COLOR_EN),
+        lambda m: f'{m.group(0)} {_MUSINSA_COLOR_EN[m.group(0)]}',
+        str(option or ''),
     )
 
 
