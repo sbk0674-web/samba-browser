@@ -1356,6 +1356,19 @@ class PayerAgent(AgentBase):
                 if pay_btn is not None:
                     break
             self.tool('wait', ms=PAY_BUTTON_POLL_WAIT_MS)
+        # 무신사머니 결제창(money.musinsapayments.com)이 about:blank 뒤 9초 넘게 걸려 뜨는 날이 있다 — 버튼을 못 보고
+        # 키패드로 넘어가 결제 미확정으로 멈췄다(실기 2026-11-10 202611106D7339 2회). 그 창이면 15초 더 기다린다
+        if pay_btn is None and str(a.handoff.get('buy_source') or a.order.source).upper() == 'MUSINSA':
+            for _ in range(20):
+                popups, _active = self._list_tabs_popups()
+                mm = [p for p in popups if p.get('id') and 'musinsapayments' in str(p.get('url') or '')]
+                if mm:
+                    seen_popup = True
+                    self.tool('switch_tab', id=str(mm[-1]['id']))
+                    pay_btn = _element_id(self.tool('find_elements', query='결제하기'))
+                    if pay_btn is not None:
+                        break
+                self.tool('wait', ms=PAY_BUTTON_POLL_WAIT_MS)
         if pay_btn is None and self._payco_agree_and_pay(
             str(a.handoff.get('card') or a.options.get('card') or '')
         ):
