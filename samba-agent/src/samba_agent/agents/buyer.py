@@ -4499,6 +4499,20 @@ class BuyerAgent(AgentBase):
                 # 샵백 경로로 3번 'cost not read', 바로 열면 정상(실기 2026-11-10 752400788766783)
                 self.note('옵션 재선택', '진입 경로 주문서 가격 못 읽음 — 바로 들어가 다시 연다')
                 snap = self._snapshot_once(a, account)
+            pno = (re.search(r'/p/product/([A-Z]{2}\d+)', a.order.product_url or '') or [None, ''])[1]
+            if (
+                snap.get('cost') is None
+                and not snap.get('methods')
+                and source_of(self.spec.name).key == 'lotteon'
+                and self.order_type_of(a.order, snap) == 'gift'
+                and pno
+            ):
+                # 롯데ON 몰 상품 화면의 '선물하기'는 "롯데백화점몰에서 구매" 확인창을 띄우고, 하네스 브라우저는 확인창을
+                # 자동 취소해 아무 일도 없다(실기 2026-11-10 752400788766783 4회). 롯데백화점몰 주소로 열면 바로 된다
+                self.note('옵션 재선택', '선물하기 막힘 — 롯데백화점몰(mall_no=2) 주소로 다시 연다')
+                snap = self._snapshot_once(
+                    a, account, {'sku': f'https://www.lotteon.com/p/product/{pno}?mall_no=2'}
+                )
             if snap.get('cost') is None and not snap.get('methods'):
                 raise AgentFailure(
                     'needs_ai',
