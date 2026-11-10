@@ -321,3 +321,31 @@ def test_old_pending_is_not_silently_hidden_and_never_accepts(tmp_path):
     assert len(calls) == count
     assert q.get_by_id(job.id).options[GIFT_FOLLOWUP_KEY]['state'] == 'needs_ai'
     assert q.get_by_id(job.id).state == 'done'
+
+
+def test_교차비교로_SSG에서_산_선물도_선물확인에_넣는다():
+    """실기 2026-11-09 롯데온 주문을 SSG 선물로 샀는데 결과가 buyer.lotteon 이름이라 선물확인이 안 잡혔다."""
+    from types import SimpleNamespace
+
+    from samba_agent.ops.ssg_gift_followup import GiftFollowup
+
+    g = GiftFollowup(
+        None,  # type: ignore[arg-type]
+        accept=lambda *a, **k: None,
+        source_of_job=lambda job: ('SSG', 'NJ5JR66B'),
+        read_detail=lambda *a, **k: None,
+        now=lambda: 100.0,
+    )
+    out = {
+        'results': {
+            'buyer.lotteon': SimpleNamespace(
+                payload={'order_type': 'gift', 'buy_source': 'SSG', 'account': 'edelvise06'}
+            ),
+            'payer': SimpleNamespace(payload={'source_order_no': '20261109685ED6'}),
+        }
+    }
+    task = g.prepare(SimpleNamespace(id=1), out)
+    assert task is not None and task['profile'] == 'edelvise06'
+    # SSG 가 아닌 곳에서 산 선물은 SSG 선물확인 대상이 아니다
+    out['results']['buyer.lotteon'].payload['buy_source'] = 'LOTTEON'
+    assert g.prepare(SimpleNamespace(id=1), out) is None

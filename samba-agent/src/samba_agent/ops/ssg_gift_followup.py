@@ -231,7 +231,16 @@ class GiftFollowup:
         if not gift_order_of(out):
             return None
         # 원래 소싱처가 아닌 실제 구매한 buyer를 따른다(교차 비교로 SSG를 샀을 수 있다).
-        bought = (out.get('results') or {}).get('buyer.ssg')
+        results = out.get('results') or {}
+        bought = results.get('buyer.ssg')
+        if bought is None:
+            # 교차 비교로 SSG 에서 샀으면 결과는 원래 소싱처 이름(buyer.lotteon 등)에 buy_source='SSG' 로 남는다
+            # (실기 2026-11-09 롯데온 주문 751331601956915·751351004692509: SSG 선물로 샀는데 선물확인이 안 잡혀 수락 누락)
+            for name, r in results.items():
+                pl = r.get('payload', {}) if isinstance(r, dict) else getattr(r, 'payload', {})
+                if str(name).startswith('buyer.') and str((pl or {}).get('buy_source') or '').upper() == 'SSG':
+                    bought = r
+                    break
         payload = (
             bought.get('payload', {})
             if isinstance(bought, dict)
