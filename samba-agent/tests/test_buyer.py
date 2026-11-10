@@ -2419,3 +2419,13 @@ def test_사이트가_가린_받는분_이름도_같은_사람으로_본다():
     assert not _same_name('장순희', '김순O')
     assert not _same_name('장순희', 'OOO')
     assert not _same_name('장순희', '장순')
+
+
+def test_롯데온은_받는분_이름_띄어쓰기를_뺀다():
+    """실기 2026-11-10: 영문 이름 'Mike Jackson' 이 저장 확인에서 끝 단어만 읽혀 멈췄다."""
+    from samba_agent.agents.buyer import shipping_for_source
+
+    s = {'name': 'Mike Jackson', 'address': 'x'}
+    assert shipping_for_source(s, 'lotteon')['name'] == 'MikeJackson'
+    assert shipping_for_source({'name': '홍길동'}, 'lotteon')['name'] == '홍길동'
+    assert shipping_for_source(s, 'musinsa')['name'] == 'Mike Jackson'

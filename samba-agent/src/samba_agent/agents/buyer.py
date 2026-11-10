@@ -173,6 +173,11 @@ def road_key(address: object) -> str:
 
 
 def shipping_for_source(shipping: dict[str, object], source: str) -> dict[str, object]:
+    if source.lower() == 'lotteon':
+        # 롯데온 배송지 목록은 받는 분 이름을 띄어쓰기 없는 한 덩어리로만 읽는다 — 'Mike Jackson' 은 끝 단어만 읽혀
+        # 저장한 줄을 못 찾았다(실기 2026-11-10 영문 이름 선물 752009414033479·752017899143179). 띄어쓰기를 빼고 넣는다
+        name = str(shipping.get('name') or '')
+        return {**shipping, 'name': ''.join(name.split())} if ' ' in name.strip() else shipping
     if source.lower() != 'ssg':
         return shipping
     name = str(shipping.get('name') or '')
