@@ -1282,7 +1282,7 @@ def pay_card_quote_problem(out: dict[str, object]) -> str | None:
 # 주문서·결제 탭(과 그 팝업)만 닫는다. 다른 레인 탭(lane 표시)은 건드리지 않는다. SSG 주문서는 pay.ssg.com/order/ordPage.ssg, 패션플러스는 /order/<번호>,
 # H몰은 hmall.com/mo/oda/order
 _CLOSE_ORDER_TABS_JS = (
-    "for (const t of await tabs.list()) { if (!t.lane && /order\\/order-form|order\\/checkout|order\\/orderform|pay\\.ssg\\.com\\/order|fashionplus\\.co\\.kr\\/order\\/\\d+|hmall\\.com\\/mo\\/oda\\/order/.test(t.url || '')) "
+    "for (const t of await tabs.list()) { if (!t.lane && /order\\/order-form|order\\/checkout|order\\/orderform|p\\/order\\/orderSheet|pay\\.ssg\\.com\\/order|fashionplus\\.co\\.kr\\/order\\/\\d+|hmall\\.com\\/mo\\/oda\\/order/.test(t.url || '')) "
     '{ try { await tabs.close(t.id) } catch (e) {} } } return "ok"'
 )
 # 롯데온 주문서의 '주문할인혜택' 창(할인변경)이 견적 뒤에 남으면 배송지 창을 가려 배송지 입력이 멈춘다
