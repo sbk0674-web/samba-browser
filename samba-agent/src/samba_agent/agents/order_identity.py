@@ -57,6 +57,11 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
+    # 주문 옵션에만 붙은 품번('NE3BR61')은 값이 아니다 — 빼고 다시 본다(실기 2026-11-10 752308665073673
+    # '다크네이비 FREE NE3BR61' ↔ '다크네이비')
+    codes = {t for t in want if re.fullmatch(r'(?=.*\d)(?=.*[a-z])[a-z0-9]{6,}', t)}
+    if codes and got and set(got) <= set(want) - codes and (set(want) - codes) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
+        return True
     # 반대로 주문엔 색만 있고 상세엔 원사이즈(FREE)가 붙은 경우도 같다(실기 2026-11-10 3482044576 '블루' ↔ '블루 · FREE')
     if want and set(want) <= set(got) and set(got) - set(want) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
