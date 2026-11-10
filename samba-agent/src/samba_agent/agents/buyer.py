@@ -200,7 +200,8 @@ def split_road_detail(shipping: dict[str, object]) -> dict[str, object]:
     det = str(shipping.get('address_detail') or '').strip()
     if det:
         return shipping
-    m = re.match(r'(.*?[가-힣A-Za-z0-9.]+(?:로|길)\s*\d+(?:-\d+)?)(?![\d-])\s*,?\s*(.+)$', addr)
+    # 도로명('…로 123')뿐 아니라 지번('…1가 237'·'…동 12-3')도 번지까지가 주소다(실기 2026-11-10 '…7가 237 101동 …호')
+    m = re.match(r'(.*?[가-힣A-Za-z0-9.]+(?:로|길|동|리|가)\s*\d+(?:-\d+)?)(?![\d-])\s*,?\s*(.+)$', addr)
     if not m:
         return shipping
     rest = re.sub(r'\([^)]*\)\s*$', '', m.group(2)).strip(' ,')

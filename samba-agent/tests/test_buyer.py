@@ -2442,3 +2442,11 @@ def test_상세주소가_비면_도로명_건물번호_뒤를_상세로_옮긴�
     assert split_road_detail(keep) == keep
     only = {'address': '서울 중구 세종대로 110', 'address_detail': ''}
     assert split_road_detail(only) == only
+
+
+def test_지번_주소도_번지_뒤를_상세로_옮긴다():
+    from samba_agent.agents.buyer import split_road_detail
+
+    s = split_road_detail({'address': '서울특별시 영등포구 영등포동7가 237 101동 1203호(영등포동7가)', 'address_detail': ''})
+    assert s['address'] == '서울특별시 영등포구 영등포동7가 237'
+    assert s['address_detail'] == '101동 1203호'
