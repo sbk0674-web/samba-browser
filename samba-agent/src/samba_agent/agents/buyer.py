@@ -192,6 +192,23 @@ def shipping_for_source(shipping: dict[str, object], source: str) -> dict[str, o
     return {**shipping, 'name': ' '.join(normalized.split())}
 
 
+def split_road_detail(shipping: dict[str, object]) -> dict[str, object]:
+    """상세주소가 비어 있고 주소 칸에 '…로 123 101동 1203호(○○동)' 처럼 동·호수까지 붙어 오면
+    도로명+건물번호까지만 주소로 남기고 나머지를 상세주소로 옮긴다 — 통째로 주소 검색하면 결과가 없다
+    (실기 2026-11-10 롯데온 20261110101712810:001 address-result-nf). 괄호 속 참고 동 이름은 버린다."""
+    addr = str(shipping.get('address') or '').strip()
+    det = str(shipping.get('address_detail') or '').strip()
+    if det:
+        return shipping
+    m = re.match(r'(.*?[가-힣A-Za-z0-9.]+(?:로|길)\s*\d+(?:-\d+)?)(?![\d-])\s*,?\s*(.+)$', addr)
+    if not m:
+        return shipping
+    rest = re.sub(r'\([^)]*\)\s*$', '', m.group(2)).strip(' ,')
+    if not rest:
+        return shipping
+    return {**shipping, 'address': m.group(1).strip(), 'address_detail': rest}
+
+
 def join_jibun(shipping: dict[str, object]) -> dict[str, object]:
     """주소가 동·리 이름에서 끝나고 상세주소가 번지로 시작하면 번지를 주소로 옮긴다.
 
@@ -2375,6 +2392,10 @@ class BuyerAgent(AgentBase):
             args['allow_department'] = (
                 True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
             )
+        # 주문의 원래 상품 링크(우리가 수집해 올린 그 상품)는 몰이 달라도 그대로 산다 — 신세계몰 한정은 다나와·대체 후보용
+        # (사용자 2026-11-10 752304982474781 "원문에 옵션존재해서 샀다": 원래 링크를 버리고 신세계몰만 찾다 멈췄다)
+        if source.mall_item and not a.options.get('product_url') and not a.options.get('source'):
+            args['any_mall'] = True
         # 사용자가 직접 고른 상품 링크(작업 옵션 any_seller)는 판매자 제한 없이 산다(사용자 2026-11-07 롯데온 프레씨유 링크)
         if source.required_seller and not a.options.get('any_seller'):
             args['required_seller'] = (
@@ -5089,7 +5110,7 @@ class BuyerAgent(AgentBase):
     def _apply_shipping(self, a: Assignment, shipping: dict[str, object], account: str) -> None:
         """이름·주소를 배송지 스크립트로 넣고 되읽어 대조한다. 원문은 이 함수 밖으로 나가지 않는다."""
         # 동 이름 + 번지 상세주소는 번지를 주소로 옮겨 검색한다(오배송 방지 2026-11-09)
-        shipping = join_jibun(shipping)
+        shipping = split_road_detail(join_jibun(shipping))
         # 이름·주소만 넘긴다 — phone 키는 출처가 어디든 버린다
         args: dict[str, object] = {
             f: shipping[f] for f in SHIPPING_ARG_FIELDS if shipping.get(f) is not None

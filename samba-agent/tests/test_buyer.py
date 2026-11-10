@@ -2429,3 +2429,16 @@ def test_롯데온은_받는분_이름_띄어쓰기를_뺀다():
     assert shipping_for_source(s, 'lotteon')['name'] == 'MikeJackson'
     assert shipping_for_source({'name': '홍길동'}, 'lotteon')['name'] == '홍길동'
     assert shipping_for_source(s, 'musinsa')['name'] == 'Mike Jackson'
+
+
+def test_상세주소가_비면_도로명_건물번호_뒤를_상세로_옮긴다():
+    """실기 2026-11-10 롯데온 20261110101712810:001: 동·호수가 붙은 주소로 검색해 결과 없음."""
+    from samba_agent.agents.buyer import split_road_detail
+
+    s = split_road_detail({'address': '부산광역시 해운대구 우동 해운대해변로 298 101동 1203호(우동)', 'address_detail': ''})
+    assert s['address'] == '부산광역시 해운대구 우동 해운대해변로 298'
+    assert s['address_detail'] == '101동 1203호'
+    keep = {'address': '서울 중구 세종대로 110', 'address_detail': '3층'}
+    assert split_road_detail(keep) == keep
+    only = {'address': '서울 중구 세종대로 110', 'address_detail': ''}
+    assert split_road_detail(only) == only
