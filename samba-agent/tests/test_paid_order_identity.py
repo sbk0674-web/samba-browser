@@ -207,3 +207,11 @@ def test_옵션_이름표가_붙은_선택안함():
 
     assert paid_option_matches('옵션:선택안함', '선택안함')
     assert not paid_option_matches('옵션:선택안함', 'BB KEYRING')
+
+
+def test_주문은_색만_상세는_색_FREE():
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    assert paid_option_matches('블루', '블루 · FREE')
+    assert not paid_option_matches('블루', '레드 · FREE')
+    assert not paid_option_matches('블루', '블루 · 270')

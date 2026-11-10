@@ -57,6 +57,9 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
+    # 반대로 주문엔 색만 있고 상세엔 원사이즈(FREE)가 붙은 경우도 같다(실기 2026-11-10 3482044576 '블루' ↔ '블루 · FREE')
+    if want and set(want) <= set(got) and set(got) - set(want) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
+        return True
     # 주문 옵션이 숫자 섞인 사이즈 코드 하나('J1'·'C12')뿐이면 상세에 색과 함께 그 코드가 있으면 같다
     # (실기 2026-11-07 무신사 키즈 'J1' ↔ 'CHALK_BLACK(Z0WX) · J1', 'C12' ↔ 'MULTI(Z90H) · C12')
     if len(want) == 1 and re.search(r'\d', want[0]) and re.fullmatch(r'[a-z]{0,2}\d{1,3}', want[0]) and want[0] in got:

@@ -203,6 +203,22 @@ def join_jibun(shipping: dict[str, object]) -> dict[str, object]:
     return {**shipping, 'address': f'{base} {m.group(1)}', 'address_detail': m.group(2).strip()}
 
 
+def _same_name(want: str, got: str) -> bool:
+    """받는 분 이름이 같은가. 사이트가 가려 보여 주는 글자('장순O'·'장*희'·'장순○')는 그 자리만 건너뛴다
+    (실기 2026-11-10 롯데온 선물 20261109102050: 되읽은 이름 '장순O' 를 다른 이름으로 봐서 멈췄다)."""
+    a, b = _norm(want), _norm(got)
+    if a == b:
+        return True
+    if not a or len(a) != len(b):
+        return False
+    masks = set('o*○●x')
+    hidden = [i for i, ch in enumerate(b) if ch in masks and a[i] != ch]
+    # 한 글자 이름 전체가 가려지거나 절반 넘게 가려지면 같은 사람인지 알 수 없다
+    if not hidden or len(hidden) * 2 > len(b):
+        return False
+    return all(a[i] == b[i] for i in range(len(a)) if i not in hidden)
+
+
 def shipping_matches(expected: dict[str, object], applied: dict[str, object]) -> bool:
     """넣은 배송지와 사이트가 되읽어 준 배송지가 같은 곳인가.
 
@@ -210,7 +226,7 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
     도로명·건물번호 등 숫자 토큰이 모두 같아야 한다(실기: 무신사가 "서울특별시 중구 세종대로 110" 을
     "서울 중구 세종대로 110 (서울특별시청)" 으로 되읽어 정확 비교가 어긋났다).
     """
-    if _norm(str(expected.get('name', ''))) != _norm(str(applied.get('name', ''))):
+    if not _same_name(str(expected.get('name', '')), str(applied.get('name', ''))):
         return False
     # 시·군·구가 양쪽에 있는데 하나도 겹치지 않으면 다른 도시다 — 번지 숫자가 같아도 같은 곳이 아니다
     exp_d = address_districts(expected.get('address'))
@@ -5214,7 +5230,7 @@ class BuyerAgent(AgentBase):
                 f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:80])} '
                 f'[ok={saved.get("ok")} 이름일치={shipping_matches(shipping, saved)} '
                 # 어느 항목에서 어긋났는지(개인정보 없이) — 이름·도시·우편번호 각각(2026-11-10 20261109102050 원인 불명)
-                f'이름={_norm(str(shipping.get("name", ""))) == _norm(str(saved.get("name", "")))} '
+                f'이름={_same_name(str(shipping.get("name", "")), str(saved.get("name", "")))} '
                 f'도시={bool(address_districts(shipping.get("address")) & address_districts(saved.get("address")))} '
                 f'우편={re.sub(r"[^0-9]", "", str(shipping.get("postal_code") or "")) == re.sub(r"[^0-9]", "", str(saved.get("zip") or saved.get("postal_code") or ""))} '
                 f'되읽음={mask_text(str({k: saved.get(k) for k in ("name", "address", "gift", "debug", "dbg") if k in saved})[:160])}]',

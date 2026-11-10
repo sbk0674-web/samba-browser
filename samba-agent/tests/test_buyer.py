@@ -2408,3 +2408,14 @@ def test_롯데온_상품명_줄은_공유하기_뒤_제목만_본다():
     assert '우노코트' in title and not KKADAEGI_BRANDS.search(title)
     assert KKADAEGI_BRANDS.search(lotteon_title_of_head('메뉴 공유하기 롯데백화점 노스페이스 눕시'))
     assert lotteon_title_of_head('메뉴만 있는 글 뉴발란스') == ''
+
+
+def test_사이트가_가린_받는분_이름도_같은_사람으로_본다():
+    """실기 2026-11-10 롯데온 선물: 되읽은 이름 '장순O'."""
+    from samba_agent.agents.buyer import _same_name
+
+    assert _same_name('장순희', '장순O')
+    assert _same_name('장순희', '장*희')
+    assert not _same_name('장순희', '김순O')
+    assert not _same_name('장순희', 'OOO')
+    assert not _same_name('장순희', '장순')
