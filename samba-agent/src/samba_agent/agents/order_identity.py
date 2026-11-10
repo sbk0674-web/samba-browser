@@ -61,6 +61,11 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     base = [_KO_COLOR.get(t.split('(')[0], t.split('(')[0]) if '(' in t else t for t in got]
     if base != got and base and sorted(base) == sorted(want):
         return True
+    # 상세가 'BLK0_BLACK:100' 처럼 색코드_색이름이면 밑줄 뒤 색이름만 본다(실기 2026-11-10 21315224160433299
+    # '블랙 100' ↔ 'BLK0_BLACK:100'). 앞쪽이 숫자 섞인 코드일 때만 — 'CHALK_BLACK' 같은 색 이름은 그대로 둔다
+    coded = [re.sub(r'^[a-z]{2,4}\d{1,2}_(?=[a-z])', '', t) for t in got]
+    if coded != got and sorted(coded) == sorted(want):
+        return True
     # 주문 옵션에만 붙은 품번('NE3BR61')은 값이 아니다 — 빼고 다시 본다(실기 2026-11-10 752308665073673
     # '다크네이비 FREE NE3BR61' ↔ '다크네이비')
     codes = {t for t in want if re.fullmatch(r'(?=.*\d)(?=.*[a-z])[a-z0-9]{6,}', t)}

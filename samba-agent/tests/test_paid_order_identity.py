@@ -42,6 +42,11 @@ def test_sold_navy_cannot_fall_back_to_live_pink_same_size():
         ('BLACK 1개 S', 'M', False),
         ('상세페이지 참조 180', '185', False),
         ('BLK(BLACK) 085(S)', '090(M)', False),
+        # 실기 2026-11-10 21315224160433299: 상세 '색코드_색이름:사이즈'
+        ('블랙 100', 'BLK0_BLACK:100', True),
+        ('화이트 100', 'BLK0_BLACK:100', False),
+        ('블랙 95', 'BLK0_BLACK:100', False),
+        ('블랙 100', 'CHALK_BLACK:100', False),
         (WANTED, PINK, False),
     ],
 )
