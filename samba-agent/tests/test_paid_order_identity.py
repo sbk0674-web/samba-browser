@@ -200,3 +200,10 @@ def test_한글_색과_영문_선택지는_같은_옵션():
     assert paid_option_matches('블랙 270', 'BLACK · 270')
     assert not paid_option_matches('블랙 270', 'WHITE · 270')
     assert not paid_option_matches('코코아 230', 'COCOA · 240')
+
+
+def test_옵션_이름표가_붙은_선택안함():
+    from samba_agent.agents.order_identity import paid_option_matches
+
+    assert paid_option_matches('옵션:선택안함', '선택안함')
+    assert not paid_option_matches('옵션:선택안함', 'BB KEYRING')

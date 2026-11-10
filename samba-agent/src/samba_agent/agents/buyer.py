@@ -1086,6 +1086,10 @@ def snapshot_args(agent_name: str, order: OrderRef, account: str | None = None) 
         args['size'] = (
             musinsa_color_en(order.option) if 'musinsa' in agent_name else order.option
         )
+        # '옵션:선택안함' 은 고를 옵션이 없다는 뜻 — 무신사 스크립트는 '없음'일 때 '선택안함' 칸을 고른다
+        # (실기 2026-11-10 20261109C14534 마스마룰즈 백팩: 키링 옵션 후보 중에서 고르다 멈췄다)
+        if 'musinsa' in agent_name and re.fullmatch(r'(?:옵션\s*[:：]\s*)?선택\s*안\s*함', str(order.option).strip()):
+            args['size'] = '없음'
     account = account or order.account
     if account:
         # 계정별 탭 프로필 — 세션(쿠키)이 계정마다 따로라 다른 계정으로 로그인된 채 사는 일이 없다

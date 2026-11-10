@@ -2385,3 +2385,13 @@ def test_무신사_한글_색은_영문_선택지_표기로_넘긴다():
     order = OrderRef(order_no='C1', source='MUSINSA', seller='쿠팡', sku='클로그', option='코코아 230', qty=1)
     assert json.loads(snapshot_args('buyer.musinsa', order))['size'] == 'COCOA 230'
     assert json.loads(snapshot_args('buyer.lotteon', order))['size'] == '코코아 230'
+
+
+def test_무신사_옵션_선택안함은_없음으로_넘긴다():
+    """실기 2026-11-10 20261109C14534: '옵션:선택안함' 을 키링 옵션 중에서 고르려다 멈췄다."""
+    from samba_agent.agents.buyer import snapshot_args
+
+    order = OrderRef(order_no='N1', source='MUSINSA', seller='롯데홈쇼핑', sku='백팩', option='옵션:선택안함', qty=1)
+    assert json.loads(snapshot_args('buyer.musinsa', order))['size'] == '없음'
+    assert json.loads(snapshot_args('buyer.musinsa', order.model_copy(update={'option': '선택안함'})))['size'] == '없음'
+    assert json.loads(snapshot_args('buyer.musinsa', order.model_copy(update={'option': '블랙 270'})))['size'] == '블랙 270'
