@@ -2396,3 +2396,15 @@ def test_무신사_옵션_선택안함은_없음으로_넘긴다():
     assert json.loads(snapshot_args('buyer.musinsa', order))['size'] == '없음'
     assert json.loads(snapshot_args('buyer.musinsa', order.model_copy(update={'option': '선택안함'})))['size'] == '없음'
     assert json.loads(snapshot_args('buyer.musinsa', order.model_copy(update={'option': '블랙 270'})))['size'] == '블랙 270'
+
+
+def test_롯데온_상품명_줄은_공유하기_뒤_제목만_본다():
+    """실기 2026-11-10: 스케쳐스 상품 화면 앞 메뉴의 '뉴발란스' 가 잡혀 5개 브랜드로 오판될 뻔했다."""
+    from samba_agent.agents.buyer import KKADAEGI_BRANDS, lotteon_title_of_head
+
+    head = ('뉴발란스 아식스 브랜드관 카테고리 경로 정보 홈여성패션신발운동화 찜해제 공유하기 롯데백화점 '
+            '스케쳐스USA [패세라]스케쳐스 여성 메모리폼 스니커즈 우노코트')
+    title = lotteon_title_of_head(head)
+    assert '우노코트' in title and not KKADAEGI_BRANDS.search(title)
+    assert KKADAEGI_BRANDS.search(lotteon_title_of_head('메뉴 공유하기 롯데백화점 노스페이스 눕시'))
+    assert lotteon_title_of_head('메뉴만 있는 글 뉴발란스') == ''

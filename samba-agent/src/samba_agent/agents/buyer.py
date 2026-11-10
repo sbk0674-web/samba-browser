@@ -1080,6 +1080,16 @@ def musinsa_color_en(option: str) -> str:
     )
 
 
+def lotteon_title_of_head(head: str) -> str:
+    """롯데온 가격 앞 250자에서 상품 제목 부분만 — '공유하기' 뒤가 판매자·상품명이다.
+    앞쪽엔 메뉴·카테고리 글(…뉴발란스…)이 섞여 다른 브랜드 상품도 5개 브랜드 까대기로 판정됐다
+    (실기 2026-11-09 다이나핏 패딩 751970025357341 까대기 오구매, 11-10 스케쳐스 우노코트에 '뉴발란스' 잡힘).
+    '공유하기'가 없으면 제목을 가려낼 수 없어 쓰지 않는다."""
+    if '공유하기' not in head:
+        return ''
+    return head.rsplit('공유하기', 1)[1]
+
+
 def snapshot_args(agent_name: str, order: OrderRef, account: str | None = None) -> str:
     """run_script 에 넘길 JSON 문자열. 옵션이 있으면 size 로, 계정이 있으면 account 로 같이 준다.
 
@@ -4637,7 +4647,7 @@ class BuyerAgent(AgentBase):
         forced = source.order_type
         # 판매 상품명에 브랜드가 빠져도(스케쳐스 '남녀 4종 울트라 플렉스 4 0 슬립인') 소싱처 상품명 줄로 고정 브랜드를 안다
         # (실기 2026-11-05 2026110557B626: 상품명만 보고 선물로 보냈다)
-        head = str(snap.get('product_head') or '') if snap else ''
+        head = lotteon_title_of_head(str(snap.get('product_head') or '')) if snap else ''
         normal_first = _as_float(snap.get('normal_price')) if snap else 0.0
         head_brand = KKADAEGI_BRANDS.search(head) if head else None
         if head_brand and not is_fixed_kkadaegi(order):
