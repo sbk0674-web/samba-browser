@@ -5213,6 +5213,10 @@ class BuyerAgent(AgentBase):
                 # 원인을 알 수 있게 되읽은 값의 모양(개인정보 가림)을 같이 남긴다(2026-11-09 선물 주문 3건 note 빈칸)
                 f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:80])} '
                 f'[ok={saved.get("ok")} 이름일치={shipping_matches(shipping, saved)} '
+                # 어느 항목에서 어긋났는지(개인정보 없이) — 이름·도시·우편번호 각각(2026-11-10 20261109102050 원인 불명)
+                f'이름={_norm(str(shipping.get("name", ""))) == _norm(str(saved.get("name", "")))} '
+                f'도시={bool(address_districts(shipping.get("address")) & address_districts(saved.get("address")))} '
+                f'우편={re.sub(r"[^0-9]", "", str(shipping.get("postal_code") or "")) == re.sub(r"[^0-9]", "", str(saved.get("zip") or saved.get("postal_code") or ""))} '
                 f'되읽음={mask_text(str({k: saved.get(k) for k in ("name", "address", "gift", "debug", "dbg") if k in saved})[:160])}]',
                 FailReason.UNKNOWN,
             )
