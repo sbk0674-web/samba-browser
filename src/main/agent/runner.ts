@@ -132,6 +132,11 @@ export const AUTOMATION_GRACE_MS = 5_000
 
 /** 바깥 자동화(주문 하네스)가 브릿지로 브라우저를 쓰는 중이라 채팅 지시를 받을 수 없을 때의 오류 글 */
 export const BRIDGE_BUSY_ERROR = '브릿지 세션 사용 중'
+/** 틈 대기 중에 사용자가 중단을 눌렀다 — 화면에는 이미 '멈춤' 이 나갔으므로 따로 알리지 않는다 */
+export const BRIDGE_GAP_CANCELLED = '브릿지 틈 대기 중단'
+/** 사용자 지시가 브릿지 틈을 기다리는 최대 시간·확인 간격 */
+export const BRIDGE_GAP_WAIT_MS = 45_000
+const BRIDGE_GAP_POLL_MS = 100
 
 export class AgentRunner {
   private abort: AbortController | null = null
@@ -165,6 +170,8 @@ export class AgentRunner {
   private session: ToolSession | null = null
   // 동시에 열린 레인 세션 수와 레인별 탭 보기 상태(하네스 계정 동시 처리)
   private laneSessions = 0
+  /** 브릿지 틈을 기다리는 사용자 지시(한 번에 하나). stop() 이 cancelled 를 세운다 */
+  private gapWait: { cancelled: boolean } | null = null
   private readonly lanes = new Map<string, LaneState>()
   // 브릿지 세션들이 함께 보는 키패드 입력 기록(창 id|호스트) — 한 결제창에 결제 비밀번호를 두 번 넣지 않는다
   private readonly bridgeKeypadEntered = new Set<string>()
@@ -427,7 +434,31 @@ export class AgentRunner {
     this.pending.clear()
   }
 
+  /**
+   * 브릿지 세션이 비는 틈을 기다린다(최대 BRIDGE_GAP_WAIT_MS). 못 얻으면 BRIDGE_BUSY_ERROR 를 던진다.
+   * 기다리는 동안 들어온 다른 지시는 '이미 실행 중' 으로 거절하고, 중단 버튼은 대기를 끊는다.
+   * 돌아온 직후에는 await 없이 곧바로 실행 상태(abort)를 잡으므로 그 사이에 세션이 끼어들지 못한다
+   */
+  private async waitForBridgeGap(): Promise<void> {
+    if (this.gapWait) throw new Error('이미 실행 중')
+    const wait = { cancelled: false }
+    this.gapWait = wait
+    try {
+      const deadline = Date.now() + BRIDGE_GAP_WAIT_MS
+      while (this.session || this.laneSessions > 0) {
+        if (wait.cancelled) throw new Error(BRIDGE_GAP_CANCELLED)
+        if (Date.now() >= deadline) throw new Error(BRIDGE_BUSY_ERROR)
+        await new Promise((resolve) => setTimeout(resolve, BRIDGE_GAP_POLL_MS))
+      }
+      if (wait.cancelled) throw new Error(BRIDGE_GAP_CANCELLED)
+    } finally {
+      this.gapWait = null
+    }
+  }
+
   stop(): void {
+    // 틈을 기다리던 지시는 여기서 끊는다(아래 '멈춤' 알림은 그대로 나간다)
+    if (this.gapWait) this.gapWait.cancelled = true
     // 실행 중이 아니어도 화면에는 '멈춤'을 알린다 — 시작도 못 한 지시(자동 작업이 브라우저를 쓰는 중 등) 때문에
     // 화면만 '생각 중'으로 남으면 중단 버튼이 아무 반응도 없었다(실기 2026-10-02)
     if (!this.abort) {
@@ -469,7 +500,9 @@ export class AgentRunner {
     // AI 창에 붙여 넣은 이미지. 모델에만 실어 주고 대화 기록에는 남기지 않는다
     images?: AgentImage[]
   ): Promise<void> {
-    if (this.session || this.laneSessions > 0) throw new Error(BRIDGE_BUSY_ERROR)
+    // 자동 작업(하네스)이 브릿지 세션을 쥐고 있으면 곧바로 거절하지 않고 틈을 기다린다 — 하네스는 도구 호출마다
+    // 세션을 열고 닫아 틈이 자주 난다(실측 2026-11-10: 60초 중 31초가 사용 중이라 지시 절반이 즉시 거절됐다)
+    if (this.session || this.laneSessions > 0) await this.waitForBridgeGap()
     // 이미 실행 중이면 세대 가드 없이 status 를 emit 하면 진행 중인 실행의 UI 를 덮어쓸 수 있다.
     // 핸들러가 throw 를 { ok: false, error } 로 ack 하므로 에러만 던진다.
     if (this.abort) {

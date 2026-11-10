@@ -39,7 +39,7 @@ import { isNewWindowShortcut } from '../browser/window-manager'
 import { ClosedTabStack, newProfileName, runGesture, type GestureDeps } from '../browser/gestures'
 import { SettingsStore } from '../settings/store'
 import { setOcrEnabled } from '../agent/tools-ocr'
-import { AgentRunner, BRIDGE_BUSY_ERROR } from '../agent/runner'
+import { AgentRunner, BRIDGE_BUSY_ERROR, BRIDGE_GAP_CANCELLED } from '../agent/runner'
 import { BridgeServer, BridgeWindowNotFound, type BridgeWindowInfo } from '../bridge/server'
 import { applyBridgeSettings, newBridgeToken } from '../bridge/wiring'
 import { createHarnessApi } from '../harness/wiring'
@@ -551,6 +551,8 @@ export function registerIpc(
         console.error('작업 실행 실패', e)
         // 시작도 못 한 지시는 상태 이벤트가 하나도 안 나간다 — 알리지 않으면 화면이 영영 '생각 중'이다
         const message = e instanceof Error ? e.message : String(e)
+        // 틈을 기다리다 사용자가 중단한 지시 — stop() 이 이미 '멈춤' 을 알렸다
+        if (message === BRIDGE_GAP_CANCELLED) return
         agent.notifyNotStarted(message === BRIDGE_BUSY_ERROR ? tr('ipc.agentBridgeBusy') : message)
       })
       return { started: true }
