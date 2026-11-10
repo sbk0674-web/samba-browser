@@ -97,8 +97,12 @@ try{
     // 카카오페이 카드 즉시할인 + 현대카드 청구할인(2.7%)이 롯데카드(즉시할인+2%)보다 쌀 수 있다(사용자 2026-11-04)
     const kc=(await Q('카카오페이 카드',/radio "카카오페이 카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
     const kmx=kc.length?Math.max(...kc.map(x=>x.id)):0;
-    const kbest=kc.filter(r=>r.id>kmx-20).sort((a,b)=>b.p-a.p)[0];
-    if(kbest){if(!kbest.on){await page.clickNative(kbest.id);await sleep(1200);}
+    // 7% 칸은 조건 제한으로 눌러도 안 켜질 때가 있다 — 큰 것부터 일반 클릭으로 눌러 실제 켜진 칸으로 견적한다
+    // (실기 2026-11-10 진단: 카드7% 안 켜짐·5% 켜짐, 진짜 마우스 클릭은 'click not sent' — 7% 로 잘못 견적해 원가가 1,980원 낮았다)
+    const kOn=async id=>(await Q('카카오페이 카드',/radio "카카오페이 카드/)).some(l=>parseInt(l.slice(1))===id&&/value="on"/.test(l));
+    let kbest=null;
+    for(const r of kc.filter(r=>r.id>kmx-20).sort((a,b)=>b.p-a.p)){if(!r.on){await page.click(r.id);await sleep(1200);}if(await kOn(r.id)){kbest=r;break;}}
+    if(kbest){
       const kamt=await amtOf();
       if(kamt>0)quotes.push({method:'카카오페이',card:'현대카드',cost:base_cost-kamt,discount:'카카오페이 카드'+kbest.p+'% 즉시할인',kakao_card:true});}
     const lr=(await Q('롯데카드',/radio "롯데카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/롯데카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
