@@ -372,8 +372,15 @@ class GiftFollowup:
                         'payer': {'payload': {'source_order_no': task['source_order_no']}},
                     }
                 }
-                before_phone()
-                line = self.accept(job, out) or ''
+                try:
+                    before_phone()
+                    line = self.accept(job, out) or ''
+                except Exception:
+                    # 수락 도중 오류(폰 잠금·연결 등)면 수락 단계로 되돌린다 — 'verify' 로 남으면 다음부터 확인만
+                    # 하고 수락을 다시 시도하지 않는다(실기 2026-11-10 3481570461 수락 0회·확인만 6회)
+                    task['phase'] = 'accept'
+                    self._save(job, task)
+                    raise
                 if '완료' not in line or '실패' in line or '못 함' in line:
                     task['phase'] = 'accept'
                     reason = mask_text(line)[:200] or reason

@@ -349,3 +349,18 @@ def test_교차비교로_SSG에서_산_선물도_선물확인에_넣는다():
     # SSG 가 아닌 곳에서 산 선물은 SSG 선물확인 대상이 아니다
     out['results']['buyer.lotteon'].payload['buy_source'] = 'LOTTEON'
     assert g.prepare(SimpleNamespace(id=1), out) is None
+
+
+def test_accept_exception_returns_to_accept_phase_and_retries(tmp_path):
+    # 실기 2026-11-10 3481570461: 첫 수락 도중 오류 → phase 'verify' 로 굳어 수락 0회·확인만 6회
+    q, job, worker, after, clock, calls, _source = harness(tmp_path)
+    after.accept = lambda job, out: (_ for _ in ()).throw(RuntimeError('phone locked'))
+    worker._apply(job, outcome())
+    task = q.get_by_id(job.id).options[GIFT_FOLLOWUP_KEY]
+    assert task['state'] == 'pending'
+    assert task['phase'] == 'accept'
+    tried = []
+    after.accept = lambda job, out: tried.append(1) or 'SSG 선물 수락 실패 — 폰 사용 중'
+    clock[0] += 3600
+    assert after.drain() is True
+    assert tried == [1]
