@@ -2450,3 +2450,10 @@ def test_지번_주소도_번지_뒤를_상세로_옮긴다():
     s = split_road_detail({'address': '서울특별시 영등포구 영등포동7가 237 101동 1203호(영등포동7가)', 'address_detail': ''})
     assert s['address'] == '서울특별시 영등포구 영등포동7가 237'
     assert s['address_detail'] == '101동 1203호'
+
+
+def test_무신사_옵션_이름표를_떼고_넘긴다():
+    from samba_agent.agents.buyer import snapshot_args
+
+    order = OrderRef(order_no='N2', source='MUSINSA', seller='롯데홈쇼핑', sku='가방', option='옵션:14 Inch', qty=1)
+    assert json.loads(snapshot_args('buyer.musinsa', order))['size'] == '14 Inch'

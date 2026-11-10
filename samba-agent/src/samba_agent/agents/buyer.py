@@ -1143,6 +1143,9 @@ def snapshot_args(agent_name: str, order: OrderRef, account: str | None = None) 
         # (실기 2026-11-10 20261109C14534 마스마룰즈 백팩: 키링 옵션 후보 중에서 고르다 멈췄다)
         if 'musinsa' in agent_name and re.fullmatch(r'(?:옵션\s*[:：]\s*)?선택\s*안\s*함', str(order.option).strip()):
             args['size'] = '없음'
+        elif 'musinsa' in agent_name and re.match(r'\s*옵션\s*[:：]', str(args['size'])):
+            # '옵션:14 Inch' 의 '옵션:' 은 이름표다 — 붙여 넘기면 선택지를 못 골랐다(실기 2026-11-10 20261110C95003 마스마룰즈 노트북 가방)
+            args['size'] = re.sub(r'^\s*옵션\s*[:：]\s*', '', str(args['size']))
     account = account or order.account
     if account:
         # 계정별 탭 프로필 — 세션(쿠키)이 계정마다 따로라 다른 계정으로 로그인된 채 사는 일이 없다
