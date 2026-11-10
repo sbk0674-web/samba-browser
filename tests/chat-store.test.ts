@@ -118,6 +118,33 @@ describe('chatStore 상태 가드', () => {
     expect(useChatStore.getState().currentLabel).toBe('시작 실패')
   })
 
+  it('실패 사유는 빈 AI 말풍선에 남긴다(시작도 못 한 지시가 무반응으로 보이지 않게)', () => {
+    useChatStore.setState({
+      status: 'running',
+      messages: [
+        { id: '1', role: 'user', text: '다운로드' },
+        { id: '2', role: 'ai', text: '', steps: [] }
+      ]
+    })
+    fire({ type: 'status', state: 'failed', message: '자동 작업이 브라우저를 쓰는 중', toolCalls: 0 })
+    const msgs = useChatStore.getState().messages
+    expect(msgs[msgs.length - 1].text).toBe('자동 작업이 브라우저를 쓰는 중')
+    expect(useChatStore.getState().status).toBe('failed')
+  })
+
+  it('로그인 문제(auth:)와 이미 답이 있는 말풍선은 덮지 않는다', () => {
+    useChatStore.setState({
+      status: 'running',
+      messages: [{ id: '1', role: 'ai', text: '하던 답', steps: [] }]
+    })
+    fire({ type: 'status', state: 'failed', message: '뒤늦은 오류', toolCalls: 0 })
+    expect(useChatStore.getState().messages[0].text).toBe('하던 답')
+    useChatStore.setState({ status: 'running', messages: [{ id: '1', role: 'ai', text: '' }] })
+    fire({ type: 'status', state: 'failed', message: 'auth:missing', toolCalls: 0 })
+    expect(useChatStore.getState().messages[0].text).toBe('')
+    expect(useChatStore.getState().authError).toBe('missing')
+  })
+
   it('api_retry 진행 이벤트는 retry 로 보관하고 step 이 오면 지운다', () => {
     useChatStore.setState({
       status: 'running',

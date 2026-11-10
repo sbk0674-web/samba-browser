@@ -284,6 +284,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? (e.message.slice(5) as 'missing' | 'limit')
         : null
       const done = e.state === 'done' || e.state === 'failed' || e.state === 'stopped'
+      // 실패 사유는 말풍선에 남긴다 — 예전엔 상태만 바꾸고 문구를 버려, 시작도 못 한 지시(자동 작업이
+      // 브라우저를 쓰는 중 등)가 아무 반응 없이 끝난 것처럼 보였다(실기 2026-11-10 "반응이 없어")
+      if (e.state === 'failed' && e.message && !auth && last?.role === 'ai' && !last.text)
+        patchLast({ text: e.message })
       // 작업이 끝나면 메인이 방금 기록을 남겼다 — 목록의 제목·순서를 다시 읽는다
       if (done) void get().loadChats()
       set({
