@@ -8,6 +8,9 @@ import { isNaverPayHost, maskedNaverAccount } from '../../shared/naverpay'
 import type { PageSnapshot } from '../../shared/snapshot'
 import { isPaySuccessUrl, PAY_SUCCESS_TEXT_RE, type PagePort } from './wiring'
 
+// 결제사 결제창 호스트(토스·네이버페이·카카오페이·페이코)
+const PAY_TAB_HOST_RE = /(^|\.)(toss\.im|tosspayments\.com|pay\.naver\.com|kakaopay\.com|payco\.com)$/
+
 const EMPTY_SNAPSHOT: PageSnapshot = { url: '', title: '', text: '', elements: [] }
 
 /** 활성 탭이 없을 때도 던지지 않는다 — 인증 흐름이 'no-field' 로 조용히 끝난다 */
@@ -22,7 +25,22 @@ export function createTabPagePort(tabs: TabManager): PagePort {
   return {
     host: () => {
       const tab = active()
-      return tab ? normalizeHost(tab.view.webContents.getURL()) : ''
+      if (!tab) return ''
+      const host = normalizeHost(tab.view.webContents.getURL())
+      // 결제창이 팝업이 아니라 새 탭으로 열리면(롯데온 토스·네이버페이, 실기 2026-11-12) 그 탭 주소는 결제사라
+      // 구매 사이트 계정을 못 찾아 폰 승인이 no-account 로 거부됐다 — 결제사 탭이면 그 탭을 연 탭의 사이트로 본다
+      if (PAY_TAB_HOST_RE.test(host) && tab.openerId) {
+        const opener = tabs.get(tab.openerId)
+        if (opener && !opener.view.webContents.isDestroyed()) return normalizeHost(opener.view.webContents.getURL())
+      }
+      if (PAY_TAB_HOST_RE.test(host)) {
+        // 연 탭을 모르면 같은 프로필의 주문서 탭 사이트로 본다
+        const sheet = tabs
+          .list()
+          .find((t) => t.profile === tab.profile && /order|checkout/i.test(t.url) && !PAY_TAB_HOST_RE.test(normalizeHost(t.url)))
+        if (sheet) return normalizeHost(sheet.url)
+      }
+      return host
     },
     profile: () => active()?.profile ?? '',
     activeTabId: () => active()?.id ?? null,
