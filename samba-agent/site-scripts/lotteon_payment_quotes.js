@@ -88,12 +88,7 @@ try{
   const hb=await page.idOf('할인변경');
   if(hb>=0){
     await page.click(hb);await sleep(2000);
-    const rs=(await Q('카카오페이 머니',/radio "카카오페이 머니\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/머니(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
-    const mx=rs.length?Math.max(...rs.map(x=>x.id)):0;
-    const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
-    if(best&&!best.on){await page.clickNative(best.id);await sleep(1200);}
-    const amt=await amtOf();
-    if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
+    // 카카오페이 머니 견적 금지 — 사용자는 카카오머니를 안 쓴다(머니 결제요청이 가서 취소, 사용자 2026-11-11)
     // 카카오페이 카드 즉시할인 + 현대카드 청구할인(2.7%)이 롯데카드(즉시할인+2%)보다 쌀 수 있다(사용자 2026-11-04)
     const kc=(await Q('카카오페이 카드',/radio "카카오페이 카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
     const kmx=kc.length?Math.max(...kc.map(x=>x.id)):0;

@@ -27,7 +27,7 @@ method=mc;
 } else {
 const mp=simplePays.find(p=>p.includes(card)||(card&&card.length>0&&p.includes(card)));
 if(!mp)return{ok:false,error:'no method'};
-const KP=mp==='카카오페이',KK=args.kakao_card?'카카오페이 카드':'카카오페이 머니';
+const KP=mp==='카카오페이',KK='카카오페이 카드';
 const LC=mp==='간편결제';
 await page.clickText(mp);await S(1500);
 {
