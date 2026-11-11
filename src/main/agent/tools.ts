@@ -2116,6 +2116,23 @@ overlays left: ${after.length}${kept}`
       )
   )
 
+  const revealTab = tool(
+    'reveal_tab',
+    'Bring a background tab to the front of its window so the page actually paints. ' +
+      'Use right before an in-page payment keypad (L.PAY): hidden tabs freeze modal animations. Returns the previously visible tab id.',
+    { id: z.string() },
+    ({ id }) =>
+      guard('탭 앞으로', async () => {
+        if (ctx.mode === 'read_only') return READ_ONLY_REFUSAL
+        const target = targetList().find((t) => t.id === id && t.kind === 'tab')
+        if (!target) return `not found: no tab with id ${id}`
+        const m = ctx.tabs as Partial<TabManager>
+        if (typeof m.revealTab !== 'function') return 'error: reveal not supported'
+        const prev = m.revealTab(id)
+        return `ok: revealed ${id}. previous ${prev ?? 'none'}`
+      })
+  )
+
   const closeTab = tool(
     'close_tab',
     'Close a tab or a popup window by id (see list_tabs).',
@@ -2725,6 +2742,7 @@ ${submittedNote}`
     newTab,
     listTabs,
     switchTab,
+    revealTab,
     closeTab,
     clearSiteCookies,
     listAccounts,
@@ -2769,6 +2787,7 @@ export const SAMBA_TOOL_NAMES = [
   'new_tab',
   'list_tabs',
   'switch_tab',
+  'reveal_tab',
   'close_tab',
   'clear_site_cookies',
   'list_accounts',

@@ -705,6 +705,28 @@ export class TabManager {
     return this.get(id)
   }
 
+  // revealTab 이 activate 를 부르는 동안만 true — 사람 사용 중 보호(holdVisible)를 건너뛴다
+  private revealing = false
+
+  /**
+   * 뒤에서 돌던 탭을 이 창의 보이는 탭으로 올린다. 가려진 탭은 화면을 그리지 않아(requestAnimationFrame 정지)
+   * 롯데온 L.PAY 비밀번호 창이 투명한 채로 멈추고 숫자 버튼 크기가 0 이 됐다(실기 2026-11-11).
+   * 결제 키패드 직전에만 쓴다. 앞서 보이던 탭 id 를 돌려준다(되돌릴 때 revealTab 으로 다시 올린다)
+   */
+  revealTab(id: string): string | null {
+    const tab = this.get(id)
+    if (!tab || !isTabAlive(tab) || this.win.isDestroyed()) return null
+    const prev = this.activeId
+    this.revealing = true
+    try {
+      this.focusedPopupId = null
+      this.activate(id)
+    } finally {
+      this.revealing = false
+    }
+    return prev
+  }
+
   /** AI 작업 대상을 고른다. 탭이면 전환, 팝업이면 그 창에 포커스를 준다 */
   focusTarget(id: string): void {
     const popup = this.popupById(id)
@@ -1019,6 +1041,8 @@ export class TabManager {
   /** 사람이 이 창을 쓰는 중이라 자동화가 보이는 탭·창 포커스를 바꾸면 안 되는가(visible-guard.ts) */
   private holdVisible(): boolean {
     if (this.win.isDestroyed()) return false
+    // 결제 키패드처럼 화면에 그려져야 하는 순간은 뒤에서 돌던 탭도 보이는 탭으로 올린다(revealTab)
+    if (this.revealing) return false
     // 브릿지(하네스) 작업은 사람의 입력 시각과 상관없이 늘 뒤에서만 돈다
     if (isBackgroundAutomation()) return true
     return shouldHoldVisible(isAutomation(), lastHumanInWindowAt(this.win), Date.now())
