@@ -56,10 +56,10 @@ await S(1200);
 const want=String(args.easy_card||(args.card==='간편결제'?args.issuer:'')||'롯데카드');
 const rl=(await page.get({query:'L.PAY 카드'})).tree.split('\n').find(l=>/^\[\d+\] radio "L\.PAY 카드"/.test(l));
 if(rl&&!/value="on"/.test(rl)){await PC(parseInt(rl.slice(1)));await S(1200);}
-let sel='';for(let k=0;k<8&&!sel;k++){const P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700);}
+let sel='';for(let k=0;k<8&&!sel;k++){const P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=/카드를 먼저 선택/.test(P)?'':((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700);}
 if(!sel.includes(want.replace('카드',''))){
-for(const o of ['textbox','label']){const g=await page.get({query:'카드'});const re=o==='textbox'?/^\[(\d+)\] textbox "카드(를 선택|선택)/:/^\[(\d+)\] label "카드선택"/;const l=g.tree.split('\n').find(x=>re.test(x));if(!l)continue;await PC(parseInt(l.slice(1)));await S(600);const f=(await page.get({query:want})).tree.split('\n').find(x=>/^\[\d+\] (option|listitem|clickable|button|link) /.test(x)&&x.includes(want));if(f){await PC(parseInt(f.slice(1)));await S(900);break}}
-sel='';for(let k=0;k<6&&!sel;k++){const P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700);}
+for(const o of ['textbox','label']){const g=await page.get({query:'카드'});const re=o==='textbox'?/^\[(\d+)\] (?:textbox|combobox) "카드(를 선택|선택)/:/^\[(\d+)\] label "카드선택"/;const l=g.tree.split('\n').find(x=>re.test(x));if(!l)continue;await PC(parseInt(l.slice(1)));await S(600);const f=(await page.get({query:want})).tree.split('\n').find(x=>/^\[\d+\] (option|listitem|clickable|button|link) /.test(x)&&x.includes(want));if(f){await PC(parseInt(f.slice(1)));await S(900);break}}
+sel='';for(let k=0;k<6&&!sel;k++){const P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=/카드를 먼저 선택/.test(P)?'':((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700);}
 }
 if(!sel.includes(want.replace('카드','')))return{ok:false,error:'L.PAY '+want+'≠'+sel,method};
 method='간편결제/'+sel;
