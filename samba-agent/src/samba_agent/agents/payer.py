@@ -1024,13 +1024,13 @@ class PayerAgent(AgentBase):
             try:
                 self._wave.add_memo(
                     a.order.wave_key,
-                    f'카카오페이 승인 {KAKAO_HUMAN_ROUNDS}회 미승인 [카카오페이 {amount}] — 결제창 닫음·결제 안 됨 확인, 다른 수단으로 다시 구매',
+                    f'카카오페이 승인 {KAKAO_HUMAN_ROUNDS}회 미승인 [카카오페이 {amount}] — 결제창 닫음·결제 안 됨 확인, 결제 멈춤(사람 확인 필요)',
                 )
             except Exception:  # noqa: BLE001
                 self.note('카카오페이', '삼바웨이브 메모 남기기 실패')
         raise AgentFailure(
             'needs_ai',
-            f'카카오페이 승인 {KAKAO_HUMAN_ROUNDS}회 미승인 — 결제창 닫음, 결제 완료 화면 없음. 카카오페이 빼고 다시 산다',
+            f'카카오페이 승인 {KAKAO_HUMAN_ROUNDS}회 미승인 — 결제창 닫음, 결제 완료 화면 없음. 결제 멈춤(다른 수단·재요청 안 함)',
             FailReason.KAKAO_UNAPPROVED,
         )
         memo = (

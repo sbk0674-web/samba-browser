@@ -663,8 +663,9 @@ def test_kakao_unapproved_requeues_with_kakao_after_wait(tmp_path):
     q.finish(job.id, 'needs_ai', error='kakao_unapproved')
     intake.run_once()
     assert q.get('K10').state == 'needs_ai'  # 20분 전에는 다시 요청하지 않는다
+    # 사용자 2026-11-11: 승인이 안 되면 멈춘다 — 시간이 지나도 다시 요청하거나 다른 수단으로 넘기지 않는다
     q._db.execute("UPDATE jobs SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?", (job.id,))
     intake.run_once()
     again = q.get('K10')
-    assert again.state == 'queued' and again.attempts == 1
+    assert again.state == 'needs_ai'
     assert not again.options.get('no_kakao')

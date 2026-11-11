@@ -432,28 +432,20 @@ class Intake:
         품절·마진·검증불일치·결제중단은 결론이거나 결제 위험이 있어 여기서 재시도하지 않는다.
         """
         if job.state == 'needs_ai' and job.error == 'kakao_unapproved':
-            # 카카오페이 승인이 안 와 결제창을 닫은 주문 — 더 비싼 수단으로 넘기지 않는다(사용자 2026-11-08: 최저가 아니면 사지 말라).
-            # 20분 뒤 카카오페이로 다시 산다(결제 요청을 다시 보낸다).
-            # 사람이 승인하지 못한 것은 삼바 주문 메모에 한 번 남긴다(사용자 2026-11-08)
+            # 카카오페이 승인이 안 와 결제창을 닫은 주문 — 멈춘다(사용자 2026-11-11: 승인이 안 되면 멈추는 것).
+            # 다른 결제수단으로 넘기지도, 같은 요청을 다시 보내지도 않는다. 사람이 다시 넣을 때까지 needs_ai 로 둔다.
+            # 삼바 주문 메모에 한 번 남긴다(사용자 2026-11-08)
             noted: set[int] = self.__dict__.setdefault('_kakao_noted', set())
             if job.id not in noted:
                 try:
                     self._wave.add_memo(
                         job.order_no,
-                        '[하네스] 카카오페이 결제요청 미승인 — 사람 승인 필요(최저가라 다른 결제수단으로 사지 않고 20분마다 다시 요청)',
+                        '[하네스] 카카오페이 결제요청 미승인 — 결제 멈춤(다른 수단·재요청 안 함), 사람 확인 필요',
                     )
                     noted.add(job.id)
-                except Exception as exc:  # noqa: BLE001 — 메모 실패가 재요청을 막으면 안 된다
+                except Exception as exc:  # noqa: BLE001 — 메모 실패는 무시
                     log.warning('카카오페이 미승인 메모 실패(무시): %s %s', job.order_no, exc)
-            try:
-                age = datetime.now(UTC) - datetime.fromisoformat(str(job.updated_at))
-            except ValueError:
-                age = timedelta(0)
-            if age < timedelta(minutes=KAKAO_RETRY_MINUTES):
-                return False
-            self._queue.requeue_waiting(job.id, error='kakao_unapproved')
-            log.info('카카오페이 미승인 주문을 카카오페이로 다시 큐에 넣었다: %s', job.order_no)
-            return True
+            return False
         if job.state == 'needs_ai' and job.error == 'after_hours':
             # 밤에 카카오페이 승인을 미룬 결제 전 대기 — 업무시간이 되면 횟수와 상관없이 다시 넣는다
             # (실기 2026-11-05 08:21: 롯데온 4건이 아침까지 그대로 멈춰 있었다)
