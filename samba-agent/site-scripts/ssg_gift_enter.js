@@ -17,7 +17,7 @@ const opt = nz(args.option).replace(/\s*\(남은수량[^)]*\)\s*$/, '')
 // 큰 페이지(신세계백화점)는 전체 목록이 잘린다 — 검색으로 찾고, '사이즈 선택하세요.'처럼 이름 붙은 칸을 먼저(맨 앞은 숨은 칸, 09-30)
 // 선택 칸이 둘(색·사이즈)이면 주문서 옵션 '색/사이즈'를 칸 순서대로 하나씩 고른다(2026-10-02 다이나핏 '라이트 블루(B1)/L')
 // '쇼핑백 신청'·추가옵션 칸은 상품 옵션이 아니다 — 세면 '색/사이즈'를 둘로 쪼개 'Z1' 만 찾다 실패한다(2026-10-05 다이나핏 조끼)
-const selN = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l)).length
+const selN = (await lines({ query: '선택하세요' })).filter(l => / (?:link|button) "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l)).length
 let parts = opt ? [opt] : []
 if (selN > 1 && opt.includes('/')) {
   const raw = opt.split('/').map(nz).filter(Boolean)
@@ -28,17 +28,17 @@ if (selN > 1 && opt.includes('/')) {
   parts = [opt.slice(0, k), opt.slice(k + 1)]
 }
 for (const opt of parts) {
-  const selAll = (await lines({ query: '선택하세요' })).filter(l => / link "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l))
-  const sel = selAll.find(l => !/ link "선택하세요\."/.test(l)) || selAll[0]
+  const selAll = (await lines({ query: '선택하세요' })).filter(l => / (?:link|button) "[^"]*선택하세요\.?"/.test(l) && !/쇼핑백|추가|포장/.test(l))
+  const sel = selAll.find(l => !/ (?:link|button) "선택하세요\."/.test(l)) || selAll[0]
   if (!sel) break
   await page.click(idL(sel))
   await sleep(1500)
   ls = [...await lines({ interactive: true }), ...await lines({ query: opt || '선택' })]
   // 전체 목록·검색 결과에 같은 항목이 두 번 잡힌다 — 요소 번호로 하나씩만
   const eq = l => lab(l).replace(/\s*\(남은수량[^)]*\)\s*$/, '') === opt
-  let cand = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] link "/.test(l) && eq(l))
+  let cand = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] (?:link|button) "/.test(l) && eq(l))
   // 똑같은 글자가 없으면 포함으로 — '블랙(Z1)' ↔ 'Z1', 'Z1/M' ↔ 'M'(2026-10-05)
-  if (!cand.length) cand = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] link "/.test(l) && lab(l).includes(opt) && !/^(선택|전체)/.test(lab(l)))
+  if (!cand.length) cand = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] (?:link|button) "/.test(l) && lab(l).includes(opt) && !/^(선택|전체)/.test(lab(l)))
   // 'L' 처럼 짧은 사이즈는 'XL'·'LOGIN' 에도 들어 있다 — 경계가 맞는 항목('L (품절)'·'L 남은수량')만 남기고, 그래도 여럿이면 옵션 줄(남은수량·품절)만 본다(2026-10-09 지오다노 '08네이비+화이트 스트라이프/L' 후보 27곳)
   if (cand.length > 1) {
     const esc = opt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -48,7 +48,7 @@ for (const opt of parts) {
     if (cand.length > 1) { const o = cand.filter(l => /남은수량|품절|매진/.test(lab(l))); if (o.length) cand = o }
   }
   if (cand.length !== 1) {
-    const all = ls.filter(l => /^\[\d+\] link "/.test(l) && /남은수량|품절|매진/.test(l)).map(lab).slice(0, 12)
+    const all = ls.filter(l => /^\[\d+\] (?:link|button) "/.test(l) && /남은수량|품절|매진/.test(l)).map(lab).slice(0, 12)
     return { ...R, error: 'option_not_found', note: '옵션 ' + opt + ' 을 하나로 못 찾음(' + cand.length + ')', options: all }
   }
   if (/품절|매진/.test(lab(cand[0]))) return { ...R, error: 'sold_out', note: '옵션 품절: ' + opt }
@@ -56,7 +56,7 @@ for (const opt of parts) {
   await sleep(1800)
   ls = await lines({ interactive: true })
 }
-const g = ls.find(l => /^\[\d+\] link "선물"/.test(l)) || (await lines({ query: '선물' })).find(l => /^\[\d+\] link "선물"/.test(l))
+const g = ls.find(l => /^\[\d+\] (?:link|button) "선물"/.test(l)) || (await lines({ query: '선물' })).find(l => /^\[\d+\] (?:link|button) "선물"/.test(l))
 if (!g) return { ...R, error: 'no_gift_button', note: '선물 버튼 없음' }
 page.click(idL(g)).catch(() => {})
 let loginSeen = null
