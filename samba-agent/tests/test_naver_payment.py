@@ -140,12 +140,12 @@ def test_payer_only_clicks_agreement_after_verified_hyundai(verified):
     assignment = SimpleNamespace(handoff={'paid': 59250})
     if verified:
         payer._prepare_naver_card(assignment)
-        assert calls == ['run_js', 'click', 'wait']
+        assert [c for c in calls if c != 'list_tabs'] == ['run_js', 'click', 'wait']
         assert payer._naver_payment['naver_reward'] == 592
     else:
         with pytest.raises(AgentFailure):
             payer._prepare_naver_card(assignment)
-        assert calls == ['run_js']
+        assert [c for c in calls if c != 'list_tabs'] == ['run_js']
 
 
 def _naver_payer(reads, keypad_out):

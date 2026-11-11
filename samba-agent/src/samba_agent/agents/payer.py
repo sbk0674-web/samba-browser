@@ -1507,6 +1507,22 @@ class PayerAgent(AgentBase):
         naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
         if naver:
             self.tool('switch_tab', id=str(naver[-1]['id']))
+        else:
+            # 네이버 결제창이 팝업이 아니라 주문서 탭 안에서 열리면 그 탭은 뒤에 가려져 그려지지 않는다 —
+            # 금액 숫자가 굴러가는 그림이 멈춰 '37112' 같은 엉뚱한 금액을 읽었다(실기 2026-11-12 21315224845173299).
+            # 앞으로 올려 그리게 한 뒤 읽는다
+            try:
+                tabs = json.loads(self.tool('list_tabs'))
+                pay_tabs = [
+                    t for t in tabs
+                    if isinstance(t, dict) and t.get('kind') == 'tab'
+                    and _pay_host_provider(str(t.get('url') or '')) == 'naverpay'
+                ]
+                if pay_tabs:
+                    self.tool('reveal_tab', id=str(pay_tabs[-1]['id']))
+                    self.tool('wait', ms=2500)
+            except (AgentFailure, ValueError) as e:
+                self.note('네이버 결제창', f'탭 앞으로 올리기 실패: {str(e)[:60]}')
         prepared = self._read_naver_card(amount)
         if isinstance(prepared, dict) and prepared.get('auth_required'):
             # 결제창 앞에 네이버페이 비밀번호 창이 먼저 뜬다 — 앱이 키마스터 값을 한 번만 넣고 결제창을 다시 본다
