@@ -5022,7 +5022,14 @@ class BuyerAgent(AgentBase):
         # 2단이면 주문 옵션 그대로(되읽은 'Z1/M' 은 색 이름이 빠져 선물 페이지의 '블랙(Z1)' 과 안 맞는다)
         # 되읽은 옵션에 주문 옵션 글자가 없으면(나이키 240 주문인데 'M' 만 읽힘) 주문 옵션을 준다
         # (실기 2026-11-11 SSG 20261111D56363: 'M' 으로 찾다 16곳이 걸려 선물 진입 실패)
-        option = want if ('/' in want or (want and want not in selected)) else (selected or want)
+        # 단, 되읽은 값이 주문 옵션의 일부('085(S)' ⊂ 'BLK(BLACK) 085(S)')면 되읽은 값을 쓴다 — 주문 옵션 통째로는
+        # 선물 페이지 선택지에 없다(실기 2026-11-12 752923663286272: 0곳)
+        if '/' in want:
+            option = want
+        elif selected and (not want or selected in want):
+            option = selected
+        else:
+            option = want or selected
         self._close_order_tabs(account)
         enter_args = json.dumps(
             {'product_url': url, 'option': option, **({'profile': account} if account else {})},
