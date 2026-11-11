@@ -97,7 +97,7 @@ if (!filled) return { ...R, note: '선물 화면에 받는 분이 안 들어감'
 const go = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] button "계속하기"/.test(l))
 if (!go) return { ...R, note: '계속하기 버튼 없음' }
 // 앞 단계(가격 확인)에서 연 일반 주문서 탭이 남아 있으면 그걸 선물 주문서로 집었다 — 누르기 전부터 있던 주문서 탭은 빼고 기다린다
-// (실기 2026-11-11 3482315635: 우리 기본 주소의 일반 주문서를 집어 '선물 아님'으로 3번 실패, 진단 창(남은 탭 없음)에서는 성공)
+// (실기 2026-11-11 다이나핏 베스트 선물: 우리 기본 주소의 일반 주문서를 집어 '선물 아님'으로 3번 실패, 진단 창(남은 탭 없음)에서는 성공)
 const pre = new Set((await tabs.list()).filter(t => /pay\.ssg\.com\/(?:order\/ordPage|nodcsnOrder)/.test(t.url || '')).map(t => t.id))
 await page.click(idL(go))
 let od = await waitTab(/pay\.ssg\.com\/(?:order\/ordPage|nodcsnOrder\/ordShppInfo)/, 30, pre)
