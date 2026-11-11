@@ -445,6 +445,10 @@ class Intake:
                     noted.add(job.id)
                 except Exception as exc:  # noqa: BLE001 — 메모 실패가 재요청을 막으면 안 된다
                     log.warning('카카오페이 미승인 메모 실패(무시): %s %s', job.order_no, exc)
+            if self._queue.requeue_without_kakao_money(job.id):
+                # 첫 미승인은 카카오머니 잔액 부족일 수 있다 — 머니만 빼고 다음으로 싼 수단으로 바로 다시 산다
+                log.info('카카오페이 미승인 — 카카오머니 빼고 다시 큐에 넣었다: %s', job.order_no)
+                return True
             try:
                 age = datetime.now(UTC) - datetime.fromisoformat(str(job.updated_at))
             except ValueError:

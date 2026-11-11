@@ -13,7 +13,10 @@ def test_single_checkout_tab_found() -> None:
 
 
 def test_multiple_or_none_returns_none() -> None:
-    assert single_order_tab(_tabs('https://a.com/order/checkout', 'https://b.com/order/order-form')) is None
+    assert (
+        single_order_tab(_tabs('https://a.com/order/checkout', 'https://b.com/order/order-form'))
+        is None
+    )
     assert single_order_tab(_tabs('https://a.com/')) is None
     assert single_order_tab('not json') is None
 
@@ -37,7 +40,9 @@ def test_프리사이즈_주문은_화면의_다른_사이즈_글자로_막지_�
     from samba_agent.agents.payer import order_form_mismatch
 
     page = '라코스테 삭스 031(블랙) 1개 S 쇼핑백 신청 14,595원'
-    assert order_form_mismatch(page, '라코스테 삭스', '031(블랙) FREE RA195E-56G', '031(블랙)') is None
+    assert (
+        order_form_mismatch(page, '라코스테 삭스', '031(블랙) FREE RA195E-56G', '031(블랙)') is None
+    )
     assert order_form_mismatch(page, '라코스테 삭스', '031(블랙) FREE RA195E-56G', '') is None
 
 
@@ -50,3 +55,25 @@ def test_상품명_속_글자_M_Logo_때문에_S_주문을_막지_않는다():
     assert order_form_mismatch(page, name, 'S', f'{name} S') is None
     # 진짜 다른 사이즈(주문 S 인데 L 이 담김)는 여전히 막는다
     assert order_form_mismatch(page.replace(' S / ', ' L / '), name, 'S', f'{name} L')
+
+
+def test_multiple_checkout_tabs_narrowed_by_profile() -> None:
+    out = json.dumps(
+        [
+            {
+                'id': 't1',
+                'kind': 'tab',
+                'profile': 'a',
+                'url': 'https://www.29cm.co.kr/order/checkout?x=1',
+            },
+            {
+                'id': 't2',
+                'kind': 'tab',
+                'profile': 'b',
+                'url': 'https://www.29cm.co.kr/order/checkout?x=2',
+            },
+        ]
+    )
+    assert single_order_tab(out) is None
+    assert single_order_tab(out, 'b') == 't2'
+    assert single_order_tab(out, 'c') is None

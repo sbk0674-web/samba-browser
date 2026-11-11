@@ -662,7 +662,12 @@ def test_kakao_unapproved_requeues_with_kakao_after_wait(tmp_path):
     q._db.execute('UPDATE jobs SET attempts=1 WHERE id=?', (job.id,))
     q.finish(job.id, 'needs_ai', error='kakao_unapproved')
     intake.run_once()
-    assert q.get('K10').state == 'needs_ai'  # 20분 전에는 다시 요청하지 않는다
+    # 첫 미승인: 카카오머니(잔액 부족일 수 있다)만 빼고 바로 다시 산다 — 다음으로 싼 수단(사용자 2026-11-11)
+    first = q.get('K10')
+    assert first.state == 'queued' and first.options.get('no_kakao_money')
+    q.finish(job.id, 'needs_ai', error='kakao_unapproved')
+    intake.run_once()
+    assert q.get('K10').state == 'needs_ai'  # 두 번째부터는 20분 전에는 다시 요청하지 않는다
     q._db.execute("UPDATE jobs SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?", (job.id,))
     intake.run_once()
     again = q.get('K10')

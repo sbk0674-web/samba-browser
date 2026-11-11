@@ -3335,6 +3335,8 @@ class BuyerAgent(AgentBase):
             return
         self.step(f'{self.spec.name}: 결제수단 견적({account})')
         quote_args: dict[str, object] = {'profile': account, 'methods': methods}
+        if getattr(self, '_no_kakao_money', False):
+            quote_args['no_kakao_money'] = True
         if src.direct_card:
             # 카드 직접 결제 소싱처(H몰): 그 카드사 줄만 견적한다(다른 카드사는 허용 수단이 아니다)
             quote_args['cards'] = [src.direct_card]
@@ -4298,6 +4300,8 @@ class BuyerAgent(AgentBase):
         self.evidence = []
         self._current_order_no = a.order.order_no
         self._no_kakao = bool(a.options.get('no_kakao'))
+        # 카카오머니 요청이 미승인(잔액 부족 등)이었던 주문 — 머니만 빼고 다음으로 싼 수단을 고른다(사용자 2026-11-11)
+        self._no_kakao_money = bool(a.options.get('no_kakao_money'))
         # 이 주문에서 뺄 결제 제공자(예: ['site'] — 롯데온 L.PAY 비밀번호 창이 안 떠 멈춘 주문, 2026-11-06)
         # 작업 옵션 값은 글자로 온다(Assignment.options: dict[str, str]) — "['site']"·"site,kakao" 모두 받는다
         self._exclude_pay = set(re.findall(r'[a-z]+', str(a.options.get('exclude_pay') or '')))

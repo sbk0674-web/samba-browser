@@ -635,23 +635,29 @@ _ORDER_FORM_URL_RE = re.compile(
 )
 
 
-def single_order_tab(list_tabs_output: str) -> str | None:
-    """list_tabs 출력에서 주문서(checkout) 주소의 일반 탭이 정확히 하나면 그 id. 없거나 여럿이면 None."""
+def single_order_tab(list_tabs_output: str, profile: str | None = None) -> str | None:
+    """list_tabs 출력에서 주문서(checkout) 주소의 일반 탭이 정확히 하나면 그 id. 없거나 여럿이면 None.
+
+    여럿이면 이 계정 프로필(profile) 탭만 남겨 다시 본다 — 다른 계정·앞 작업 주문서가 열려 있으면
+    29CM 결제가 'no tab' 으로 계속 멈췄다(실기 2026-11-11 4988·4994).
+    """
     try:
         targets = json.loads(list_tabs_output)
     except (json.JSONDecodeError, TypeError):
         return None
     if not isinstance(targets, list):
         return None
-    ids = [
-        str(t['id'])
+    forms = [
+        t
         for t in targets
         if isinstance(t, dict)
         and t.get('kind') == 'tab'
         and t.get('id')
         and _ORDER_FORM_URL_RE.search(str(t.get('url') or ''))
     ]
-    return ids[0] if len(ids) == 1 else None
+    if len(forms) > 1 and profile:
+        forms = [t for t in forms if str(t.get('profile') or '') == str(profile)]
+    return str(forms[0]['id']) if len(forms) == 1 else None
 
 
 def _pay_provider_from_host(url: str) -> str | None:
@@ -2069,12 +2075,24 @@ class PayerAgent(AgentBase):
             # 구매 핸드오프에 주문서 탭 id 가 빠진 경우(실기 2026-10-20 29CM 2770: no tab 4회) — 열린 탭 중
             # 주문서(checkout) 주소가 하나뿐이면 그것을 쓴다. 여럿이면 짐작하지 않는다
             try:
-                found_tab = single_order_tab(self.tool('list_tabs'))
+                listed_tabs = self.tool('list_tabs')
             except AgentFailure:
-                found_tab = None
+                listed_tabs = '[]'
+            found_tab = single_order_tab(listed_tabs, profile or None)
             if found_tab:
                 payload['tab'] = found_tab
                 self.note('결제창', f'핸드오프에 주문서 탭이 없어 열린 탭에서 찾았다({found_tab})')
+            else:
+                # 왜 못 찾았는지 남긴다 — 주문서 탭 수·종류·프로필(주소는 경로만)
+                try:
+                    seen = [
+                        f"{t.get('kind')}:{t.get('profile')}:{urlsplit(str(t.get('url') or '')).path[:30]}"
+                        for t in json.loads(listed_tabs)
+                        if isinstance(t, dict) and _ORDER_FORM_URL_RE.search(str(t.get('url') or ''))
+                    ]
+                except ValueError:
+                    seen = []
+                self.note('결제창', f'주문서 탭 못 고름 — 후보 {len(seen)}개 {seen[:4]}')
         # 결제창 진입은 AI 수리 대상이 아니다 — 비밀번호 없는 간편결제(무신사페이 카드 등)는 '결제하기' 한 번에
         # 결제가 끝난다(실기 2026-09-24: 수리 시험 중 결제하기 클릭으로 실결제 발생). 실패하면 사람에게 넘긴다
         raw_enter = self.tool(
