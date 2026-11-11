@@ -106,3 +106,38 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         tok == size or tok.startswith(size + '(')
         for tok in re.split(r'[\s/:,·]+', str(other or '').casefold())
     )
+
+
+# 색 이름·색코드 → 한 가지 영어 색(교차 비교 색 대조용)
+_EN_COLORS = (
+    'black', 'white', 'blue', 'navy', 'grey', 'beige', 'ivory', 'red', 'green', 'pink', 'brown',
+    'khaki', 'cream', 'charcoal', 'purple', 'yellow', 'orange', 'mint', 'silver', 'gold', 'sand',
+)
+_COLOR_CODES = {
+    'blk': 'black', 'wht': 'white', 'blu': 'blue', 'nvy': 'navy', 'gry': 'grey', 'gra': 'grey',
+    'beg': 'beige', 'bge': 'beige', 'red': 'red', 'grn': 'green', 'pnk': 'pink', 'brn': 'brown',
+    'khk': 'khaki', 'crm': 'cream', 'cre': 'cream', 'ivr': 'ivory', 'ivo': 'ivory', 'pur': 'purple',
+    'ylw': 'yellow', 'org': 'orange', 'slv': 'silver',
+}
+
+
+def colors_in(text: object) -> set[str]:
+    """글 속 색(한글 색 이름·영어 색·'BLU0'·'WHT0_WHITE' 같은 색코드)을 영어 색 집합으로."""
+    # '화이트라벨'(노스페이스 라인 이름)은 색이 아니다
+    t = re.sub(r'화이트\s*라벨|white\s*label', ' ', str(text or '').casefold()).replace('gray', 'grey')
+    out = {c for ko, c in _KO_COLOR.items() if ko in t and c in _EN_COLORS}
+    out |= {c for c in _EN_COLORS if re.search(r'(?<![a-z])' + c + r'(?![a-z])', t)}
+    out |= {_COLOR_CODES[m] for m in re.findall(r'(?<![a-z])([a-z]{3})\d(?![a-z0-9])', t) if m in _COLOR_CODES}
+    return out
+
+
+def cross_color_conflict(order_text: object, other_text: object) -> tuple[set[str], set[str]] | None:
+    """주문 상품의 색과 다른 사이트에서 찾은 상품의 색이 둘 다 있고 하나도 안 겹치면 (주문 색, 찾은 색). 아니면 None.
+
+    실기 2026-11-10 3482152956: 무신사 블루(UR221CRS63 BLU0) 품절 → 29CM 에서 같은 품번 화이트 상품을 샀다.
+    주문 옵션이 사이즈 '100' 뿐이라 색을 아무도 대조하지 않았다.
+    """
+    want, got = colors_in(order_text), colors_in(other_text)
+    if want and got and not (want & got):
+        return want, got
+    return None

@@ -25,7 +25,7 @@ from samba_agent.agents.base import (
     split_page_dialogs,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment, OrderRef
-from samba_agent.agents.order_identity import color_code_conflict
+from samba_agent.agents.order_identity import color_code_conflict, cross_color_conflict
 from samba_agent.agents.registry import AgentSpec
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
@@ -3833,6 +3833,18 @@ class BuyerAgent(AgentBase):
                 cmp._apply_payment_quotes(a2, s_acc, s_snap)
         except AgentFailure as e:
             self.note('교차 비교', mask_text(f'{sib_src.id} 견적 실패({e.reason[:60]}) — {stay}'))
+            return None
+        # 같은 품번이라도 색이 다른 상품일 수 있다 — 주문 상품의 색과 찾은 상품의 색이 안 겹치면 쓰지 않는다
+        # (실기 2026-11-10 3482152956: 무신사 블루 품절 → 29CM 같은 품번 화이트를 샀다. 주문 옵션이 '100' 뿐이었다)
+        clash = cross_color_conflict(
+            f'{a.order.sku} {a.order.option or ""}',
+            ' '.join(str(s_snap.get(k) or '') for k in ('product_name', 'selected', 'chosen')),
+        )
+        if clash:
+            self.note(
+                '교차 비교',
+                f'{sib_src.id} 상품 색 {sorted(clash[1])} ≠ 주문 색 {sorted(clash[0])} — 다른 색 상품이라 쓰지 않는다',
+            )
             return None
         other = _as_float(s_snap.get('cost'))
         sale = _as_float(a.order.sale_price)

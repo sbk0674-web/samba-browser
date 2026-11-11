@@ -235,3 +235,17 @@ def test_상세_색번호_괄호는_빼고_본다():
 
     assert paid_option_matches('블랙 3XL', '블랙(001) / 3XL')
     assert not paid_option_matches('블랙 3XL', '화이트(100) / 3XL')
+
+
+def test_cross_color_conflict_blocks_other_color_same_model():
+    # 실기 2026-11-10 3482152956: 무신사 블루 품절 → 29CM 같은 품번 화이트 상품을 샀다
+    from samba_agent.agents.order_identity import cross_color_conflict
+
+    order = '매장정품 엄브로 UMBRO UR221CRS63 BLU0 COOLING 반팔 티셔츠 블루 라운드티셔츠 6505429 [100] 100'
+    assert cross_color_conflict(order, '[COOLING] 아이스코튼 웨이브 그래픽 반팔 티셔츠 화이트 UR221CRS63 WHT0_WHITE:100')
+    assert cross_color_conflict(order, '[COOLING] 반팔 티셔츠 블루 UR221CRS63 BLU0_BLUE:100') is None
+    # 색 정보가 한쪽에 없으면 막지 않는다
+    assert cross_color_conflict('나이키 HQ0504-010 080', '스위프트 크루넥 HQ0504-010 080') is None
+    # 노스페이스 '화이트라벨'은 색이 아니다
+    assert cross_color_conflict('노스페이스 화이트라벨 클리프 로우 GRAY', '화이트라벨 클리프 로우 스니커즈 GRAY') is None
+    assert cross_color_conflict('노스페이스 화이트라벨 BLACK', '화이트라벨 그레이') is not None
