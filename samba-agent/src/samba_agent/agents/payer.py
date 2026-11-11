@@ -2071,6 +2071,13 @@ class PayerAgent(AgentBase):
                     FailReason.UNKNOWN,
                 )
             payload['tab'] = str(sheets[0].get('id'))
+            # 뒤에 가려진 탭은 화면을 그리지 않아 L.PAY 비밀번호 창이 투명한 채 멈추고 숫자판 크기가 0 이 된다
+            # (실기 2026-11-11 21315224549733299: 'target is not a secret input' 10회). 결제 직전에 앞으로 올린다
+            if not a.dry_run:
+                try:
+                    self.note('결제창', self.tool('reveal_tab', id=payload['tab'])[:80])
+                except AgentFailure as e:
+                    self.note('결제창', f'주문서 탭 앞으로 올리기 실패: {e.reason[:60]}')
         elif script == 'checkout_enter_29cm' and not a.dry_run:
             # 구매 핸드오프에 주문서 탭 id 가 빠진 경우(실기 2026-10-20 29CM 2770: no tab 4회) — 열린 탭 중
             # 주문서(checkout) 주소가 하나뿐이면 그것을 쓴다. 여럿이면 짐작하지 않는다

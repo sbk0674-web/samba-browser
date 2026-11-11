@@ -29,6 +29,7 @@ BRIDGE_TOOLS = frozenset(
         'new_tab',
         'list_tabs',
         'switch_tab',
+        'reveal_tab',
         'close_tab',
         'list_accounts',
         'fill_secret',
