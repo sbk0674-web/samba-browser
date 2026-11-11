@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { loadProfileProxies, parseProxyUrl, profileOfPartition } from '../src/main/browser/profile-proxy'
 
 describe('프로필별 프록시 설정', () => {
@@ -28,5 +31,17 @@ describe('프로필별 프록시 설정', () => {
     })
     expect(out.snkrdunk?.proxyRules).toBe('http=127.0.0.1:8899;https=127.0.0.1:8899')
     expect(Object.keys(out)).toEqual(['snkrdunk'])
+  })
+
+  it('파일의 pacScript 항목(proxyRules 없이)도 읽고, "*" 는 모든 프로필 기본값으로 남는다(ABC마트 PAC 2026-11-11)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pp-'))
+    writeFileSync(
+      join(dir, 'profile-proxies.json'),
+      JSON.stringify({ '*': { pacScript: 'http://127.0.0.1:18113/proxy.pac' }, snkrdunk: { proxyRules: 'http=1.2.3.4:80' } })
+    )
+    const out = loadProfileProxies(dir, {})
+    expect(out['*']?.pacScript).toBe('http://127.0.0.1:18113/proxy.pac')
+    expect(out.snkrdunk?.proxyRules).toBe('http=1.2.3.4:80')
+    expect(out.snkrdunk?.pacScript).toBeUndefined()
   })
 })

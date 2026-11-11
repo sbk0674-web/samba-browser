@@ -16,6 +16,8 @@ import { join } from 'path'
 
 export interface ProfileProxy {
   proxyRules: string
+  /** PAC 주소 — 있으면 proxyRules 대신 쓴다(특정 도메인만 프록시로 보낼 때. 예: ABC마트 전용 중계기 PAC) */
+  pacScript?: string
   proxyBypassRules?: string
   username?: string
   password?: string
@@ -64,9 +66,11 @@ export function loadProfileProxies(
       for (const [name, value] of Object.entries(parsed)) {
         if (!value || typeof value !== 'object') continue
         const v = value as Record<string, unknown>
-        if (typeof v.proxyRules !== 'string' || !v.proxyRules.trim()) continue
+        const pac = typeof v.pacScript === 'string' && v.pacScript.trim() ? v.pacScript.trim() : ''
+        if (!pac && (typeof v.proxyRules !== 'string' || !v.proxyRules.trim())) continue
         out[name.toLowerCase()] = {
-          proxyRules: v.proxyRules,
+          proxyRules: typeof v.proxyRules === 'string' ? v.proxyRules : '',
+          ...(pac ? { pacScript: pac } : {}),
           ...(typeof v.proxyBypassRules === 'string' ? { proxyBypassRules: v.proxyBypassRules } : {}),
           ...(typeof v.username === 'string' ? { username: v.username } : {}),
           ...(typeof v.password === 'string' ? { password: v.password } : {})
@@ -102,11 +106,15 @@ const authRegistered = new Set<string>()
  * 같은 세션에 두 번 불려도 setProxy 는 멱등이다
  */
 export function applyProfileProxy(ses: Session, profile: string, proxies: ProfileProxies): boolean {
-  const cfg = proxies[profile.toLowerCase()]
+  // 프로필 전용 설정이 없으면 '*'(모든 프로필 기본값)를 쓴다 — ABC마트가 집 IP 를 막아 ABC 도메인만 중계기로 보내는 PAC(2026-11-11)
+  const cfg = proxies[profile.toLowerCase()] ?? proxies['*']
   if (!cfg) return false
+  const config = cfg.pacScript
+    ? { pacScript: cfg.pacScript }
+    : { proxyRules: cfg.proxyRules, proxyBypassRules: cfg.proxyBypassRules ?? '<local>' }
   void ses
-    .setProxy({ proxyRules: cfg.proxyRules, proxyBypassRules: cfg.proxyBypassRules ?? '<local>' })
-    .then(() => console.info(`프로필 프록시 적용: ${profile} → ${cfg.proxyRules}`))
+    .setProxy(config)
+    .then(() => console.info(`프로필 프록시 적용: ${profile} → ${cfg.pacScript ?? cfg.proxyRules}`))
     .catch((e: unknown) => console.error(`프로필 프록시 실패: ${profile}`, e instanceof Error ? e.message : e))
   if (cfg.username !== undefined && !authRegistered.has(profile.toLowerCase())) {
     authRegistered.add(profile.toLowerCase())
