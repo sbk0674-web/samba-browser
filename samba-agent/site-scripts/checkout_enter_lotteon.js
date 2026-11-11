@@ -91,8 +91,8 @@ const LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/;for(let k=0;k<4;k++)
 let T='',h=0;for(let w=0;w<20;w++){await S(1e3);T=await AT();if(LP.test(T)||DN.test(T)||/OVERLAY: "[^"]*(주문할인|할인 결제|혜택이)/.test(T))break}
 if(LP.test(T)||DN.test(T))break;
 const Z=async(q,r)=>(await page.get({query:q})).tree.split('\n').filter(l=>r.test(l)).map(l=>PI(l.slice(1)));
-if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const P=l=>+l.match(/(\d+)%/)[1]+(/간편/.test(method)&&/롯데카드/.test(l)?99:0),q=(await page.get({query:'%'})).tree.split('\n').filter(l=>/^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x,y)=>P(y)-P(x)),r=q.slice(0,1).map(l=>PI(l.slice(1)));if(r.length){await page.clickNative(r[0]);await S(1200);const g=await Z('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/);if(g.length){await PC(g[0]);await S(2500);h=1}}
-if(!h){const b=await Z('닫기',/button "닫기"/);if(b.length){await page.clickNative(Math.max(...b));await S(2000);h=1}}}
+if(/OVERLAY: "[^"]*주문할인혜택/.test(T)){const P=l=>+l.match(/(\d+)%/)[1]+(/간편/.test(method)&&/롯데카드/.test(l)?99:0),q=(await page.get({query:'%'})).tree.split('\n').filter(l=>/^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x,y)=>P(y)-P(x)),r=q.slice(0,1).map(l=>PI(l.slice(1)));if(r.length){await PC(r[0]+1);await S(800);await PC(r[0]);await S(1200);const g=await Z('할인혜택 받기',/button "[\d,]+원 할인혜택 받기"/);if(g.length){await PC(g[0]);await S(2500);h=1}}
+if(!h){const b=await Z('닫기',/button "닫기"/);if(b.length){await PC(Math.max(...b));await S(2000);h=1}}}
 if(/OVERLAY: "[^"]*할인 결제수단으로만/.test(T)){const b=await Z('적용하기',/button "적용하기"/);if(b.length){await PC(Math.max(...b));await S(2500);h=1}}
 if(/OVERLAY: "혜택이 변경/.test(T)){await S(2500);continue}
 if(!h)break;
