@@ -85,6 +85,8 @@ try{
   const Q=async(q,re)=>{const x=(await page.get({query:q})).tree.split('\n').filter(l=>re.test(l));return x;};
   const BR=/button "[\d,]+원 할인혜택 받기"/;
   const amtOf=async()=>{const bl=(await Q('할인혜택 받기',BR)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];return bl?parseInt((bl.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;};
+  // 줄 금액으로 견적(버튼 금액은 앞 칸 값이 남음, 11-11)
+  const rowAmt=async(lab,p)=>{const t=String((await page.get({query:lab})).tree||'');const x=(t.split('PAGE TEXT')[1]||t).replace(/\s+/g,' ');const m=x.match(new RegExp(lab+' ?'+p+'% 즉시할인 ?(?:자세히 ?)?-([0-9,]+) ?원'));return m?parseInt(m[1].replace(/,/g,''),10):0;};
   const hb=await page.idOf('할인변경');
   if(hb>=0){
     await page.click(hb);await sleep(2000);
@@ -94,7 +96,7 @@ try{
     const mx=rs.length?Math.max(...rs.map(x=>x.id)):0;
     const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
     if(best&&!best.on){await page.clickNative(best.id);await sleep(1200);}
-    const amt=await amtOf();
+    const amt=best?((await rowAmt('카카오페이 머니',best.p))||await amtOf()):0;
     if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
     }
     // 카카오페이 카드 즉시할인 + 현대카드 청구할인(2.7%)이 롯데카드(즉시할인+2%)보다 쌀 수 있다(사용자 2026-11-04)
@@ -106,7 +108,7 @@ try{
     let kbest=null;
     for(const r of kc.filter(r=>r.id>kmx-20).sort((a,b)=>b.p-a.p)){if(!r.on){await page.click(r.id);await sleep(1200);}if(await kOn(r.id)){kbest=r;break;}}
     if(kbest){
-      const kamt=await amtOf();
+      const kamt=(await rowAmt('카카오페이 카드',kbest.p))||await amtOf();
       if(kamt>0)quotes.push({method:'카카오페이',card:'현대카드',cost:base_cost-kamt,discount:'카카오페이 카드'+kbest.p+'% 즉시할인',kakao_card:true});}
     const lr=(await Q('롯데카드',/radio "롯데카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/롯데카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
     const lmx=lr.length?Math.max(...lr.map(x=>x.id)):0;
@@ -119,7 +121,7 @@ try{
         if(await isOn())break;
         await page.click(tid);await sleep(1200);
       }
-      if(await isOn())lamt=await amtOf();
+      if(await isOn())lamt=(await rowAmt('롯데카드',lbest.p))||await amtOf();
       if(lamt>0){
         for(let i=quotes.length-1;i>=0;i--)if(quotes[i].method==='간편결제')quotes.splice(i,1);
         quotes.push({method:'간편결제',card:'롯데카드',cost:base_cost-lamt,discount:'롯데카드 '+lbest.p+'% 즉시할인'});

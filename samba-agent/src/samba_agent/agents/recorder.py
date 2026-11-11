@@ -232,10 +232,16 @@ class RecorderAgent(AgentBase):
         bought = str(a.handoff.get('account') or '').strip() or (a.order.account or '').strip()
         # 주문 계정과 같아도 id 를 조회한다 — 주문에 미리 잡힌 계정은 아이디만 있고 id 가 비어 있어
         # 주문계정이 빈칸으로 남았다(실기 2026-09-27: ABC buyer01·무신사 buyer05 결제건)
-        if bought and (bought != (a.order.account or '') or not a.order.account_id) and self._wave is not None:
-            found = self._wave.sourcing_account_id(
-                _source_site(str(a.handoff.get('buy_source') or a.order.source)), bought
-            )
+        buy_source = str(a.handoff.get('buy_source') or a.order.source)
+        # 교차 비교로 다른 사이트에서 샀으면 계정 아이디가 같아도 그 사이트 계정으로 적는다
+        # (실기 2026-11-11 21315224549733299: SSG edelvise06 로 샀는데 롯데온 edelvise06 으로 기록)
+        other_site = _source_site(buy_source) != _source_site(str(a.order.source))
+        if (
+            bought
+            and (bought != (a.order.account or '') or not a.order.account_id or other_site)
+            and self._wave is not None
+        ):
+            found = self._wave.sourcing_account_id(_source_site(buy_source), bought)
             if found:
                 self.note('주문계정', f'실제 구매 계정 {bought} 로 기록')
                 return found
