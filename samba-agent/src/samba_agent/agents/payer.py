@@ -1524,6 +1524,13 @@ class PayerAgent(AgentBase):
             except (AgentFailure, ValueError) as e:
                 self.note('네이버 결제창', f'탭 앞으로 올리기 실패: {str(e)[:60]}')
         prepared = self._read_naver_card(amount)
+        # 금액은 숫자가 굴러가는 그림이라 다 멈추기 전에 읽으면 숫자가 섞인다(실기 2026-11-12: 37,112·36,738 로 읽힘).
+        # 결제액 불일치면 조금 기다렸다 다시 읽는다 — 그래도 다르면 그대로 멈춘다
+        for _ in range(6):
+            if not (isinstance(prepared, dict) and '결제액 불일치' in str(prepared.get('error') or '')):
+                break
+            self.tool('wait', ms=2000)
+            prepared = self._read_naver_card(amount)
         if isinstance(prepared, dict) and prepared.get('auth_required'):
             # 결제창 앞에 네이버페이 비밀번호 창이 먼저 뜬다 — 앱이 키마스터 값을 한 번만 넣고 결제창을 다시 본다
             account = str(a.handoff.get('account') or a.order.account or '')
