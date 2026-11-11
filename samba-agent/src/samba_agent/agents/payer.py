@@ -2075,16 +2075,6 @@ class PayerAgent(AgentBase):
             if found_tab:
                 payload['tab'] = found_tab
                 self.note('결제창', f'핸드오프에 주문서 탭이 없어 열린 탭에서 찾았다({found_tab})')
-        if script == 'checkout_enter_lotteon' and payload.get('tab'):
-            # 주문서의 '주문할인혜택' 창이 결제수단 칸을 가려 카카오페이 카드를 못 고른다 — 진입 전에 처리한다
-            # (실기 2026-11-10 20261110101741102:001 '카카오페이 카드 미선택' 2회. 키패드 단계 처리는 진입 뒤라 늦다)
-            try:
-                self.tool('switch_tab', id=str(payload['tab']))
-                cleared = str(self.tool('run_js', code=LOTTEON_DISCOUNT_OVERLAY_JS))
-                if 'none' not in cleared:
-                    self.note('주문할인 창', mask_text(f'결제 진입 전 {cleared[:80]}'))
-            except AgentFailure as e:
-                self.note('주문할인 창', mask_text(f'결제 진입 전 처리 실패: {e.reason}'[:120]))
         # 결제창 진입은 AI 수리 대상이 아니다 — 비밀번호 없는 간편결제(무신사페이 카드 등)는 '결제하기' 한 번에
         # 결제가 끝난다(실기 2026-09-24: 수리 시험 중 결제하기 클릭으로 실결제 발생). 실패하면 사람에게 넘긴다
         raw_enter = self.tool(
