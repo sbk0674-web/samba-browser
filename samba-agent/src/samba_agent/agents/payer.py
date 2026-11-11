@@ -2071,13 +2071,6 @@ class PayerAgent(AgentBase):
                     FailReason.UNKNOWN,
                 )
             payload['tab'] = str(sheets[0].get('id'))
-            # 뒤에 가려진 탭은 화면을 그리지 않아 L.PAY 비밀번호 창이 투명한 채 멈추고 숫자판 크기가 0 이 된다
-            # (실기 2026-11-11 21315224549733299: 'target is not a secret input' 10회). 결제 직전에 앞으로 올린다
-            if not a.dry_run:
-                try:
-                    self.note('결제창', self.tool('reveal_tab', id=payload['tab'])[:80])
-                except AgentFailure as e:
-                    self.note('결제창', f'주문서 탭 앞으로 올리기 실패: {e.reason[:60]}')
         elif script == 'checkout_enter_29cm' and not a.dry_run:
             # 구매 핸드오프에 주문서 탭 id 가 빠진 경우(실기 2026-10-20 29CM 2770: no tab 4회) — 열린 탭 중
             # 주문서(checkout) 주소가 하나뿐이면 그것을 쓴다. 여럿이면 짐작하지 않는다
@@ -2100,6 +2093,14 @@ class PayerAgent(AgentBase):
                 except ValueError:
                     seen = []
                 self.note('결제창', f'주문서 탭 못 고름 — 후보 {len(seen)}개 {seen[:4]}')
+        if script == 'checkout_enter_lotteon' and payload.get('tab') and not a.dry_run:
+            # 뒤에 가려진 탭은 화면을 그리지 않아 L.PAY 비밀번호 창이 투명한 채 멈추고 숫자판 크기가 0 이 된다
+            # (실기 2026-11-11 21315224549733299: 'target is not a secret input' 10회). 결제 직전에 앞으로 올린다.
+            # 구매 핸드오프가 준 탭이든 찾은 탭이든 같게 올린다(처음엔 찾은 탭 분기에만 넣어 실행되지 않았다)
+            try:
+                self.note('결제창', self.tool('reveal_tab', id=str(payload['tab']))[:80])
+            except AgentFailure as e:
+                self.note('결제창', f'주문서 탭 앞으로 올리기 실패: {e.reason[:60]}')
         # 결제창 진입은 AI 수리 대상이 아니다 — 비밀번호 없는 간편결제(무신사페이 카드 등)는 '결제하기' 한 번에
         # 결제가 끝난다(실기 2026-09-24: 수리 시험 중 결제하기 클릭으로 실결제 발생). 실패하면 사람에게 넘긴다
         raw_enter = self.tool(
