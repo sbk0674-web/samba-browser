@@ -22,8 +22,8 @@ const hasName = t => nameRe.test(sq(t).toLowerCase())
 const mine = b => { const x = sq(b); return (!road || x.includes(road)) && (!det || x.includes(det)) && hasName(b) }
 const tree = async o => { for (let i = 0; i < 4; i++) { try { const g = await page.get(o || {}); if (g && g.tree) return g.tree } catch (e) {} await sleep(400) } return '' }
 const idL = l => parseInt(l.slice(1))
-const findTab = async re => (await tabs.list()).find(t => re.test(t.url || ''))
-const waitTab = async (re, n) => { for (let i = 0; i < n; i++) { const t = await findTab(re); if (t) return t; await sleep(500) } return null }
+const findTab = async (re, skip) => (await tabs.list()).find(t => re.test(t.url || '') && !(skip && skip.has(t.id)))
+const waitTab = async (re, n, skip) => { for (let i = 0; i < n; i++) { const t = await findTab(re, skip); if (t) return t; await sleep(500) } return null }
 const gift = await findTab(/pay\.ssg\.com\/cart\/giftInfo/)
 if (!gift) return { ...R, note: '선물 정보 화면 없음' }
 await tabs.switch(gift.id)
@@ -96,8 +96,11 @@ for (let i = 0; i < 10 && !filled; i++) {
 if (!filled) return { ...R, note: '선물 화면에 받는 분이 안 들어감' + ((await findTab(/selectShpploc/)) ? '(주소록 창이 안 닫힘)' : '') }
 const go = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] button "계속하기"/.test(l))
 if (!go) return { ...R, note: '계속하기 버튼 없음' }
+// 앞 단계(가격 확인)에서 연 일반 주문서 탭이 남아 있으면 그걸 선물 주문서로 집었다 — 누르기 전부터 있던 주문서 탭은 빼고 기다린다
+// (실기 2026-11-11 3482315635: 우리 기본 주소의 일반 주문서를 집어 '선물 아님'으로 3번 실패, 진단 창(남은 탭 없음)에서는 성공)
+const pre = new Set((await tabs.list()).filter(t => /pay\.ssg\.com\/(?:order\/ordPage|nodcsnOrder)/.test(t.url || '')).map(t => t.id))
 await page.click(idL(go))
-let od = await waitTab(/pay\.ssg\.com\/(?:order\/ordPage|nodcsnOrder\/ordShppInfo)/, 30)
+let od = await waitTab(/pay\.ssg\.com\/(?:order\/ordPage|nodcsnOrder\/ordShppInfo)/, 30, pre)
 if (od && /\/nodcsnOrder\/ordShppInfo/.test(od.url || '')) {
   await tabs.switch(od.id)
   try { await page.waitFor('계속하기', 6000) } catch (e) {}
@@ -106,7 +109,7 @@ if (od && /\/nodcsnOrder\/ordShppInfo/.test(od.url || '')) {
   const next = (await tree({ interactive: true })).split('\n').find(l => /^\[\d+\] (?:button|link) "계속하기"/.test(l))
   if (!next) return { ...R, note: '중간 배송정보 계속하기 없음' }
   await page.click(idL(next))
-  od = await waitTab(/pay\.ssg\.com\/order\/ordPage/, 30)
+  od = await waitTab(/pay\.ssg\.com\/order\/ordPage/, 30, pre)
 }
 if (!od) return { ...R, note: '주문서가 안 뜸', observed_urls: (await tabs.list()).map(t => String(t.url || '').split('?')[0]) }
 await tabs.switch(od.id)
