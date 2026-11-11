@@ -366,26 +366,6 @@ class JobQueue:
                 (json.dumps(options, ensure_ascii=False), _now(), job_id),
             )
 
-    def requeue_without_kakao_money(self, job_id: int) -> bool:
-        """카카오페이 미승인 작업을 카카오머니만 뺀 견적으로 바로 다시 넣는다(횟수 안 늘림). 이미 뺐으면 False.
-
-        카카오머니는 잔액이 모자라면 결제가 안 된다 — 같은 머니 요청을 20분마다 되풀이하지 않고 다음으로 싼
-        수단(카카오페이 카드·롯데카드 등)으로 산다(사용자 2026-11-11).
-        """
-        with self._immediate():
-            row = self._by_id(job_id)
-            if row is None or row['state'] != 'needs_ai' or row['error'] != 'kakao_unapproved':
-                return False
-            options = json.loads(row['options'] or '{}')
-            if options.get('no_kakao_money'):
-                return False
-            options['no_kakao_money'] = True
-            self._db.execute(
-                "UPDATE jobs SET state='queued', error=NULL, options=?, updated_at=? WHERE id=?",
-                (json.dumps(options, ensure_ascii=False), _now(), job_id),
-            )
-            return True
-
     def requeue_waiting(self, job_id: int, error: str = 'after_hours') -> None:
         """업무시간 대기(after_hours)·카카오 미승인처럼 실패가 아닌 대기 건을 시도 횟수를 늘리지 않고 다시 큐에 넣는다."""
         self._db.execute(
