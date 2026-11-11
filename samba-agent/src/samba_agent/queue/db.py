@@ -109,6 +109,7 @@ class JobQueue:
 
     def __init__(self, path: Path) -> None:
         self.allowed_job_ids: frozenset[int] | None = None
+        self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row

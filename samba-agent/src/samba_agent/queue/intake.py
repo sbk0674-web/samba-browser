@@ -12,11 +12,13 @@
 
 import logging
 import re
+import sqlite3
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 
 from samba_agent.agents.contracts import OrderRef
 from samba_agent.failures import FailReason
@@ -461,6 +463,10 @@ class Intake:
             return False
         if job.attempts >= 1:
             return False
+        if self._paid_already(job.id):
+            # 결제를 마친 작업은 자동으로 다시 넣지 않는다 — 처음부터 다시 돌아 같은 상품을 또 산다
+            # (실기 2026-11-11 21:22 752780415189051: 결제 후 삼바 기입 530 실패 → 'unknown' 자동 재큐 → 구매 재시작)
+            return False
         try:
             idle = datetime.now(UTC) - datetime.fromisoformat(job.updated_at)
         except ValueError:
@@ -473,6 +479,28 @@ class Intake:
             return False
         log.info('자동수리 실패 작업을 다시 큐에 넣었다: %s (%s)', job.order_no, job.error)
         return True
+
+    def _paid_already(self, job_id: int) -> bool:
+        """이 작업에 결제 성공 기록(events 의 pay ok)이 있는가. 못 읽으면 결제한 것으로 본다(재구매가 더 위험하다)."""
+        path = getattr(self._queue, 'path', None)
+        if path is None:
+            return False
+        events = Path(path).parent / 'events.sqlite'
+        if not events.exists():
+            return False
+        try:
+            con = sqlite3.connect(f'file:{events}?mode=ro', uri=True, timeout=5)
+            try:
+                row = con.execute(
+                    "SELECT 1 FROM events WHERE job_id=? AND kind='agent' "
+                    "AND json_extract(payload,'$.step')='pay' AND json_extract(payload,'$.ok')=1 LIMIT 1",
+                    (job_id,),
+                ).fetchone()
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return True
+        return row is not None
 
     def _settle_market_cancelled(self) -> None:
         """마켓이 이미 취소로 돌린 미이행 주문을 취소중으로 넘겨 정리한다(삼바웨이브가 마켓 취소완료와 맞춰 마감한다).
