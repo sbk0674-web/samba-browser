@@ -702,10 +702,10 @@ const T=String((await page.get({})).tree||'');
 // 배송지 고를 때 연 '배송지 선택' 창이 닫히지 않고 남아 비밀번호 키패드를 가린다(실기 2026-11-09 4658) — 닫기만 누른다
 const bc=T.match(/OVERLAY: "배송지 선택"[^\n]*close ids: \[(\d+)/);
 if(bc){await page.click(+bc[1]);await sleep(1200);return 'closed-address';}
-if(!/OVERLAY: "[^"]*주문할인혜택/.test(T))return 'none';
+if(!/(?:OVERLAY: |dialog )"[^"]*주문할인혜택/.test(T))return 'none';
 const P=l=>+(l.match(/(\d+)%/)||[0,0])[1]+(/롯데카드/.test(l)?99:0);
 const q=String((await page.get({query:'%'})).tree||'').split(String.fromCharCode(10)).filter(l=>/^\[\d+\] radio "[^"]*\d+%/.test(l)).sort((x,y)=>P(y)-P(x));
-if(q.length){await page.clickNative(parseInt(q[0].slice(1)));await sleep(1200);}
+if(q.length){const i=parseInt(q[0].slice(1));await page.click(i+1);await sleep(800);await page.click(i);await sleep(1200);}
 const g=String((await page.get({query:'할인혜택 받기'})).tree||'').split(String.fromCharCode(10)).filter(l=>/button "[\d,]+원 할인혜택 받기"/.test(l)).map(l=>parseInt(l.slice(1)));
 if(g.length){await page.click(g[0]);await sleep(2500);return 'applied';}
 return 'no-button';
