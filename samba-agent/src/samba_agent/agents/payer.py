@@ -1574,6 +1574,9 @@ class PayerAgent(AgentBase):
             # 롯데온 결제 진입이 L.POINT '전액사용'을 눌러 포인트만큼 덜 낸다(실기 2026-11-13 21315225308403299: 주문서 37,260 ·
             # L.POINT 9,800P → 네이버 27,460). 주문서의 최종 결제금액('총N건 금액')을 다시 읽어 그 값으로 한 번 더 본다
             sheet_total = self._sheet_final_total()
+            lpoint = int(getattr(self, '_lpoint', 0) or 0)
+            if not sheet_total and 0 < lpoint < amount:
+                sheet_total = amount - lpoint
             if sheet_total and sheet_total != amount and 0 < sheet_total < amount:
                 self.note('네이버 결제액', f'주문서 최종 결제금액 {sheet_total:,}원(포인트 사용 반영)으로 다시 대조 — 견적 {amount:,}원')
                 naver = [p for p in self._list_tabs_popups()[0] if _pay_host_provider(str(p.get('url') or '')) == 'naverpay']
@@ -2265,6 +2268,17 @@ class PayerAgent(AgentBase):
         # 결제창 진입은 AI 수리 대상이 아니다 — 비밀번호 없는 간편결제(무신사페이 카드 등)는 '결제하기' 한 번에
         # 결제가 끝난다(실기 2026-09-24: 수리 시험 중 결제하기 클릭으로 실결제 발생). 실패하면 사람에게 넘긴다
         self._sheet_tab = str(payload.get('tab') or '')
+        # 롯데온 결제 진입은 L.POINT '전액사용'을 누른다 — 네이버 창이 같은 탭에서 열려 나중엔 주문서를 못 읽으니 지금 잔액을 적어 둔다
+        self._lpoint = 0
+        if script == 'checkout_enter_lotteon' and self._sheet_tab:
+            try:
+                self.tool('switch_tab', id=self._sheet_tab)
+                lp = re.search(r'L\.?POINT\s*([\d,]+)\s*P\s*전액사용', re.sub(r'\s+', ' ', self.tool('get_page')))
+                self._lpoint = int(lp.group(1).replace(',', '')) if lp else 0
+                if self._lpoint:
+                    self.note('L.POINT', f'주문서 보유 {self._lpoint:,}P — 결제 진입이 전액 사용한다')
+            except AgentFailure:
+                self._lpoint = 0
         raw_enter = self.tool(
             'run_script', name=script, args=json.dumps(payload, ensure_ascii=False)
         )
