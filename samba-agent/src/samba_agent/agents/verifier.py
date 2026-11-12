@@ -89,7 +89,8 @@ def _single_color_buy(wanted: object, actual: object, choice: object) -> bool:
     for t in re.split(r'[\s/·]+', str(actual or '').casefold()):
         got |= {t.split('(')[0], t.split('(', 1)[-1].rstrip(')')}
     sizes = [t for t in re.split(r'[\s/·]+', str(wanted or '').casefold()) if _SIZEISH.fullmatch(t)]
-    return bool(sizes) and all(t in got for t in sizes)
+    # 'EU 42 · KR 270' 처럼 나라별 사이즈가 같이 오면 상세엔 마지막(KR) 하나만 보인다 — 마지막 사이즈로 본다(2026-11-13 21315225160483299)
+    return bool(sizes) and sizes[-1] in got
 
 
 class VerifierAgent(AgentBase):
