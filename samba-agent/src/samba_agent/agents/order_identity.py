@@ -90,6 +90,15 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     want_set |= {t.split('(', 1)[1].rstrip(')') for t in want if '(' in t}
     if got and all(t in want_set for t in got) and any(_SIZE_ONLY.fullmatch(t) for t in got):
         return True
+    # 상세가 '95(M)'·'105(XL)' 처럼 숫자 사이즈 괄호 안에 글자 사이즈를 쓰면 둘 다 같은 값이다 — 펼쳐서 본다
+    # (실기 2026-11-12 롯데온 21315225093923299 '화이트 M' ↔ '화이트 / 95(M)', 21315225097553299 '블랙 XL · KR 105' ↔ '105(XL)')
+    wide: list[str] = []
+    for t in got:
+        m = re.fullmatch(r'(\d{2,3})\(([a-z0-9]+)\)', t)
+        # 숫자 쪽은 주문에 없어도 된다 — 괄호 안 글자 사이즈가 주문 사이즈와 같으면 같은 칸이다
+        wide += ([m.group(1)] if m and m.group(1) in want else []) + [m.group(2)] if m else [_KO_COLOR.get(t, t)]
+    if wide != got and all(t in want_set or t in want for t in wide) and any(_SIZE_ONLY.fullmatch(t) for t in wide):
+        return True
     # 색상이 상품에 묶인 사이트는 주문 상세에 사이즈만 보인다 — 사이즈뿐인 값은 주문 옵션 안에 그 사이즈가 있으면 같다.
     # 색상이 적혀 있는 값은 그대로 전체가 같아야 한다.
     if option_key(wanted) and option_key(wanted) == option_key(actual):
