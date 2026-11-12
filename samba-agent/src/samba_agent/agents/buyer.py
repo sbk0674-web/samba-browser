@@ -291,6 +291,13 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
     b = _norm_address(str(applied.get('address', '')))
     if not a or not b:
         return False
+    # 끝의 괄호 참고항목('(역곡동, 2차한양수자인아파트)')은 사이트 입력칸 글자 수 제한으로 잘려 되읽힌다
+    # (실기 2026-11-12 롯데온: '…16-14(역곡동, 2차한양수자인아파' — 닫는 괄호까지 잘림). 참고항목을 떼고 본주소가 같으면 같은 곳
+    def _base(v: object) -> str:
+        return _norm_address(re.sub(r'\s*\([^)]*\)?\s*$', '', str(v or '')))
+    base_a, base_b = _base(expected.get('address')), _base(applied.get('address'))
+    if base_a and base_a == base_b and re.search(r'\d', base_a):
+        return True
     # 주문 주소에 건물번호가 없고 상세주소가 번호로 시작하면('…로' + '29, 5층') 포함 관계만으로는 건물번호를
     # 확인하지 못한다('…로 31' 도 품는다) — 아래의 주소+상세 숫자 비교로 넘긴다
     number_in_detail = not re.search(r'\d', a) and bool(
