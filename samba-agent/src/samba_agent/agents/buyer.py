@@ -4305,6 +4305,14 @@ class BuyerAgent(AgentBase):
         # 이 주문에서 뺄 결제 제공자(예: ['site'] — 롯데온 L.PAY 비밀번호 창이 안 떠 멈춘 주문, 2026-11-06)
         # 작업 옵션 값은 글자로 온다(Assignment.options: dict[str, str]) — "['site']"·"site,kakao" 모두 받는다
         self._exclude_pay = set(re.findall(r'[a-z]+', str(a.options.get('exclude_pay') or '')))
+        if self._exclude_pay or self._no_kakao or self._no_kakao_money:
+            # 결제수단을 빼 두면 최저가가 아닌 수단으로 사게 된다 — 최저가가 아니면 사지 않고 사람에게 넘긴다
+            # (사용자 2026-11-12: 최저가 아니면 사지 말고 보고·메모. Claude 가 수단을 빼서 2번째로 싼 토스로 돌렸다)
+            raise AgentFailure(
+                'needs_ai',
+                '결제수단 제외 옵션이 있어 최저가가 아닌 수단으로 살 수 있다 — 사지 않음(최저가 수단 문제를 고친 뒤 옵션을 지우고 다시)',
+                FailReason.UNKNOWN,
+            )
         self._coupon_gap_off = False
         self._already_bought(a)
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
