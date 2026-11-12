@@ -429,7 +429,10 @@ def order_form_mismatch(
     # 6) 삼바 상품명의 영문·숫자 낱말(모델명 'ZX 500 RS')이 두 개 이상이고 모두 주문서에 따로 보이면 같은 상품이다 — 한글
     #    수식어('오리지널스')만 사이트 이름에 빠졌다(실기 2026-11-12 롯데온 21315225181143299 '아디다스 오리지널스 ZX 500 …
     #    RS' ↔ 주문서 '아디다스 ZX 500 RS KJ2598')
-    latin = [t for t in re.findall(r'[a-z0-9]+', product_name.lower()) if len(t) >= 2]
+    # 주문 이름 뒤에 붙은 옵션 괄호('[EU 블랙/화이트 EU 42 · KR 265]')·옵션 글자는 모델명이 아니다 — 빼고 본다
+    opt_toks = set(re.findall(r'[a-z0-9]+', f'{option or ""} {selected or ""}'.lower()))
+    base_name = re.sub(r'\[[^\]]*\]', ' ', product_name.lower())
+    latin = [t for t in re.findall(r'[a-z0-9]+', base_name) if len(t) >= 2 and t not in opt_toks]
     if len(latin) >= 2 and all(re.search(rf'(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])', low) for t in latin):
         return None
     return f'상품명 단어 {words[:6]} 가 주문서에 없다' + (
