@@ -219,6 +219,16 @@ def join_jibun(shipping: dict[str, object]) -> dict[str, object]:
     """
     addr = str(shipping.get('address') or '').strip()
     det = str(shipping.get('address_detail') or '').strip()
+    # 상세주소가 주소를 통째로 다시 적고 번지를 붙여 오는 마켓이 있다('인천광역시 서구 원창동' + '인천광역시 서구 원창동 381 …')
+    # — 겹친 앞부분을 떼야 번지가 보인다(실기 2026-11-12 롯데온 21315225049943299: 동 이름만으로 검색해 address-result-nf)
+    if addr and det.replace(' ', '').startswith(addr.replace(' ', '')):
+        cut = 0
+        for ch in det:
+            if cut and det[:cut].replace(' ', '') == addr.replace(' ', ''):
+                break
+            cut += 1
+        det = det[cut:].strip()
+        shipping = {**shipping, 'address_detail': det}
     m = re.match(r'(\d+(?:-\d+)?)(?![\d-])[,\s]*(.*)$', det)
     if not m or not re.search(r'[가-힣0-9](?:동|리|가)$', addr):
         return shipping
