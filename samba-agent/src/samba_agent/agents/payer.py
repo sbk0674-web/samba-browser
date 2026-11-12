@@ -1802,6 +1802,22 @@ class PayerAgent(AgentBase):
                 except AgentFailure:
                     self.tool('switch_tab', id=str(fds['id']))
                 self.tool('wait', ms=1500)
+                # 원인 확인용 — 재인증 창 키패드를 앱이 못 읽는다(OCR 후보 0개, 2026-11-12 4건). 화면 상태·버튼 크기만 남긴다
+                try:
+                    probe = self.tool(
+                        'run_js',
+                        code=(
+                            "JSON.stringify({vis:document.visibilityState,focus:document.hasFocus(),w:innerWidth,h:innerHeight,"
+                            "frames:document.querySelectorAll('iframe').length,"
+                            "btn:[...document.querySelectorAll('button')].slice(0,18).map(b=>{const r=b.getBoundingClientRect();"
+                            "const st=getComputedStyle(b);return [Math.round(r.width),Math.round(r.height),(b.innerText||'').trim().slice(0,4),"
+                            "st.backgroundImage.slice(0,25),b.querySelector('img,svg,canvas')?b.querySelector('img,svg,canvas').tagName:'']})})"
+                        ),
+                        safety='no_pay',
+                    )
+                    self.note('네이버 재인증 화면', mask_text(str(probe)[:900]))
+                except AgentFailure as e:
+                    self.note('네이버 재인증 화면', f'읽기 실패: {e.reason[:80]}')
                 account = str(a.handoff.get('account') or a.order.account or '')
                 out = self._press_keypad(a, 'naver', account)
                 self.note('네이버 재인증 입력', mask_text(out[:160]))
