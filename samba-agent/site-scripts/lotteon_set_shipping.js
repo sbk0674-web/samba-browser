@@ -32,7 +32,7 @@ const nameQ=R.gift?'받는 분':'받는 분을 입력';
 for(let i=0;i<6&&!n;i++){n=L(await E(nameQ),e=>X(e)&&/받는 분/.test(e.text));if(!n)await S(700);}
 if(!n)return F('name-input-nf');
 await page.type(n.id,name,true);
-const dl=await E('휴대폰');let p=L(dl,e=>X(e)&&/휴대폰/.test(e.text));R.phone_field_id=p?p.id:null;
+const dl=await E('휴대폰');let p=L(dl,e=>X(e)&&/휴대폰/.test(e.text))||L(await E('하이픈'),X);R.phone_field_id=p?p.id:null;
 let z=L(dl,e=>B(e)&&/우편번호/.test(e.text))||L(await E('우편번호 찾기'),e=>B(e));
 if(!z)return F('zip-button-nf');
 await C(z.id);await S(700);
