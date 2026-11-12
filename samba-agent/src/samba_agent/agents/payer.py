@@ -17,8 +17,10 @@ from samba_agent.agents.base import AgentBase, AgentFailure, run_agent, split_pa
 from samba_agent.agents.buyer import (
     DIRECT_CARD_METHODS,
     POINTS_ONLY_METHOD,
+    OFFICE_SHIPPING,
     address_districts,
     product_no_of,
+    road_key,
     size_letters,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment
@@ -1779,6 +1781,25 @@ class PayerAgent(AgentBase):
                 FailReason.VERIFY_MISMATCH,
             )
         self.note('결제 성공', mask_text(page[:200]))
+        # 주문완료 화면의 배송지와 고객 주소를 맞대 본다(사용자 2026-11-12: 마지막 완료 화면에서 비교하면 끝).
+        # 고객 주소(도로명+번호)가 완료 화면에 없고 사무실 주소가 보이면(까대기 제외) 오배송 — 바로 알리고 멈추게 표시한다
+        ship_mismatch = False
+        try:
+            done_page = self.tool('get_page')
+            flat_done = re.sub(r'\s+', '', done_page)
+            want = str(a.handoff.get('ship_key') or '')
+            office = road_key(OFFICE_SHIPPING.get('address'))
+            kind = str(a.handoff.get('order_type') or a.order.order_type or '')
+            if kind != 'kkadaegi' and want and want != office:
+                if office and office in flat_done and want not in flat_done:
+                    ship_mismatch = True
+            if ship_mismatch:
+                self.note('완료 화면 배송지', '고객 주소 없음·사무실 주소 보임 — 오배송 의심')
+                toast('오배송 의심', f'{a.order.order_no}: 주문완료 화면 배송지가 고객 주소가 아니다(사무실)')
+            elif want and want in flat_done:
+                self.note('완료 화면 배송지', '고객 주소 일치')
+        except AgentFailure as e:
+            self.note('완료 화면 배송지', f'읽기 실패: {e.reason[:60]}')
         # 누가 결제했는지(플레이북 §5-4) — 이 경로는 에이전트가 결제를 끝낸 것이다
         payload: dict[str, object] = {
             'dry_run': False,
@@ -1786,6 +1807,8 @@ class PayerAgent(AgentBase):
             'paid_by': paid_by,
             'card': card,
         }
+        if ship_mismatch:
+            payload['ship_mismatch'] = True
         if getattr(self, '_arrival_memo', None):
             payload['arrival_memo'] = self._arrival_memo
         if getattr(self, '_naver_payment', None):

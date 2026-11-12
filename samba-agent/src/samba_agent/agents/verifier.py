@@ -94,6 +94,10 @@ class VerifierAgent(AgentBase):
         if self._wave is None or kind not in ('direct', 'kkadaegi', 'gift'):
             missing.append('shipping')
             return mismatch, missing
+        if a.handoff.get('ship_mismatch'):
+            # 결제 단계가 주문완료 화면에서 사무실 주소를 봤다 — 오배송(사용자 2026-11-12)
+            mismatch.append('shipping_complete')
+            return mismatch, missing
         applied_ship = source.get('shipping')
         if kind == 'gift' and isinstance(applied_ship, dict) and str(applied_ship.get('address') or '').strip():
             # 선물 주문인데 소싱처 주문 상세에 배송 주소가 박혀 있다 = 선물이 아니라 일반 배송으로 결제됐다
