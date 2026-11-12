@@ -71,6 +71,27 @@ def _same(field: str, got: object, want: object) -> bool:
     return got == want
 
 
+_SIZEISH = re.compile(r'^(?:\d{2,3}|\d?x{0,3}[sml]|[sml]d|lg|sm|md|xl|\dxl|free|f)$')
+
+
+def _single_color_buy(wanted: object, actual: object, choice: object) -> bool:
+    """색 고르는 단계가 없던 상품(색 하나뿐)이면 사이즈만 맞으면 같다.
+
+    구매가 고른 줄에 사이즈·가격·재고 말고 아무 글자도 없으면 색 선택지가 없었던 것이다(실기 2026-11-12 롯데온
+    21315224977733299 언더아머: 주문 '실버 MD' · 고른 줄 'MD(95) 23,400 7개 남음' · 상세 '그레이(011) / MD(95)' —
+    상품 색은 그레이(011) 하나뿐인데 검사 불일치로 멈췄다).
+    """
+    pick = re.sub(r'[\d,]+\s*(?:원|개\s*남음)?|남음|품절임박|\(|\)|[·/]', ' ', str(choice or '').casefold())
+    pick_words = [w for w in pick.split() if not _SIZEISH.fullmatch(w)]
+    if not str(choice or '').strip() or pick_words:
+        return False
+    got = set()
+    for t in re.split(r'[\s/·]+', str(actual or '').casefold()):
+        got |= {t.split('(')[0], t.split('(', 1)[-1].rstrip(')')}
+    sizes = [t for t in re.split(r'[\s/·]+', str(wanted or '').casefold()) if _SIZEISH.fullmatch(t)]
+    return bool(sizes) and all(t in got for t in sizes)
+
+
 class VerifierAgent(AgentBase):
     """대조만 한다. 주문·배송지는 바꾸지 않는다 — 쓰기 도구는 소싱처 상세 스크립트 AI 수리용 save_script 뿐이다."""
 
@@ -83,7 +104,9 @@ class VerifierAgent(AgentBase):
         actual = source.get('selected') or source.get('option')
         if not a.order.option or not actual:
             missing.append('option')
-        elif not paid_option_matches(a.order.option, actual):
+        elif not paid_option_matches(a.order.option, actual) and not _single_color_buy(
+            a.order.option, actual, a.handoff.get('option')
+        ):
             mismatch.append('option')
         qty = source.get('qty')
         if qty is None:
