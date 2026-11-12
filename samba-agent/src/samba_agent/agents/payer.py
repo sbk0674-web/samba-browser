@@ -1745,6 +1745,7 @@ class PayerAgent(AgentBase):
 
     def _confirm_paid(self, a: Assignment, card: str, paid_by: str = 'agent') -> AgentResult:
         """결제 뒤 성공 확인 — 완료 화면 문구, 없으면(ABC·그랜드스테이지) 주문내역의 방금 생긴 주문으로."""
+        self._naver_fds_done = False
         self.step('payer: 성공 확인')
         page = self._success_page(a)
 
@@ -1774,6 +1775,41 @@ class PayerAgent(AgentBase):
             recent_no = self._recent_art_order(a) or self._recent_cm29_order(a)
             if recent_no:
                 page = f'결제완료 주문번호 {recent_no}'
+        if not any(m in page for m in PAY_SUCCESS_MARKERS) and not getattr(self, '_naver_fds_done', False):
+            # 네이버페이가 결제하기 뒤 이상거래 확인(FDS)으로 비밀번호를 한 번 더 묻는다 — 주소 'authentication/pw/check …
+            # order_fds_failed'. 결제는 아직 안 끝났다. 그 탭을 앞으로 올려 앱이 키마스터 비밀번호를 한 번 넣게 하고
+            # 완료 화면을 다시 본다(실기 2026-11-12 롯데온 20261112738095·21315225160483299·753123710615576 세 건 멈춤)
+            fds = None
+            try:
+                listed = json.loads(self.tool('list_tabs'))
+                fds = next(
+                    (t for t in listed if isinstance(t, dict) and 'pay.naver.com/authentication/pw/check' in str(t.get('url') or '')),
+                    None,
+                )
+            except (AgentFailure, ValueError):
+                fds = None
+            if fds is not None:
+                self._naver_fds_done = True
+                self.note('네이버 재인증', '결제하기 뒤 네이버페이 비밀번호 재확인 창 — 앱이 한 번 넣는다')
+                try:
+                    self.tool('reveal_tab', id=str(fds['id']))
+                except AgentFailure:
+                    self.tool('switch_tab', id=str(fds['id']))
+                self.tool('wait', ms=1500)
+                account = str(a.handoff.get('account') or a.order.account or '')
+                out = self._press_keypad(a, 'naver', account)
+                self.note('네이버 재인증 입력', mask_text(out[:160]))
+                for _ in range(PAY_RESULT_POLL_TRIES):
+                    self.tool('wait', ms=PAY_RESULT_POLL_WAIT_MS)
+                    page = self._success_page(a)
+                    if any(m in page for m in PAY_SUCCESS_MARKERS) or failed_page(page):
+                        break
+                if failed_page(page):
+                    raise AgentFailure(
+                        'needs_ai',
+                        f'네이버 재인증 뒤 결제 실패 화면 — 결제 안 됨({mask_text(page.split(chr(10), 1)[0][:80])})',
+                        FailReason.PAY_INTERRUPTED,
+                    )
         if not any(m in page for m in PAY_SUCCESS_MARKERS):
             raise AgentFailure(
                 'needs_ai',
