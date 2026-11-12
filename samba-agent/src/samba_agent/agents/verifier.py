@@ -94,6 +94,12 @@ class VerifierAgent(AgentBase):
         if self._wave is None or kind not in ('direct', 'kkadaegi', 'gift'):
             missing.append('shipping')
             return mismatch, missing
+        applied_ship = source.get('shipping')
+        if kind == 'gift' and isinstance(applied_ship, dict) and str(applied_ship.get('address') or '').strip():
+            # 선물 주문인데 소싱처 주문 상세에 배송 주소가 박혀 있다 = 선물이 아니라 일반 배송으로 결제됐다
+            # (실기 2026-11-10 752400788766783: 고객 이름으로 사무실 배송 — 예전엔 '대조 불가'로 통과시켰다)
+            mismatch.append('gift_shipping')
+            return mismatch, missing
         order = self._wave.get_order(a.order.wave_key, order_type=kind)
         expected = order.shipping.to_script_args()
         if order.order_type != kind or not all(expected.get(k) for k in ('name', 'address')):
