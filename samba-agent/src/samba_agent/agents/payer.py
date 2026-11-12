@@ -2096,6 +2096,10 @@ class PayerAgent(AgentBase):
         amount = a.handoff.get('paid')
         if isinstance(amount, int | float) and not isinstance(amount, bool) and amount > 0:
             payload['amount'] = amount
+        if script == 'checkout_enter_lotteon' and a.handoff.get('order_type') == 'gift':
+            # 선물 주문은 '받는 분 주소로 보내기'가 켜진 선물 주문서에서만 결제한다 — 일반 주문서로 결제해
+            # 고객 이름으로 사무실에 배송됐다(실기 2026-11-10 752400788766783, 사용자 2026-11-12)
+            payload['gift'] = True
         if a.handoff.get('order_tab'):
             payload['tab'] = str(a.handoff.get('order_tab'))
         elif script == 'checkout_enter_lotteon' and profile:

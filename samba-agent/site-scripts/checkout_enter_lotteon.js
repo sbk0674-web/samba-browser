@@ -84,6 +84,7 @@ try{const st=(await GQ('입력한 이름으로 선물')).tree.split('\n').find(l
 if(st&&!/value="[^"]+"/.test(st)){const hn=((await GQ('님로그아웃')).tree.match(/([가-힣A-Za-z]{2,10})님\s*로그아웃/)||[])[1];if(hn){await page.type(PI(st.slice(1)),hn,false);await S(500);}}}catch(e){}
 try{const ra=(await GQ('받는 분 주소로 보내기')).tree.split('\n').find(l=>/^\[\d+\] radio "받는 분 주소로/.test(l));
 if(ra&&!/value="on"/.test(ra)){await PC(PI(ra.slice(1)));await S(1500);}}catch(e){}
+if(args.gift&&!/value="on"/.test(((await GQ('받는 분 주소로 보내기')).tree.match(/radio "받는 분 주소로[^\n]*/)||[''])[0]))return{ok:false,error:'선물 주문서 아님'};
 const payId=await page.idOf('결제하기');
 if(payId<0)return{ok:false,error:'결제하기?',method};
 let pr=String(await PC(payId));
