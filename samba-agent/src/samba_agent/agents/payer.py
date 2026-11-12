@@ -1113,35 +1113,52 @@ class PayerAgent(AgentBase):
             (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
         )
         attempts: list[tuple[str, str | None]] = [('toss', None), *[('toss', lab) for lab in labels], ('kakao', None)]
-        for pattern, field, fmt in fields:
-            element_id = _element_id_of(page, pattern)
-            if element_id is None:
-                raise AgentFailure(
-                    'needs_ai', f'토스페이 알림 요청 칸 없음({field})', FailReason.UNKNOWN
-                )
-            out = ''
-            # 휴대폰·생년월일은 같은 사람의 값이다 — 이 구매 계정의 토스 항목에 없으면 같은 사이트의 다른 계정 토스 항목,
-            # 그래도 없으면 카카오페이 항목 값을 쓴다(계정마다 따로 넣지 않게, 사용자 2026-10-06)
-            for provider, label in attempts:
-                out = self.tool(
-                    'fill_secret',
-                    elementId=element_id,
-                    itemType='password',
-                    provider=provider,
-                    field=field,
-                    format=fmt,
-                    **({'accountLabel': label} if label else {}),
-                )
-                if out.strip().lower().startswith('ok'):
-                    break
-            if not out.strip().lower().startswith('ok'):
-                raise AgentFailure(
-                    'needs_ai',
-                    f'토스페이 알림 요청 입력 실패({field}): {mask_text(out[:100])}',
-                    FailReason.UNKNOWN,
-                )
+
+        def fill_all(order: list[tuple[str, str | None]]) -> None:
+            nonlocal page
+            for pattern, field, fmt in fields:
+                element_id = _element_id_of(page, pattern)
+                if element_id is None:
+                    raise AgentFailure(
+                        'needs_ai', f'토스페이 알림 요청 칸 없음({field})', FailReason.UNKNOWN
+                    )
+                out = ''
+                # 휴대폰·생년월일은 같은 사람의 값이다 — 이 구매 계정의 토스 항목에 없으면 같은 사이트의 다른 계정 토스 항목,
+                # 그래도 없으면 카카오페이 항목 값을 쓴다(계정마다 따로 넣지 않게, 사용자 2026-10-06)
+                for provider, label in order:
+                    out = self.tool(
+                        'fill_secret',
+                        elementId=element_id,
+                        itemType='password',
+                        provider=provider,
+                        field=field,
+                        format=fmt,
+                        **({'accountLabel': label} if label else {}),
+                    )
+                    if out.strip().lower().startswith('ok'):
+                        break
+                if not out.strip().lower().startswith('ok'):
+                    raise AgentFailure(
+                        'needs_ai',
+                        f'토스페이 알림 요청 입력 실패({field}): {mask_text(out[:100])}',
+                        FailReason.UNKNOWN,
+                    )
+
+        fill_all(attempts)
         self.tool('wait', ms=TOSS_PUSH_WAIT_MS)
         now = self.tool('get_page')
+        if 'app-payment/push' not in now.split('\n', 1)[0] and '정확하지 않아요' in now:
+            # 이 계정의 토스 항목 값(휴대폰·생년월일)을 토스가 거절했다(실기 2026-11-12 롯데온 edelvise06) —
+            # 확인창을 닫고 카카오페이 항목 값(결제 승인을 실제로 받는 사람)으로 한 번 더 보낸다
+            ok_btn = _element_id_of(now, r'button "확인"')
+            if ok_btn is not None:
+                self.tool('click', id=ok_btn)
+                self.tool('wait', ms=TOSS_TAB_WAIT_MS)
+            page = self.tool('get_page')
+            self.note('토스페이', '토스 항목 값 거절 — 카카오페이 항목 값으로 다시 보냄')
+            fill_all([('kakao', None)])
+            self.tool('wait', ms=TOSS_PUSH_WAIT_MS)
+            now = self.tool('get_page')
         if 'app-payment/push' not in now.split('\n', 1)[0]:
             raise AgentFailure(
                 'needs_ai',
