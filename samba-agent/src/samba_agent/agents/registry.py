@@ -71,6 +71,7 @@ BUYER_TOOLS: tuple[str, ...] = (
     'new_tab',
     'list_tabs',
     'switch_tab',
+    'reveal_tab',
     'close_tab',
     'list_accounts',
     'login',

@@ -4397,6 +4397,10 @@ class BuyerAgent(AgentBase):
                 raise
             if alt is None or e.fail_reason is FailReason.DUPLICATE:
                 raise
+            # 최저가 사이트가 배송지·주문서 같은 진행 단계에서 막혔다고 더 비싼 짝 사이트로 사지 않는다 — 막힌 원인을
+            # 고칠 때까지 멈춘다(사용자 2026-11-12: 최저가 아니면 사지 말고 보고. 실기: 롯데온 69,168 → SSG 145,796 대체 시도)
+            if alt[2] > 0:
+                raise
             # 페이지 읽기 경합(page busy)은 잠깐의 앱 상태라 다시 하면 된다 — 비싼 짝 소싱처로 갈아타지 않는다
             # (실기 2026-11-07 무신사 32,150 → 29CM 46,325 대체 3번, 29CM 금고 잠김으로 멈춤)
             if 'page busy' in e.reason or '페이지 읽기 경합' in e.reason:
@@ -5212,6 +5216,13 @@ class BuyerAgent(AgentBase):
             args['profile'] = account
         if getattr(self, '_ship_tab', ''):
             args['tab'] = self._ship_tab
+            if source_of(self.spec.name).key == 'lotteon':
+                # 뒤에 가려진 탭은 그려지지 않아 롯데온 배송지 창(모달)이 투명한 채 멈춘다 — 앞으로 올린 뒤 넣는다
+                # (실기 2026-11-12 20261111065484·066890: 배송지 입력 검증 실패, 사유 없음)
+                try:
+                    self.tool('reveal_tab', id=str(self._ship_tab))
+                except AgentFailure as e:
+                    self.note('배송지', f'주문서 탭 앞으로 올리기 실패: {e.reason[:60]}')
 
         applied = self._run_set_shipping(shipping, args)
         # 주소 검색 팝업이 첫 시도에 안 뜨는 사이트가 있다(실측 2026-09-29 SSG: 첫 시도 '우편번호 팝업 안 뜸',
