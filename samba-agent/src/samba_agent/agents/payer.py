@@ -1311,8 +1311,13 @@ class PayerAgent(AgentBase):
         ship_key = str(a.handoff.get('ship_key') or '')
         if ship_key:
             flat = re.sub(r'\s+', '', page)
+            # 주문서 전체가 아니라 '배송정보' 칸(실제로 보낼 주소)만 본다 — 전체에서 찾으면 주소록 목록에 남은 고객 주소
+            # 때문에 통과했다. 실제 배송지는 사무실이었다(실기 2026-11-10 752400788766783, 사용자 2026-11-12)
+            m = re.search(r'배송정보(.{0,160}?)(?:휴대전화|연락처|배송요청|요청사항)', flat)
+            if m:
+                flat = m.group(1)
             roads = re.findall(r'[가-힣A-Za-z0-9.]+(?:로|길)\d+(?:-\d+)?', flat)
-            if roads and ship_key not in flat:
+            if (roads or m) and ship_key not in flat:
                 raise AgentFailure(
                     'needs_ai',
                     '주문서의 받는 분 주소가 주문 주소와 다르다 — 결제하지 않음(배송지 다시 확인)',
