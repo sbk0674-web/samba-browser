@@ -1418,15 +1418,21 @@ export function keypadUnlabeled(): KeypadCellDto[] | null {
     bw: number
     bh: number
   }[] = []
+  // 왜 빠졌는지 센다 — 네이버페이 재인증 창(pw/check)에서 후보 0개로 넘겼는데 이유를 몰랐다(2026-11-12)
+  const why = { digit: 0, text: 0, nested: 0, hidden: 0, small: 0, big: 0, sample: '' }
   for (const el of Array.from(document.querySelectorAll<HTMLElement>(KEYPAD_UNLABELED_SELECTOR))) {
-    if (singleDigitOf(el) !== null) continue
-    if ((el.textContent ?? '').trim() !== '') continue
+    if (singleDigitOf(el) !== null) { why.digit++; continue }
+    if ((el.textContent ?? '').trim() !== '') {
+      why.text++
+      if (!why.sample && el.tagName === 'BUTTON') why.sample = (el.textContent ?? '').trim().slice(0, 12)
+      continue
+    }
     // <a><button></button></a> 처럼 겹친 경우 안쪽 하나만 센다
-    if (el.querySelector(KEYPAD_UNLABELED_SELECTOR) !== null) continue
-    if (!isVisible(el, visible)) continue
+    if (el.querySelector(KEYPAD_UNLABELED_SELECTOR) !== null) { why.nested++; continue }
+    if (!isVisible(el, visible)) { why.hidden++; continue }
     const r = el.getBoundingClientRect()
-    if (r.width < KEYPAD_CELL_MIN || r.height < KEYPAD_CELL_MIN) continue
-    if (r.width > KEYPAD_CELL_MAX || r.height > KEYPAD_CELL_MAX) continue
+    if (r.width < KEYPAD_CELL_MIN || r.height < KEYPAD_CELL_MIN) { why.small++; continue }
+    if (r.width > KEYPAD_CELL_MAX || r.height > KEYPAD_CELL_MAX) { why.big++; continue }
     // OCR 은 숫자 그림 주변만 읽는 편이 정확하다(130×63 칸 전체를 주면 작은 숫자를 검출 모델이 놓친다 — 실기).
     // 버튼 안에 그림을 담은 작은 요소(스프라이트 span·img·svg)가 하나 있으면 그 사각형에 여백을 둬 쓴다
     const glyph = glyphRectOf(el, r)
@@ -1443,7 +1449,7 @@ export function keypadUnlabeled(): KeypadCellDto[] | null {
   // 글자 없는 버튼이 더 있으면(재배열·지우기 아이콘 등) 크기가 같은 칸끼리 묶어 가장 큰 무리만 키패드로 본다
   // (실기 2026-09-30 네이버페이 비밀번호 확인 창: 10~14개 범위를 넘어 사람에게 넘겼다)
   const picked = cells.length > KEYPAD_UNLABELED_MAX ? largestSameSizeGroup(cells) : cells
-  keypadDiag = `후보 ${cells.length}개, 같은 크기 무리 ${picked.length}개`
+  keypadDiag = `후보 ${cells.length}개, 같은 크기 무리 ${picked.length}개 (뺀 이유: 숫자${why.digit} 글자${why.text}[${why.sample}] 겹침${why.nested} 숨김${why.hidden} 작음${why.small} 큼${why.big}, 창 ${innerWidth}x${innerHeight} ${document.visibilityState})`
   if (picked.length < KEYPAD_UNLABELED_MIN || picked.length > KEYPAD_UNLABELED_MAX) return null
   picked.sort((a, b) => a.y - b.y || a.x - b.x)
   return picked.map((c) => ({
