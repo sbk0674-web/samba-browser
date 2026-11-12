@@ -1,10 +1,11 @@
 const A=args||{};const name=String(A.name||'').trim().replace(/\*/g,'O');const addr=String(A.address||'').trim();
 if(A.tab)await tabs.switch(String(A.tab));
 const pe=t=>t.split('\n').map(l=>l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?(?:\s+name=(\S+))?(?:\s+value="([^"]*)")?/)).filter(Boolean).map(m=>({id:+m[1],role:m[2],text:m[3]||'',name:m[4]||'',value:m[5]}));
-const DSEL='[role=dialog]';
+const DSEL='[role=dialog]';// 라디오 name 이 deliveryAddress→memberDeliveryRadio 로 바뀌어 라디오0(2026-11-12) — 둘 다 받는다
+const DN=/^(deliveryAddress|memberDeliveryRadio)$/;
 // 화면 요소는 150개까지만 나온다 — 할인 창·배송지 220여 줄이 함께면 배송지 라디오가 잘렸다(2026-11-05 라디오0). '배송지' 글자로 걸러 읽고 name=deliveryAddress 라디오만 쓴다(앞쪽 줄이면 충분 — 덮어쓰는 칸은 둘째 줄)
 let RQL='';
-const RQ=async()=>{const t=String((await page.get({query:'배송지',interactive:true})).tree||'');const ls=t.split('\n');const D=pe(String((await page.get({selector:DSEL,interactive:true})).tree||''));const rc={};D.forEach(e=>{const k=e.role+(e.role==='button'||e.role==='radio'?':'+e.text.slice(0,6):'');rc[k]=(rc[k]||0)+1});RQL=ls.filter(l=>/radio/.test(l)).slice(0,3).join(' | ').slice(0,120)+' 총'+ls.length+' 창'+JSON.stringify(rc).slice(0,300);return pe(t).filter(e=>e.role==='radio'&&e.name==='deliveryAddress');};
+const RQ=async()=>{const t=String((await page.get({query:'배송지',interactive:true})).tree||'');const ls=t.split('\n');const D=pe(String((await page.get({selector:DSEL,interactive:true})).tree||''));const rc={};D.forEach(e=>{const k=e.role+(e.role==='button'||e.role==='radio'?':'+e.text.slice(0,6):'');rc[k]=(rc[k]||0)+1});RQL=ls.filter(l=>/radio/.test(l)).slice(0,3).join(' | ').slice(0,120)+' 총'+ls.length+' 창'+JSON.stringify(rc).slice(0,300);const all=pe(t).concat(D);return all.filter((e,i)=>e.role==='radio'&&DN.test(e.name)&&all.findIndex(x=>x.id===e.id)===i);};
 const dl=async()=>pe((await page.get({selector:DSEL,interactive:true})).tree);
 const s=pe((await page.get({query:'저장'})).tree).filter(e=>e.role==='button'&&e.text==='저장').pop();
 if(!s)return{ok:false,note:'저장 버튼 없음'};
@@ -30,7 +31,7 @@ while((m=re.exec(t))){out.push({name:nm(m[1]),seg:nm('['+m[2]+']'+m[3])});}
 return hd?out.slice(1):out;};
 const generic=x=>/^(기본)?배송지$/.test(x);
 // 주문할인혜택 창(할인 라디오)이 같이 열려 있으면 배송지 라디오와 섞여 순서가 어긋났다(2026-11-05) — 배송지 라디오만 센다
-const getRadios=L=>{const out=[];L.forEach((e,i)=>{if(e.role!=='radio'||(e.name&&e.name!=='deliveryAddress'))return;
+const getRadios=L=>{const out=[];L.forEach((e,i)=>{if(e.role!=='radio'||(e.name&&!DN.test(e.name)))return;
 let n=null;
 if(!generic(e.text)){n=nm(e.text);}else{for(let j=i+1;j<L.length;j++){const x=L[j];if(x.role==='radio'||x.role==='button')break;if(x.role==='label'&&!generic(x.text)){n=nm(x.text);break;}}}
 if(n===null)return;
@@ -49,12 +50,14 @@ for(let i=0;i<radios.length&&i<rows.length;i++){
 if(radios[i].text!==null&&radios[i].text!==rows[i].name)continue;
 if(rows[i].name===norm){found++;if(okRow(rows[i].seg))cands.push(radios[i]);else if(i===1&&!road)second=radios[i];}
 }
+// 라디오 글자가 고객 이름이 되고 '배송지' 글자 필터에 안 걸려 라디오0·줄 순서 어긋남(2026-11-12) — 이름이 하나뿐인 줄이면 그 라디오
+if(!cands.length){const rr=rows.filter(x=>x.name===norm),rd=radios.filter(x=>x.text===norm);if(rr.length===1&&rd.length===1&&(okRow(rr[0].seg)||!road))cands.push(rd[0]);}
 if(cands.length)r=cands[0];
 // 지번 주소('…면 …리 123')는 롯데온이 도로명으로 바꿔 저장해 글자로 못 맞춘다(실기 2026-11-03 4101) — 방금 덮어쓴 둘째 줄이 이름까지 같으면 그 줄이다
 else if(second&&k>=2)r=second;
 }
 // 저장하면 목록 창 없이 바로 주문서로 돌아가는 화면이 생겼다(2026-11-05 라디오0) — 주문서 배송지 칸을 직접 읽어 되돌려 준다
-if(!found&&!radios0){const tx0=(String((await page.get({})).tree).split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ');const m0=tx0.match(/(?:받는 분|배송지)\s+(?:배송지\s+)?(.{0,120}?)\s*(?:변경|배송지 선택하기|배송지 수정하기)/);const seg0=m0?nm(m0[1]):'';if(seg0&&seg0.includes(norm)&&okRow(seg0)){if(A.gift){let q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');if(q&&q.value!=='on'){await page.click(q.id);await sleep(900);q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');}if(!q||q.value!=='on')return{ok:false,note:'빠른 선물 못 켬'};return{ok:true,name,address:addr,gift:true,quick_gift:true};}return{ok:true,name,address:m0[1].replace(/^\[\d{5}\]\s*/,'').replace(/01\d[-\d*]+.*/,'').trim()};}}
+if(!found&&!radios0){const tx0=(String((await page.get({})).tree).split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ');const m0=tx0.match(/(?:받는 분|배송지)\s+(?:배송지\s+)?(.{0,120}?)\s*(?:변경|배송지 선택하기|배송지 수정하기)/);const seg0=m0?nm(m0[1]):'';if(seg0&&seg0.includes(norm)&&okRow(seg0)){if(A.gift){let q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');if(q&&q.value!=='on'){await page.click(q.id);await sleep(900);q=pe((await page.get({query:'빠른 선물'})).tree).find(e=>e.role==='checkbox');}if(!q||q.value!=='on')return{ok:false,note:'빠른 선물 못 켬'};return{ok:true,name,address:addr,gift:true,quick_gift:true};}return{ok:true,name,zip:(m0[1].match(/^\[(\d{5})\]/)||[])[1]||null,address:m0[1].replace(/^\[\d{5}\]\s*/,'').replace(/01\d[-\d*]+.*/,'').trim()};}}
 if(!found)return{ok:false,note:'저장한 배송지 줄 없음('+dbg+')'};
 if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
 await page.click(r.id);await sleep(600);
@@ -71,4 +74,4 @@ return{ok:true,name,address:addr,gift:true,quick_gift:true};
 }
 const txt=(String((await page.get({})).tree).split('PAGE TEXT:')[1]||'').replace(/\s+/g,' ');
 const m=txt.match(/배송지\s+(?:배송지\s+)?(.{0,90}?)\s*변경/);
-return{ok:!!m,name,address:m?m[1].replace(/^\[\d{5}\]\s*/,'').replace(/01\d[-\d*]+.*/,'').trim():null,note:m?null:'주문서 배송지 못 읽음'};
+return{ok:!!m,name,zip:m?((m[1].match(/^\[(\d{5})\]/)||[])[1]||null):null,address:m?m[1].replace(/^\[\d{5}\]\s*/,'').replace(/01\d[-\d*]+.*/,'').trim():null,note:m?null:'주문서 배송지 못 읽음'};

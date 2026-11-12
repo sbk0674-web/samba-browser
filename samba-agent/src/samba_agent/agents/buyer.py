@@ -4323,6 +4323,7 @@ class BuyerAgent(AgentBase):
         self._already_bought(a)
         # 결제 직전 주소 대조 열쇠 — 앞 주문 것이 남아 이 주문을 엉뚱하게 통과·차단하지 않게 매번 비운다
         self._ship_key = ''
+        self._ship_resolved = ''
         self._ship_districts: list[str] = []
         source0 = source_of(self.spec.name)
         if source0.gift_unless_poison and self._shipping_fn is not None:
@@ -5273,6 +5274,27 @@ class BuyerAgent(AgentBase):
             self._confirm_shipping(shipping, args)
         # 결제 직전 주문서 대조용 열쇠(도로명+번호) — 전체 주소는 남기지 않는다
         self._ship_key = road_key(shipping.get('address'))
+        _resolved = road_key(getattr(self, '_ship_resolved', ''))
+        if not re.search(r'(로|길)', self._ship_key) and re.search(r'(로|길)\d', _resolved):
+            # 지번(…동 980) 고객 주소는 주문서에 도로명으로만 보인다 — 저장 확인(이름·시군구 일치)을 통과한 도로명으로 대조
+            self._ship_key = _resolved
+        if source_of(self.spec.name).key == 'lotteon' and self._ship_key:
+            # 스크립트가 넣었다고 알린 주소가 아니라 주문서 '배송정보'(실제로 보낼 곳)를 다시 읽어 확인한다 — 등록 창이
+            # 저장 안 된 채 남아 배송정보는 사무실 그대로였고, 그대로 결제돼 사무실로 가거나(752400788766783) 결제 실패
+            # 화면(753092421091378·21315224977733299)으로 끝났다(직접 재현 2026-11-12)
+            try:
+                if getattr(self, '_ship_tab', ''):
+                    self.tool('switch_tab', id=str(self._ship_tab))
+                sheet = re.sub(r'\s+', '', self.tool('get_page', query='배송정보'))
+                m = re.search(r'배송정보(.{0,200}?)(?:휴대전화|연락처|배송요청|요청사항)', sheet)
+            except AgentFailure:
+                m = None
+            if m is None or self._ship_key not in m.group(1):
+                raise AgentFailure(
+                    'needs_ai',
+                    '주문서 배송정보에 고객 주소가 안 들어갔다(배송지 창 저장 안 됨) — 결제하지 않음',
+                    FailReason.UNKNOWN,
+                )
         # 결제 직전 시·군·구 대조용 — 동·번지가 같은 다른 도시(여수 남산동 262-4)를 걸러낸다(2026-10-23)
         self._ship_districts = sorted(address_districts(shipping.get('address')))
         # 마스킹 규칙이 이름을 가리려면 라벨이 앞에 있어야 한다(ops.masking) — 라벨을 붙여서 가린다
@@ -5388,6 +5410,8 @@ class BuyerAgent(AgentBase):
                 f'되읽음={mask_text(str({k: saved.get(k) for k in ("name", "address", "gift", "debug", "dbg") if k in saved})[:160])}]',
                 FailReason.UNKNOWN,
             )
+        # 롯데온이 지번 주소를 도로명으로 바꿔 저장한다 — 주문서 대조 열쇠는 롯데온이 되돌려 준 주소에서 뽑는다(2026-11-12)
+        self._ship_resolved = str(saved.get('address') or '')
 
     def _confirm_shipping(self, shipping: dict[str, object], args: dict[str, object]) -> None:
         """팝업 폼 사이트는 전화까지 채운 폼을 저장/적용해야 주문서에 반영된다(sources.yaml shipping_confirm).
