@@ -426,6 +426,12 @@ def order_form_mismatch(
         toks = [c for c in site_tokens if len(c) >= 3 and not c.isdigit()]
         if toks and sum(1 for c in toks if c in compact_text) >= max(1, (len(toks) + 1) // 2):
             return None
+    # 6) 삼바 상품명의 영문·숫자 낱말(모델명 'ZX 500 RS')이 두 개 이상이고 모두 주문서에 따로 보이면 같은 상품이다 — 한글
+    #    수식어('오리지널스')만 사이트 이름에 빠졌다(실기 2026-11-12 롯데온 21315225181143299 '아디다스 오리지널스 ZX 500 …
+    #    RS' ↔ 주문서 '아디다스 ZX 500 RS KJ2598')
+    latin = [t for t in re.findall(r'[a-z0-9]+', product_name.lower()) if len(t) >= 2]
+    if len(latin) >= 2 and all(re.search(rf'(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])', low) for t in latin):
+        return None
     return f'상품명 단어 {words[:6]} 가 주문서에 없다' + (
         f'(사이트 상품명 {site_words[:6]} 로도 못 맞춤)' if site_words else ''
     )
