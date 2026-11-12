@@ -1110,7 +1110,8 @@ def resolve_choice(choice: str, candidates: list[str]) -> str | None:
 
 
 # 품절 표시: "[품절]"·끝의 "품절"·"(품절)". "품절임박"(재고 적음)은 품절이 아니다(실기: 롯데온)
-_SOLD_OUT_RE = re.compile(r'\[품절\]|품절(?!임박)')
+# SSG 는 품절을 '(매진)' 으로 적는다(실기 2026-11-13 753342716198914 'Black(매진)' 을 골라 주문서를 두 번 못 열었다)
+_SOLD_OUT_RE = re.compile(r'\[품절\]|품절(?!임박)|매진')
 
 
 def _sold_out(option: str) -> bool:
