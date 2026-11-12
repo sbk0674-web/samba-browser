@@ -1740,6 +1740,18 @@ class PayerAgent(AgentBase):
         """결제 뒤 성공 확인 — 완료 화면 문구, 없으면(ABC·그랜드스테이지) 주문내역의 방금 생긴 주문으로."""
         self.step('payer: 성공 확인')
         page = self._success_page(a)
+
+        def failed_page(text: str) -> bool:
+            # 결제 실패 화면(롯데온 /p/order/fail)에도 메뉴 등에 '결제완료' 글자가 있어 성공으로 읽었다
+            # (실기 2026-11-12 21315224977733299: URL …/p/order/fail 을 결제 성공으로 기록 → 주문번호 없음)
+            return bool(re.search(r'/order/fail|orderFail|payFail', text.split('\n', 1)[0], re.IGNORECASE))
+
+        if failed_page(page):
+            raise AgentFailure(
+                'needs_ai',
+                f'결제 실패 화면 — 결제 안 됨({mask_text(page.split(chr(10), 1)[0][:80])})',
+                FailReason.PAY_INTERRUPTED,
+            )
         # 탭 안 키패드(네이버페이 → 롯데온) 는 승인 뒤 주문 완료로 돌아오는 데 4초보다 오래 걸린다
         # (실기 2026-09-28 컬럼비아: 결제됐는데 '확인되지 않는다') — 완료 문구가 뜰 때까지 몇 번 더 본다
         for _ in range(PAY_RESULT_POLL_TRIES):
