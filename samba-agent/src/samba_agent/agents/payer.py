@@ -1507,6 +1507,19 @@ class PayerAgent(AgentBase):
                     FailReason.PERMISSION_DENIED,
                 )
 
+    def _sheet_final_total(self) -> int | None:
+        """결제 진입에 쓴 주문서 탭의 최종 결제금액('총1건 27,460'). 못 읽으면 None."""
+        tab = getattr(self, '_sheet_tab', '')
+        if not tab:
+            return None
+        try:
+            self.tool('switch_tab', id=tab)
+            flat = re.sub(r'\s+', ' ', self.tool('get_page', query='총 결제금액'))
+        except AgentFailure:
+            return None
+        m = re.search(r'총 결제금액.{0,200}?총\s*\d+\s*건\s*([\d,]+)', flat)
+        return int(m.group(1).replace(',', '')) if m else None
+
     def _read_naver_card(self, amount: int) -> dict[str, object] | None:
         """네이버 결제창의 카드·금액·적립을 읽는다. 읽기만 하고 동의 버튼은 누르지 않는다."""
         from samba_agent.agents.naverpay import NAVER_PREPARE_JS
@@ -1557,6 +1570,16 @@ class PayerAgent(AgentBase):
                 break
             self.tool('wait', ms=2000)
             prepared = self._read_naver_card(amount)
+        if isinstance(prepared, dict) and '결제액 불일치' in str(prepared.get('error') or ''):
+            # 롯데온 결제 진입이 L.POINT '전액사용'을 눌러 포인트만큼 덜 낸다(실기 2026-11-13 21315225308403299: 주문서 37,260 ·
+            # L.POINT 9,800P → 네이버 27,460). 주문서의 최종 결제금액('총N건 금액')을 다시 읽어 그 값으로 한 번 더 본다
+            sheet_total = self._sheet_final_total()
+            if sheet_total and sheet_total != amount and 0 < sheet_total < amount:
+                self.note('네이버 결제액', f'주문서 최종 결제금액 {sheet_total:,}원(포인트 사용 반영)으로 다시 대조 — 견적 {amount:,}원')
+                naver = [p for p in self._list_tabs_popups()[0] if _pay_host_provider(str(p.get('url') or '')) == 'naverpay']
+                if naver:
+                    self.tool('switch_tab', id=str(naver[-1]['id']))
+                prepared = self._read_naver_card(sheet_total)
         if isinstance(prepared, dict) and prepared.get('auth_required'):
             # 결제창 앞에 네이버페이 비밀번호 창이 먼저 뜬다 — 앱이 키마스터 값을 한 번만 넣고 결제창을 다시 본다
             account = str(a.handoff.get('account') or a.order.account or '')
@@ -2241,6 +2264,7 @@ class PayerAgent(AgentBase):
                 self.note('결제창', f'주문서 탭 앞으로 올리기 실패: {e.reason[:60]}')
         # 결제창 진입은 AI 수리 대상이 아니다 — 비밀번호 없는 간편결제(무신사페이 카드 등)는 '결제하기' 한 번에
         # 결제가 끝난다(실기 2026-09-24: 수리 시험 중 결제하기 클릭으로 실결제 발생). 실패하면 사람에게 넘긴다
+        self._sheet_tab = str(payload.get('tab') or '')
         raw_enter = self.tool(
             'run_script', name=script, args=json.dumps(payload, ensure_ascii=False)
         )
