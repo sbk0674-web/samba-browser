@@ -2271,6 +2271,11 @@ overlays left: ${after.length}${kept}`
           if (typeof m.revealTab === 'function' && typeof m.get === 'function' && m.get(tab.id)) {
             m.revealTab(tab.id)
             await new Promise((r) => setTimeout(r, 800))
+          } else if (typeof m.focusTarget === 'function') {
+            // 결제 팝업 창(네이버페이 비밀번호 등)은 뒤에서 숨긴 채(show:false) 열려 그려지지 않는다 — 포커스 없이 보이게 한다
+            // (실기 2026-11-12 21315225048333299: 네이버 비밀번호 OCR 후보 0개)
+            m.focusTarget(tab.id)
+            await new Promise((r) => setTimeout(r, 800))
           }
           return await keypadEnter(tab, accountLabel, provider, dryRunDigits)
         }
