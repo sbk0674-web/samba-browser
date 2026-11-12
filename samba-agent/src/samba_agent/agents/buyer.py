@@ -5297,9 +5297,22 @@ class BuyerAgent(AgentBase):
                     self.tool('switch_tab', id=str(self._ship_tab))
                 sheet = re.sub(r'\s+', '', self.tool('get_page', query='배송정보'))
                 m = re.search(r'배송정보(.{0,200}?)(?:휴대전화|연락처|배송요청|요청사항)', sheet)
+                if m is None:
+                    # 선물 주문서엔 '배송정보' 칸이 없고 '받는 분 주소로 보내기' 아래 주소 입력칸에 들어간다(실기 2026-11-12
+                    # 753123710615576: 주소칸에 고객 주소가 맞게 들어갔는데 이 검사가 칸을 못 찾아 멈췄다)
+                    m = re.search(r'textbox"주소"value="([^"]*)"', re.sub(r'\s+', '', self.tool('get_page', query='주소')))
             except AgentFailure:
                 m = None
-            if m is None or self._ship_key not in m.group(1):
+            seen = re.sub(r'\s+', '', m.group(1)) if m else ''
+            # 지번 열쇠('영덕동980')는 롯데온이 도로명으로 바꿔 보여 준다('흥덕1로79번길7(영덕동,…)') — 동 이름과 시·군·구가
+            # 모두 보이면 같은 곳으로 본다(번지는 도로명 변환 뒤 사라진다)
+            jb = re.fullmatch(r'(.+?(?:동|리|가))\d[\d-]*', self._ship_key)
+            jibun_ok = bool(
+                jb
+                and jb.group(1) in seen
+                and all(d in seen for d in address_districts(shipping.get('address')))
+            )
+            if m is None or (self._ship_key not in seen and not jibun_ok):
                 raise AgentFailure(
                     'needs_ai',
                     '주문서 배송정보에 고객 주소가 안 들어갔다(배송지 창 저장 안 됨) — 결제하지 않음',
