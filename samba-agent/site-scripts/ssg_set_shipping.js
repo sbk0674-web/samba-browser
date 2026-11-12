@@ -74,7 +74,7 @@ await page.click(pickBtn)
 await sleep(700)
 const dtl = await first('#addrDtlInput, input[name="dtlAddr"]')
 const tl = nz((nz(args.address).match(/^.*(?:로|길)\s*\d+(?:-\d+)?\s*(?:\([^)]*\))?\s*(.*)$/) || nz(args.address).match(/^.*?[동리가]\s*\d+(?:-\d+)?\s+(.*)$/) || [])[1])
-const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || (/^[\dA-Za-z]|[호층동]$/.test(tl) ? tl : '')
+const dtlRaw = nz(args.address_detail) || nz((nz(args.address).split(',')[1] || '').replace(/\([^)]*\)/g, ' ')) || tl
 const dtlText = (dtlRaw.length > 40 ? nz(dtlRaw.replace(/\([^)]*\)?/g, ' ')) : dtlRaw).slice(0, 40).trim()
 if (dtl >= 0 && dtlText) await page.type(dtl, dtlText, false)
 if (!/zipcd\.ssg/.test(await page.url())) return { ...R, note: '우편번호 팝업 아님' }
