@@ -1072,6 +1072,16 @@ class PayerAgent(AgentBase):
         for _ in range(TOSS_POPUP_POLL_TRIES):
             popups, _active = self._list_tabs_popups()
             toss = [p for p in popups if p.get('id') and 'toss.im' in str(p.get('url') or '')]
+            if not toss:
+                # 롯데온은 토스 결제창을 팝업이 아니라 탭으로 연다 — 탭 목록도 본다(실기 2026-11-12 21315224845173299:
+                # 팝업만 봐서 휴대폰·생년월일을 안 넣고 폰 승인으로 넘어가 no-account 로 거절)
+                try:
+                    toss = [
+                        t for t in json.loads(self.tool('list_tabs'))
+                        if isinstance(t, dict) and t.get('id') and 'toss.im' in str(t.get('url') or '')
+                    ]
+                except (AgentFailure, ValueError):
+                    toss = []
             if toss:
                 toss_tab = str(toss[-1]['id'])
                 break
