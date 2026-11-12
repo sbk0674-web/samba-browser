@@ -5247,6 +5247,18 @@ class BuyerAgent(AgentBase):
             # 스크립트가 남긴 사유(note)를 붙인다 — 예전엔 사유 없이 멈춰 비교 오탐인지 스크립트 실패인지 몰랐다(job 207)
             # note 가 없으면 오류 코드(name-input-nf 등)라도 남긴다 — 사유 없는 실패는 원인을 못 가른다(실기 2026-09-29)
             note = str(applied.get('note') or applied.get('error') or '').strip()
+            # 어느 대조가 어긋났는지 개인정보 없이 남긴다(이름 일치 여부·시군구 겹침·주소 글자 수·우편번호 유무)
+            try:
+                self.note(
+                    '배송지 대조',
+                    f"이름 {'같음' if _same_name(str(shipping.get('name', '')), str(applied.get('name', ''))) else '다름'} · "
+                    f"시군구 겹침 {bool(address_districts(shipping.get('address')) & address_districts(applied.get('address')))} · "
+                    f"주소 {len(str(shipping.get('address') or ''))}/{len(str(applied.get('address') or ''))}자 · "
+                    f"우편번호 {bool(shipping.get('postal_code'))}/{bool(applied.get('zip') or applied.get('postal_code'))} · "
+                    f"되읽은 키 {sorted(k for k, v in applied.items() if v not in (None, ''))}",
+                )
+            except Exception:  # noqa: BLE001 — 진단 메모 실패는 무시
+                pass
             raise AgentFailure(
                 'needs_ai',
                 '배송지 입력 검증에 실패했다' + (f': {mask_text(note[:80])}' if note else ''),

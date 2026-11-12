@@ -2265,6 +2265,13 @@ overlays left: ${after.length}${kept}`
         // 결제 비밀번호가 아닌 항목을 키패드 화면에서 부르면 넘긴다(넣을 곳이 없다)
         if (await secretKeypadGate.check(tab)) {
           if (itemType !== 'password') return await keypadHandoff(tab)
+          // 뒤에 가려진 탭은 그려지지 않아 키패드 숫자를 화면(OCR)으로 못 읽는다 — 탭이면 앞으로 올린 뒤 누른다
+          // (실기 2026-11-12 롯데온 네이버페이 비밀번호: '글자 없는 버튼 10~14개를 못 찾음 (후보 0개)')
+          const m = ctx.tabs as Partial<TabManager>
+          if (typeof m.revealTab === 'function' && typeof m.get === 'function' && m.get(tab.id)) {
+            m.revealTab(tab.id)
+            await new Promise((r) => setTimeout(r, 800))
+          }
           return await keypadEnter(tab, accountLabel, provider, dryRunDigits)
         }
         const host = currentHost(tab)
