@@ -1514,7 +1514,7 @@ class PayerAgent(AgentBase):
             return None
         try:
             self.tool('switch_tab', id=tab)
-            flat = re.sub(r'\s+', ' ', self.tool('get_page', query='총 결제금액'))
+            flat = re.sub(r'\s+', ' ', self.tool('get_page').split('PAGE TEXT')[-1])
         except AgentFailure:
             return None
         m = re.search(r'총 결제금액.{0,200}?총\s*\d+\s*건\s*([\d,]+)', flat)
