@@ -1322,6 +1322,20 @@ class PayerAgent(AgentBase):
         # 구매가 만든 주문서 탭을 먼저 앞으로 — 활성 탭이 다른 페이지면 엉뚱한 화면을 대조한다
         # (결제 진입 스크립트도 같은 tab 을 받아 그 탭에서 따로 대조한다)
         order_tab = a.handoff.get('order_tab')
+        if not order_tab and str(a.handoff.get('buy_source') or a.order.source or '').upper() == 'LOTTEON':
+            # 롯데온 구매는 주문서 탭 id 를 안 넘긴다 — 활성 탭이 상품·매장 페이지면 엉뚱한 화면을 대조해 맞는 주문서를
+            # 다르다고 막았다(실기 2026-11-14 21315225604823299 컨버스). 이 계정의 주문서 탭이 하나면 그것을 본다
+            try:
+                profile = str(a.handoff.get('account') or a.order.account or '')
+                sheets = [
+                    t for t in json.loads(self.tool('list_tabs'))
+                    if isinstance(t, dict) and 'orderSheet' in str(t.get('url') or '')
+                    and (not profile or str(t.get('profile') or '') == profile)
+                ]
+                if len(sheets) == 1:
+                    self.tool('switch_tab', id=str(sheets[0].get('id')))
+            except (AgentFailure, ValueError):
+                pass
         if order_tab:
             self.tool('switch_tab', id=str(order_tab))
         page = self.tool('get_page')
