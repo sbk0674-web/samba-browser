@@ -74,6 +74,16 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         keep = [t for t in want if t not in ('eu', 'kr', 'us', 'uk') and not re.fullmatch(r'\d+(?:\.\d+)?', t)] + [kr_size]
         if base and sorted(base) == sorted(keep):
             return True
+        # 한국 치수가 같고(앞 0 무시 — '95' ↔ '095') 상세의 색 이름이 주문과 다른 '아는 색'이 아니면 같은 옵션이다.
+        # 소싱처 고유 색 이름('PINE')은 글자로 못 맞춘다 — 구매 단계가 그 상품의 선택지에서 고른 것이다
+        # (실기 2026-11-13 29CM 21315225592033299 '그린 M · KR 95' ↔ 'PINE [사이즈]095')
+        nums = [t for t in got if re.fullmatch(r'\d{2,3}', t)]
+        if len(nums) == 1 and nums[0].lstrip('0') == kr_size.lstrip('0'):
+            known = set(_KO_COLOR.values())
+            want_colors = {t for t in want if t in known}
+            got_colors = {t for t in got if t in known}
+            if not (want_colors and got_colors and not (want_colors & got_colors)):
+                return True
     # 상세가 'BLK0_BLACK:100' 처럼 색코드_색이름이면 밑줄 뒤 색이름만 본다(실기 2026-11-10 21315224160433299
     # '블랙 100' ↔ 'BLK0_BLACK:100'). 앞쪽이 숫자 섞인 코드일 때만 — 'CHALK_BLACK' 같은 색 이름은 그대로 둔다
     coded = [re.sub(r'^[a-z]{2,4}\d{1,2}_(?=[a-z])', '', t) for t in got]
