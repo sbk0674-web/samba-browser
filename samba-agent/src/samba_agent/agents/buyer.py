@@ -894,8 +894,9 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
     # (실기 2026-09-28: 주문 '블랙 & 올리브 그린' ↔ 무신사 선택지 ['FREE'] 를 옵션 불일치로 멈췄다).
     # 상품이 맞는지는 결제 직전 주문서 대조가 다시 본다
     if (
-        len(live) == 1
-        and _is_free_size(live[0])
+        live
+        # 같은 FREE 줄이 가격 붙은 꼴·없는 꼴 두 번 나온다('FREE 59,500'·'FREE') — 전부 프리사이즈면 하나로 본다(2026-11-13 21515225469689257)
+        and all(_is_free_size(o) for o in live)
         and not re.search(r'\d', wanted)
         and not size_letters(wanted)
     ):
