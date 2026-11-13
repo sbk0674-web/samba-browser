@@ -878,6 +878,10 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
     아무 단계도 안 맞으면 빈 목록 — 절대 '가까운 값' 으로 대신하지 않는다.
     """
     live = [o for o in options if not _sold_out(o) and not color_code_conflict(wanted, o)]
+    # 선택지 조각(재고 '4개 남음 (품절임박)'·가격 '137,400')은 옵션이 아니다 — 주문 옵션의 숫자 4 가 재고 조각에 걸려
+    # 엉뚱한 줄을 골랐다(실기 2026-11-13 롯데온 21315225409303299 라코스테 'SKB/초콜릿향 4' → '4개 남음')
+    real = [o for o in live if not re.fullmatch(r'\s*(?:\d+\s*개\s*남음.*|\d{1,3}(?:,\d{3})+)\s*', o)]
+    live = real or live
     if not wanted:
         return live
     # 프리사이즈 표기 차이(FREE·F·ONE·ONE SIZE·OS·단일) — 주문이 프리사이즈인데 후보가 프리사이즈 하나뿐이면 그것이다
@@ -975,6 +979,13 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
             by_code = [o for o in live if re.match(rf'{code}(?!\d)', o.strip())]
             if by_code:
                 return by_code
+    # 숫자 하나만 적힌 라코스테 사이즈('SKB/초콜릿향 4') — 선택지가 세 자리 코드('004(100)')뿐이면 그 코드로 맞춘다
+    # (실기 2026-11-13 롯데온 21315225409303299)
+    lone = [t for t in re.split(r'[\s/]+', w) if re.fullmatch(r'\d', t.strip())]
+    if len(lone) == 1 and live and all(re.match(r'00\d\(\d+\)', o.strip()) for o in live):
+        by_code = [o for o in live if o.strip().startswith(f'00{lone[0].strip()}(')]
+        if by_code:
+            return by_code
     digits = re.findall(r'\d+', w)
     if len(digits) == 1:
         by_digit = [o for o in live if re.findall(r'\d+', o) == digits]
