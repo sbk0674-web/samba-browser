@@ -2277,6 +2277,10 @@ overlays left: ${after.length}${kept}`
             m.focusTarget(tab.id)
             await new Promise((r) => setTimeout(r, 800))
           }
+          // 숫자를 다 누를 때까지 탭 크기를 유지한다 — 브라우저 영역이 0 크기인 화면(설정·작업)에서도 누를 수 있게
+          if (typeof m.withFront === 'function' && typeof m.get === 'function' && m.get(tab.id)) {
+            return await m.withFront(tab.id, () => keypadEnter(tab, accountLabel, provider, dryRunDigits))
+          }
           return await keypadEnter(tab, accountLabel, provider, dryRunDigits)
         }
         const host = currentHost(tab)

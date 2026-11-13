@@ -1019,7 +1019,23 @@ export class TabManager {
    */
   async withFront<T>(id: string, fn: () => Promise<T>): Promise<T> {
     const tab = this.get(id)
-    if (!tab || this.win.isDestroyed() || id === this.activeId || !isTabAlive(tab)) return fn()
+    if (!tab || this.win.isDestroyed() || !isTabAlive(tab)) return fn()
+    if (id === this.activeId) {
+      // 보이는 탭이어도 설정·작업 화면이 떠 있으면 브라우저 영역이 0 크기다 — 그대로 두면 키패드 칸 크기가 0 이라
+      // 숫자를 못 읽는다(실기 2026-11-13 네이버페이 재인증: '작음10, 창 0x0 hidden'). 그동안만 창 크기를 준다
+      const [aw, ah] = this.win.getContentSize()
+      const ab = computeViewBounds(this.layout, aw, ah, tab.mobile)
+      const cur = tab.view.getBounds()
+      // 바깥 호출이 이미 크기를 줬으면(겹쳐 부른 경우) 그대로 둔다
+      if (this.gateHidden || (cur.width > 0 && cur.height > 0) || aw <= 0 || ah <= 0) return fn()
+      tab.view.setBounds({ x: 0, y: 0, width: aw, height: ah })
+      this.win.contentView.addChildView(tab.view)
+      try {
+        return await fn()
+      } finally {
+        if (!this.win.isDestroyed() && isTabAlive(tab)) tab.view.setBounds(ab)
+      }
+    }
     const visible = this.activeId !== null ? this.get(this.activeId) : null
     // 설정·작업 화면처럼 브라우저 영역이 0 크기면 탭도 0 크기로 그려져 캡처·키패드 판정이 안 된다
     // (실기 2026-09-30 네이버페이 키패드: 칸 크기 0·후보 0) — 그동안만 창 크기를 준다
