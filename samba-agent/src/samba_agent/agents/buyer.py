@@ -861,7 +861,8 @@ def _is_free_size(text: str) -> bool:
     return any(t in _FREE_SIZE_TOKENS for t in toks) or 'onesize' in joined or 'freesize' in joined
 
 
-_KR_SIZE_RE = re.compile(r'(?<![A-Za-z])KR\s*(\d{3})(?!\d)', re.IGNORECASE)
+# 옷 치수는 두 자리('KR 95')도 있다 — 세 자리만 읽어 'KR 95' 주문을 'PINE 095' 에 못 맞췄다(2026-11-13)
+_KR_SIZE_RE = re.compile(r'(?<![A-Za-z])KR\s*(\d{2,3})(?!\d)', re.IGNORECASE)
 
 
 def kr_size(text: str | None) -> str | None:
@@ -908,7 +909,8 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
         marked = [o for o in live if kr_size(o) == kr]
         if marked:
             return marked
-        by_kr = [o for o in live if not kr_size(o) and kr in size_numbers(o)]
+        # 선택지가 앞에 0 을 붙여 적는다('PINE 095') — 주문 'KR 95' 와 같은 치수다(실기 2026-11-13 29CM 21315225592033299)
+        by_kr = [o for o in live if not kr_size(o) and kr.lstrip('0') in {n.lstrip('0') for n in size_numbers(o)}]
         if by_kr:
             return by_kr
     w = wanted.strip()
