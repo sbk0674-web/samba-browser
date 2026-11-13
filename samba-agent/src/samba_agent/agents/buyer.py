@@ -3531,7 +3531,8 @@ class BuyerAgent(AgentBase):
                 self._quote_skips.append(f'{account}: 옵션 불일치 {options[:6]}')
             return None
         selected = str(snap.get('selected') or '').strip()
-        if a.order.option and not selected and snap.get('note') == 'nopick':
+        # 29CM 스크립트는 못 골랐을 때 note 를 '옵션 불일치'로 준다 — 같은 경우다(실기 2026-11-13 21315225592033299·21315225499693299)
+        if a.order.option and not selected and snap.get('note') in ('nopick', '옵션 불일치'):
             # 스크립트가 주문 옵션 글자로는 못 골랐지만(nopick) 후보 중 같은 옵션을 맞췄으면(AI·사이즈 표기 규칙 —
             # '화이트 S' ↔ 'White-SM') 그 후보 글자로 한 번 다시 연다. 안 그러면 계정마다 '주문서 옵션 못 읽음' 으로 빠져
             # 모든 계정 불가가 됐다(실기 2026-10-21 무신사 포이즌 2799, 건당 16분)
