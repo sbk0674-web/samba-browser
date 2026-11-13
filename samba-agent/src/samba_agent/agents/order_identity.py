@@ -57,6 +57,12 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
+    # 주문엔 색만 있고('그레이') 상세엔 원사이즈(FREE)만 보이는 단일 옵션 상품 — 색은 상품 자체가 정한다(지정 상품 주소에서 산 것)
+    # (실기 2026-11-13 무신사 21315225464193299 '그레이' ↔ 'FREE')
+    if got and set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'} and want and not any(
+        re.search(r'\d', t) or _SIZE_ONLY.fullmatch(t) for t in want
+    ):
+        return True
     # 상세가 '블랙(001) / 3XL' 처럼 색 뒤에 색번호를 붙이면 괄호 앞만 본다(실기 2026-11-10 21315224120343299)
     base = [_KO_COLOR.get(t.split('(')[0], t.split('(')[0]) if '(' in t else t for t in got]
     if base != got and base and sorted(base) == sorted(want):
