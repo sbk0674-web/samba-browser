@@ -103,7 +103,10 @@ class VerifierAgent(AgentBase):
         """Read actual option and shipping independently; never emit personal values."""
         mismatch, missing = [], []
         actual = source.get('selected') or source.get('option')
-        if not a.order.option or not actual:
+        if not a.order.option:
+            # 옵션 없는 단일 상품 주문은 맞대 볼 옵션이 없다 — 미확인으로 멈추지 않는다(실기 2026-11-13 20261113F87538 가방)
+            pass
+        elif not actual:
             missing.append('option')
         elif not paid_option_matches(a.order.option, actual) and not _single_color_buy(
             a.order.option, actual, a.handoff.get('option')
