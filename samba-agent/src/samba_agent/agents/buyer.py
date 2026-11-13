@@ -3438,6 +3438,21 @@ class BuyerAgent(AgentBase):
                 FailReason.CARD_MISSING,
             )
         best = quotes[0]
+        # 하네스가 아직 못 쓰는 할인 줄(삼성카드·토스페이 카드 등)이 고른 수단의 할인보다 크면 사지 않는다 —
+        # 롯데온 할인은 매번 바뀐다. 모르는 더 싼 수단이 있는데 아는 수단으로 사면 비싸게 산 것이다(사용자 2026-11-13)
+        unsupported = [u for u in (out.get('unsupported') or []) if isinstance(u, dict)]
+        if unsupported:
+            self.note('미지원 할인 줄', ', '.join(f"{u.get('name')} {u.get('percent')}% -{_as_float(u.get('amount')):,.0f}" for u in unsupported))
+            chosen_cut = base - _as_float(best.get('paid')) if base > 0 else 0.0
+            bigger = [u for u in unsupported if _as_float(u.get('amount')) > chosen_cut + 1]
+            if bigger:
+                top = max(bigger, key=lambda u: _as_float(u.get('amount')))
+                raise AgentFailure(
+                    'needs_ai',
+                    f"더 큰 할인({top.get('name')} {top.get('percent')}% -{_as_float(top.get('amount')):,.0f}원)이 있는데 "
+                    f'하네스가 그 수단으로 못 산다 — 고른 수단 할인 {chosen_cut:,.0f}원. 사지 않음',
+                    FailReason.UNKNOWN,
+                )
         snap['cost'] = best['cost']
         snap['pay_amount'] = best['paid']
         snap['pay_method'] = best['method']

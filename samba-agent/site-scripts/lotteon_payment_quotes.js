@@ -81,62 +81,37 @@ if (rid >= 0) {
   if (!restored) note = 'restore to 롯데카드 failed, please check manually';
 }
 
+const unsupported=[];
 try{
   const Q=async(q,re)=>{const x=(await page.get({query:q})).tree.split('\n').filter(l=>re.test(l));return x;};
   const BR=/button "[\d,]+원 할인혜택 받기"/;
   const amtOf=async()=>{const bl=(await Q('할인혜택 받기',BR)).sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)))[0];return bl?parseInt((bl.match(/"([\d,]+)원/)||[])[1].replace(/,/g,''),10):0;};
-  // 줄 금액으로 견적(버튼 금액은 앞 칸 값이 남음, 11-11)
-  const rowAmt=async(lab,p)=>{const t=String((await page.get({query:lab})).tree||'');const x=(t.split('PAGE TEXT')[1]||t).replace(/\s+/g,' ');const m=x.match(new RegExp(lab+' ?'+p+'% 즉시할인 ?(?:자세히 ?)?-([0-9,]+) ?원'));return m?parseInt(m[1].replace(/,/g,''),10):0;};
   const hb=await page.idOf('할인변경');
   if(hb>=0){
     await page.click(hb);await sleep(2000);
-    // 결제수단은 종류 상관없이 제일 싼 것(사용자 2026-11-11). 카카오머니 요청이 미승인(잔액 부족 등)이면 다음 시도는 머니를 빼고 견적한다
-    if(!args.no_kakao_money){
-    const rs=(await Q('카카오페이 머니',/radio "카카오페이 머니\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/머니(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
-    const mx=rs.length?Math.max(...rs.map(x=>x.id)):0;
-    const best=rs.filter(r=>r.id>mx-20).sort((a,b)=>b.p-a.p)[0];
-    if(best&&!best.on){await page.clickNative(best.id);await sleep(1200);}
-    const amt=best?((await rowAmt('카카오페이 머니',best.p))||await amtOf()):0;
-    if(best&&amt>0)quotes.push({method:'카카오페이',card:null,cost:base_cost-amt,discount:'카카오페이 머니'+best.p+'% 즉시할인'});
-    }
-    // 카카오페이 카드 즉시할인 + 현대카드 청구할인(2.7%)이 롯데카드(즉시할인+2%)보다 쌀 수 있다(사용자 2026-11-04)
-    const kc=(await Q('카카오페이 카드',/radio "카카오페이 카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
-    const kmx=kc.length?Math.max(...kc.map(x=>x.id)):0;
-    // 7% 칸은 조건 제한으로 눌러도 안 켜질 때가 있다 — 큰 것부터 일반 클릭으로 눌러 실제 켜진 칸으로 견적한다
-    // 라벨(id+1)을 눌러야 켜진다(11-13 10%가 안 켜져 5%로 견적)
-    const kOn=async id=>(await Q('카카오페이 카드',/radio "카카오페이 카드/)).some(l=>parseInt(l.slice(1))===id&&/value="on"/.test(l));
-    let kbest=null;
-    for(const r of kc.filter(r=>r.id>kmx-20).sort((a,b)=>b.p-a.p)){for(const t of [r.id+1,r.id]){if(await kOn(r.id))break;await page.click(t);await sleep(1200);}if(await kOn(r.id)){kbest=r;break;}}
-    if(kbest){
-      const kamt=(await rowAmt('카카오페이 카드',kbest.p))||await amtOf();
-      if(kamt>0)quotes.push({method:'카카오페이',card:'현대카드',cost:base_cost-kamt,discount:'카카오페이 카드'+kbest.p+'% 즉시할인',kakao_card:true});}
-    const lr=(await Q('롯데카드',/radio "롯데카드\s*\d+%/)).map(l=>({id:parseInt(l.slice(1)),p:+(l.match(/롯데카드\s*(\d+)%/)||[])[1],on:/value="on"/.test(l)}));
-    const lmx=lr.length?Math.max(...lr.map(x=>x.id)):0;
-    const lbest=lr.filter(r=>r.id>lmx-20).sort((a,b)=>b.p-a.p)[0];
-    if(lbest){
-      let lamt=0;
-      // 오래된 창이 남아 있을 수 있어 lbest.id 줄만 보고 켜짐 판단. 라벨(id+1) 클릭이 라디오를 켠다
-      const isOn=async()=>{const ls=await Q('롯데카드',/radio "롯데카드\s*\d+%/);const l=ls.find(x=>parseInt(x.slice(1))===lbest.id);return !!l&&/value="on"/.test(l);};
-      for(const tid of [lbest.id+1,lbest.id]){
-        if(await isOn())break;
-        await page.click(tid);await sleep(1200);
-      }
-      if(await isOn())lamt=(await rowAmt('롯데카드',lbest.p))||await amtOf();
-      if(lamt>0){
-        for(let i=quotes.length-1;i>=0;i--)if(quotes[i].method==='간편결제')quotes.splice(i,1);
-        quotes.push({method:'간편결제',card:'롯데카드',cost:base_cost-lamt,discount:'롯데카드 '+lbest.p+'% 즉시할인'});
-      }
+    // 할인 줄은 화면 글자('○○ N% 즉시할인 -금액원')를 그대로 읽는다 — 칸을 눌러 보고 켜진 것만 믿다가 10%를 5%로 견적했다
+    // (사용자 2026-11-13: 롯데온 할인은 매번 바뀐다). 어떤 수단이든 줄이 있으면 전부 읽는다
+    const X=(String((await page.get({query:'즉시할인'})).tree||'').split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');
+    const RW={};
+    for(const m of X.matchAll(/([가-힣A-Za-z.]{2,12}(?: ?(?:카드|머니))?) ?(\d+)% ?즉시할인 ?(?:자세히 ?)?-([0-9,]+) ?원/g)){
+      const n=m[1].replace(/\s/g,''),a=parseInt(m[3].replace(/,/g,''),10);if(a>0&&(!RW[n]||a>RW[n].a))RW[n]={a,p:+m[2]};}
+    const MAP={'롯데카드':['간편결제','롯데카드'],'카카오페이카드':['카카오페이','현대카드'],'카카오페이머니':['카카오페이',null]};
+    for(const n in RW){
+      const mp=MAP[n],r=RW[n];
+      if(n==='카카오페이머니'&&args.no_kakao_money)continue;
+      if(!mp){unsupported.push({name:n,percent:r.p,amount:r.a});continue;}
+      if(mp[0]==='간편결제')for(let i=quotes.length-1;i>=0;i--)if(quotes[i].method==='간편결제')quotes.splice(i,1);
+      quotes.push({method:mp[0],card:mp[1],cost:base_cost-r.a,discount:n+r.p+'% 즉시할인',...(n==='카카오페이카드'?{kakao_card:true}:{})});
     }
     const cs=(await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>parseInt(l.slice(1)));
     if(cs.length){await page.clickNative(Math.max(...cs));await sleep(1200);
       const ca=await amtOf();
-      // 할인창은 '1개만 선택' — 카드 즉시할인(롯데카드·카카오페이)과 장바구니 쿠폰은 겹치지 않는다(실기 2026-11-07 롯데온 노스페이스:
-      // 롯데카드 10%+쿠폰 15% 를 겹쳐 91,414 로 잘못 견적 → L.PAY 가 골라짐). 즉시할인이 없는 수단에만 쿠폰을 뺀다
+      // 할인창은 '1개만 선택' — 카드 즉시할인과 장바구니 쿠폰은 겹치지 않는다(2026-11-07). 즉시할인이 없는 수단에만 쿠폰을 뺀다
       if(ca>0)for(const q of quotes)if(q.cost!=null&&q.method!=='카카오페이'&&!q.discount){q.cost-=ca;q.discount='장바구니 쿠폰';}
     }
     const cl=(await Q('닫기',/button "닫기"/)).map(l=>parseInt(l.slice(1))).sort((a,b)=>b-a);
     for(const c of cl.slice(0,2)){await page.click(c);await sleep(400);}
   }
-}catch(e){note=(note?note+' / ':'')+'카카오페이 머니 견적 실패: '+String(e).slice(0,60);}
+}catch(e){note=(note?note+' / ':'')+'할인 견적 실패: '+String(e).slice(0,60);}
 
-return { quotes, base_cost, note };
+return { quotes, base_cost, note, unsupported };
