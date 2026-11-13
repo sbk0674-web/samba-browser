@@ -707,6 +707,17 @@ TOSS_PUSH_WAIT_MS = 4000
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
 KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck', 'verify-failed')
 KAKAO_HUMAN_WAIT_TRIES = 36
+# 카카오페이 결제창(팝업)이 카카오 주소로 바뀔 때까지 찾는 횟수(1.5초 간격)
+KAKAO_POPUP_TRIES = 12
+def _tabs_list(raw: object) -> list[dict[str, object]]:
+    """list_tabs 원문을 탭 사전 목록으로(못 읽으면 빈 목록)."""
+    try:
+        v = json.loads(str(raw or '[]'))
+    except ValueError:
+        return []
+    return [t for t in v if isinstance(t, dict)] if isinstance(v, list) else []
+
+
 # 사람 승인 요청 횟수 — 3번 요청 뒤에도 안 되면 삼바웨이브 메모(사용자 규칙 2026-11-04)
 KAKAO_HUMAN_ROUNDS = 3
 # 카카오페이 사람 승인 요청 시간(KST). 2026-11-04 업무시간(8~18시)만 → 2026-11-05 사용자 "야근 많으니 그냥 요청해" 로 종일
@@ -1171,9 +1182,28 @@ class PayerAgent(AgentBase):
         번호·생년월일은 하네스를 지나가지 않는다. 결제창이 카톡결제 화면이 아니면(이미 요청됨 등) 아무것도 하지 않는다.
         키마스터에 값이 없으면(not found) 결제하지 않고 사람에게 넘긴다."""
         self.step('payer: 카카오페이 카톡결제 요청')
+        # 카카오페이 결제창은 따로 뜬 팝업이다 — 앞 탭(주문서)만 보고 '카카오 화면 아님'으로 넘겨, 폰에 요청을 안 보낸 채
+        # 승인 알림만 띄웠다(실기 2026-11-13 21315225235983299 29CM: 결제창 about:blank → 사용자 '승인요청 실제로 안 옴').
+        # 결제창이 카카오 주소로 바뀔 때까지 찾아 그 창으로 옮긴다
         page = self.tool('get_page')
-        if 'kakaopay.com' not in page.split('\n', 1)[0]:
-            return None
+        for _ in range(KAKAO_POPUP_TRIES):
+            if 'kakaopay.com' in page.splitlines()[0] if page else False:
+                break
+            popups, _active = self._list_tabs_popups()
+            kp = [q for q in popups if 'kakaopay.com' in str(q.get('url') or '')] or [q for q in _tabs_list(getattr(self, '_last_listed', '')) if 'kakaopay.com' in str(q.get('url') or '')]
+            if kp:
+                self.tool('switch_tab', id=str(kp[-1]['id']))
+                page = self.tool('get_page')
+                continue
+            self.tool('wait', ms=1500)
+            page = self.tool('get_page')
+        if not page or 'kakaopay.com' not in page.splitlines()[0]:
+            # 결제창을 못 찾았는데 '승인해 주세요' 알림만 띄우면 사람이 헛기다린다 — 결제창 없음으로 멈춘다
+            raise AgentFailure(
+                'needs_ai',
+                '카카오페이 결제창이 안 떠 폰으로 결제요청을 못 보냈다 — 결제 안 됨(재결제 전 주문내역 확인)',
+                FailReason.PAY_INTERRUPTED,
+            )
         tab = _element_id_of(page, r'tab "카톡결제"')
         if tab is not None:
             self.tool('click', id=tab)
