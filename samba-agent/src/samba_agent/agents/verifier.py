@@ -6,6 +6,7 @@ import re
 from samba_agent.agents.base import AgentBase, AgentFailure, Decision, run_agent
 from samba_agent.agents.buyer import _norm_address
 from samba_agent.agents.contracts import AgentResult, Assignment
+from samba_agent.agents.buyer import _same_name
 from samba_agent.agents.order_identity import paid_option_matches
 from samba_agent.agents.source_detail import (
     actual_cost,
@@ -167,7 +168,10 @@ class VerifierAgent(AgentBase):
                     # 선물 받는 분 이름은 SSG 가 잘라 저장한다(긴 영문 이름 — 실기 2026-11-03 4076) — 주소록 대조와 같이
                     # 공백 빼고 앞 8자·대소문자 무시로 본다
                     head = value.replace(' ', '').lower()[:8]
-                    if head not in raw.replace(' ', '').lower():
+                    # 롯데온 선물 상세는 이름 가운데를 가려 보여 준다('박O학') — 가린 자리만 건너뛰고 같으면 같은 사람이다
+                    # (실기 2026-11-13 20261113G18958: 맞게 샀는데 받는 분 미확인으로 멈춤)
+                    masked_ok = any(_same_name(value, tok) for tok in raw.split())
+                    if head not in raw.replace(' ', '').lower() and not masked_ok:
                         missing.append('recipient')
                 elif key == 'name':
                     if not re.search(r'(?<![가-힣A-Za-z])' + re.escape(value) + r'(?![가-힣A-Za-z])', raw):
