@@ -799,6 +799,8 @@ def _amount_krw(value: object) -> int | None:
 RESULT_URL_ORDER_NO_RE = re.compile(
     r'order/(?:result|complete)/([A-Za-z0-9-]{6,32})'
     r'|order/confirmed/[^\s"]*?[?&]order_serial=([A-Za-z0-9-]{6,32})'
+    # 롯데온은 결제 뒤 주문 상세(…/claim/orderDetail?odNo=2026111310653999)로 바로 가기도 한다(실기 2026-11-13 20261112055238)
+    r'|claim/orderDetail\?odNo=(\d{12,20})'
 )
 
 
@@ -812,12 +814,12 @@ def _source_order_no(page: str, tabs: str = '') -> str | None:
     # 2026092815965556 을 읽어 기입했다). 화면 첫 줄(URL: …)을 먼저 본다
     m = RESULT_URL_ORDER_NO_RE.search(page.splitlines()[0] if page.strip() else '')
     if m:
-        return m.group(1) or m.group(2)
+        return m.group(1) or m.group(2) or m.group(3)
     m = SOURCE_ORDER_NO_RE.search(page)
     if m:
         return m.group(1)
     m = RESULT_URL_ORDER_NO_RE.search(tabs)
-    return (m.group(1) or m.group(2)) if m else None
+    return (m.group(1) or m.group(2) or m.group(3)) if m else None
 
 
 def recent_art_order(agent: AgentBase, a: Assignment) -> str | None:
