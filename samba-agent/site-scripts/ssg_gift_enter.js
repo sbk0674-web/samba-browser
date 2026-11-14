@@ -40,6 +40,8 @@ for (const opt of parts) {
   // 똑같은 글자가 없으면 포함으로 — '블랙(Z1)' ↔ 'Z1', 'Z1/M' ↔ 'M'(2026-10-05)
   if (!cand.length) cand = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] (?:link|button) "/.test(l) && lab(l).includes(opt) && !/^(선택|전체)/.test(lab(l)))
   // 'L' 처럼 짧은 사이즈는 'XL'·'LOGIN' 에도 들어 있다 — 경계가 맞는 항목('L (품절)'·'L 남은수량')만 남기고, 그래도 여럿이면 옵션 줄(남은수량·품절)만 본다(2026-10-09 지오다노 '08네이비+화이트 스트라이프/L' 후보 27곳)
+  // 상품 설명 iframe(요소 번호 100000~) 안의 사이즈 버튼 그림 글자는 옵션이 아니다(2026-11-14 아르마니 셔츠 XL 2곳)
+  if (cand.length > 1 && cand.some(l => idL(l) < 100000)) cand = cand.filter(l => idL(l) < 100000)
   if (cand.length > 1) {
     const esc = opt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const bnd = new RegExp('(^|[^A-Za-z0-9가-힣])' + esc + '($|[^A-Za-z0-9가-힣])')
