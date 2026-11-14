@@ -388,7 +388,10 @@ def order_form_mismatch(
     picked_num = re.fullmatch(r'\s*0?(\d{2,3})\s*', selected or '')
     if ordered_letters and not chosen_letters and picked_num:
         num = int(picked_num.group(1))
-        allowed = set()
+        # 주문 옵션에 그 숫자 사이즈가 직접 적혀 있으면('M · KR 70' ↔ '070') 표보다 주문 글자가 우선이다
+        # (실기 2026-11-14 롯데온 나이키 여성 요가 팬츠 21315225767713299: 허리 치수 70 을 M 표로 막았다)
+        order_nums = {int(n) for n in re.findall(r'(?<![\d.])0?(\d{2,3})(?![\d.])', option or '')}
+        allowed = set(order_nums)
         for letter in ordered_letters:
             allowed |= _LETTER_KR_SIZES.get(letter, set())
         if num not in allowed:
