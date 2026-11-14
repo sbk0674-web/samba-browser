@@ -75,6 +75,10 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         letters = [t.upper() for t in want if t.upper() in _LETTER_KR_SIZES]
         if len(letters) == 1 and int(got[0]) in _LETTER_KR_SIZES[letters[0]] and not any(re.search(r'\d', t) for t in want):
             return True
+    # 상세가 사이즈 하나('2')뿐이고 주문은 '색 + 그 사이즈'('화이트 2') — 색 선택지가 없는 단일 색 상품이다(지정 상품 주소에서 산 것)
+    # (실기 2026-11-15 무신사 21315226170523299)
+    if len(got) == 1 and len(want) == 2 and got[0] in want and not re.search(r'\d', [t for t in want if t != got[0]][0]):
+        return True
     # 색 이름 띄어쓰기만 다른 경우('다크그레이 L' ↔ '플랫 다크 그레이 / … [SIZE]L') — 사이즈 낱말은 똑같이 있고
     # 주문의 나머지 낱말이 띄어쓰기를 뺀 상세 글자 안에 그대로 있으면 같다(실기 2026-11-14 29CM 21315225880503299)
     raw_want = [t for t in re.split(r'\s+', wanted.casefold()) if t]
