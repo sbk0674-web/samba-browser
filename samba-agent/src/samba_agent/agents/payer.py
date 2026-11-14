@@ -330,6 +330,21 @@ def _mostly_found(words: list[str], hay: str) -> bool:
     return False
 
 
+# 글자 사이즈 → 한국 숫자 사이즈(여성은 한 칸 아래, 남성은 한 칸 위라 두 값을 다 허용한다)
+_LETTER_KR_SIZES: dict[str, set[int]] = {
+    'XXS': {75, 80},
+    '2XS': {75, 80},
+    'XS': {80, 85},
+    'S': {85, 90},
+    'M': {90, 95},
+    'L': {95, 100},
+    'XL': {100, 105},
+    'XXL': {105, 110},
+    '2XL': {105, 110},
+    '3XL': {110, 115},
+}
+
+
 def _has_number(text: str, number: str) -> bool:
     return bool(re.search(rf'(?<!\d){re.escape(number)}(?!\d)', text))
 
@@ -382,7 +397,18 @@ def order_form_mismatch(
     numeric_free = bool(sizes) and ordered_letters <= {'FREE', 'ONE'}
     if ordered_letters and chosen_letters and ordered_letters != chosen_letters and not numeric_free:
         return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {sorted(chosen_letters)} 이 담겼다'
-    if ordered_letters and not chosen_letters and not (ordered_letters <= {'FREE', 'ONE'}):
+    # 구매가 글자 사이즈를 한국 숫자 사이즈로 골랐다(나이키 여성 S → '085') — 글자↔숫자 표로 맞는지 본다.
+    # 주문서 화면 전체 글자(검색어·L.POINT 등)에서 S·M·L 을 줍는 아래 대조는 이 경우 엉뚱한 글자로 막는다
+    # (실기 2026-11-14 롯데온 나이키 맨투맨 S→085·XS→080 이 'FREE·L·M 만 보인다'로 멈췄다)
+    picked_num = re.fullmatch(r'\s*0?(\d{2,3})\s*', selected or '')
+    if ordered_letters and not chosen_letters and picked_num:
+        num = int(picked_num.group(1))
+        allowed = set()
+        for letter in ordered_letters:
+            allowed |= _LETTER_KR_SIZES.get(letter, set())
+        if num not in allowed:
+            return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {selected.strip()} 이 담겼다'
+    elif ordered_letters and not chosen_letters and not (ordered_letters <= {'FREE', 'ONE'}):
         # 구매가 담긴 옵션을 못 넘긴 경우 — 주문서 화면에 사이즈 글자가 보이는데 주문 사이즈 글자가 하나도 없으면 다른 사이즈다
         page_letters = size_letters(text)
         if page_letters and not (ordered_letters & page_letters):
