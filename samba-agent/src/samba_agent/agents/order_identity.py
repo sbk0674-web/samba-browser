@@ -75,6 +75,11 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         letters = [t.upper() for t in want if t.upper() in _LETTER_KR_SIZES]
         if len(letters) == 1 and int(got[0]) in _LETTER_KR_SIZES[letters[0]] and not any(re.search(r'\d', t) for t in want):
             return True
+    # 상세가 '색-사이즈' 한 덩어리('White-LG')면 하이픈으로 나눠 다시 본다(실기 2026-11-15 29CM 21315226177103299 '화이트 LG')
+    if any('-' in t for t in got):
+        split = _tokens(re.sub(r'(?<=[a-z가-힣])-(?=[a-z0-9가-힣])', ' ', str(actual or ''), flags=re.IGNORECASE))
+        if split != got and sorted(split) == sorted(want):
+            return True
     # 상세가 사이즈 하나('2')뿐이고 주문은 '색 + 그 사이즈'('화이트 2') — 색 선택지가 없는 단일 색 상품이다(지정 상품 주소에서 산 것)
     # (실기 2026-11-15 무신사 21315226170523299)
     if len(got) == 1 and len(want) == 2 and got[0] in want and not re.search(r'\d', [t for t in want if t != got[0]][0]):
