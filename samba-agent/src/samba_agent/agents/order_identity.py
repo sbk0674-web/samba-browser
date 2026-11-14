@@ -44,6 +44,21 @@ def _tokens(value: object) -> list[str]:
     ]
 
 
+# 글자 사이즈 → 한국 숫자 사이즈(여성은 한 칸 아래, 남성은 한 칸 위라 두 값을 다 허용한다)
+_LETTER_KR_SIZES: dict[str, set[int]] = {
+    'XXS': {75, 80},
+    '2XS': {75, 80},
+    'XS': {80, 85},
+    'S': {85, 90},
+    'M': {90, 95},
+    'L': {95, 100},
+    'XL': {100, 105},
+    'XXL': {105, 110},
+    '2XL': {105, 110},
+    '3XL': {110, 115},
+}
+
+
 def paid_option_matches(wanted: object, actual: object) -> bool:
     # 상세의 낱말이 모두 주문 옵션에 있고 그중 사이즈가 있으면 같다 — 주문에만 붙은 수량·품번은 무시한다
     # (실기 2026-11-03 4073 'LYONS BLUE 1개 100' ↔ 'LYONS BLUE · 100', 4039 '… 095(L) NJ3NR86A')
@@ -54,6 +69,12 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 낱말이 똑같으면 같은 옵션이다 — 'ONE'(원사이즈)처럼 사이즈 꼴이 아닌 값도(실기 2026-11-03 4111 'LIGHT BEIGE ONE 1개' ↔ 'LIGHT BEIGE · ONE')
     if got and sorted(got) == sorted(want):
         return True
+    # 상세가 한국 숫자 사이즈 하나('085')뿐이고 주문은 글자 사이즈('다크그레이 S') — 글자↔숫자 표에 맞으면 같다(색은 지정 상품이 정한다)
+    # (실기 2026-11-14 롯데온 나이키 21315225647113299 'S' ↔ '085' 를 맞게 샀는데 불일치로 멈춤)
+    if len(got) == 1 and re.fullmatch(r'\d{2,3}', got[0]):
+        letters = [t.upper() for t in want if t.upper() in _LETTER_KR_SIZES]
+        if len(letters) == 1 and int(got[0]) in _LETTER_KR_SIZES[letters[0]] and not any(re.search(r'\d', t) for t in want):
+            return True
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True

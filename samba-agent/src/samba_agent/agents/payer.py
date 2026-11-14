@@ -24,7 +24,7 @@ from samba_agent.agents.buyer import (
     size_letters,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment
-from samba_agent.agents.order_identity import color_code_conflict
+from samba_agent.agents.order_identity import _LETTER_KR_SIZES, color_code_conflict
 from samba_agent.export.desktop import toast
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
@@ -328,21 +328,6 @@ def _mostly_found(words: list[str], hay: str) -> bool:
         if total and hit * 2 >= total:
             return True
     return False
-
-
-# 글자 사이즈 → 한국 숫자 사이즈(여성은 한 칸 아래, 남성은 한 칸 위라 두 값을 다 허용한다)
-_LETTER_KR_SIZES: dict[str, set[int]] = {
-    'XXS': {75, 80},
-    '2XS': {75, 80},
-    'XS': {80, 85},
-    'S': {85, 90},
-    'M': {90, 95},
-    'L': {95, 100},
-    'XL': {100, 105},
-    'XXL': {105, 110},
-    '2XL': {105, 110},
-    '3XL': {110, 115},
-}
 
 
 def _has_number(text: str, number: str) -> bool:
