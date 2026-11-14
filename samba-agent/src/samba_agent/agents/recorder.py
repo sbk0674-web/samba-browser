@@ -424,7 +424,16 @@ class RecorderAgent(AgentBase):
         est = a.handoff.get('cost')
         if isinstance(est, int | float) and not isinstance(est, bool) and est > 0:
             gap = cost - float(est)
-            if abs(gap) > ESTIMATE_GAP_WON:
+            # 결제액은 견적과 같고 주문 상세에서 적립만 더 보인 경우(롯데온 상품별 적립 ~0.5%) — 원가가 싸진 것뿐이라 올리지 않는다
+            # (실기 2026-11-14 5245·5268: 적립 522·534원 때문에 -522·-534원 견적 오차로 매번 멈췄다)
+            try:
+                reward_won = float(detail.get('reward') or 0)
+            except (TypeError, ValueError):
+                reward_won = 0.0
+            reward_only = gap < 0 and reward_won > 0 and abs(gap + reward_won) <= ESTIMATE_GAP_WON
+            if reward_only:
+                self.note('견적 차이(적립)', f'적립 {reward_won:,.0f}원만큼 원가가 낮아짐 — 결제액은 견적과 같다')
+            elif abs(gap) > ESTIMATE_GAP_WON:
                 self._estimate_gap = gap
                 self.note('⚠ 견적 오차', f'견적 {float(est):,.0f}원 · 실제 {cost:,.0f}원 · 차이 {gap:+,.0f}원 — 견적 스크립트 점검 필요')
         values['real_price'] = cost
