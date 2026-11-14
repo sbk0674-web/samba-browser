@@ -75,6 +75,14 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         letters = [t.upper() for t in want if t.upper() in _LETTER_KR_SIZES]
         if len(letters) == 1 and int(got[0]) in _LETTER_KR_SIZES[letters[0]] and not any(re.search(r'\d', t) for t in want):
             return True
+    # 색 이름 띄어쓰기만 다른 경우('다크그레이 L' ↔ '플랫 다크 그레이 / … [SIZE]L') — 사이즈 낱말은 똑같이 있고
+    # 주문의 나머지 낱말이 띄어쓰기를 뺀 상세 글자 안에 그대로 있으면 같다(실기 2026-11-14 29CM 21315225880503299)
+    raw_want = [t for t in re.split(r'\s+', wanted.casefold()) if t]
+    size_want = [t for t in raw_want if _SIZE_ONLY.fullmatch(t)]
+    rest_want = [t for t in raw_want if not _SIZE_ONLY.fullmatch(t)]
+    compact = re.sub(r'\s+', '', str(actual or '').casefold())
+    if size_want and rest_want and all(t in got for t in size_want) and all(len(t) >= 2 and t in compact for t in rest_want):
+        return True
     # 원사이즈(FREE) 상품은 상세에 색상만 나온다 — 주문에만 있는 낱말이 FREE 뿐이면 같다(실기 2026-11-03 4121 '화이트 FREE' ↔ '화이트')
     if got and set(got) <= set(want) and set(want) - set(got) <= {'free', 'f', 'one', 'onesize', '프리', 'fr'}:
         return True
