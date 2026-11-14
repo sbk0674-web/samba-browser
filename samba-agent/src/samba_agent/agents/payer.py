@@ -2290,6 +2290,30 @@ class PayerAgent(AgentBase):
                 ]
             except (AgentFailure, ValueError):
                 sheets = []
+            if len(sheets) > 1:
+                # 같은 계정 주문서가 여럿이면 화면 글자로 이 주문(상품·옵션)과 맞는 것만 남긴다 — 구매 진입(샵백)이 같은 상품
+                # 주문서를 두 번 열어 결제를 멈췄다(실기 2026-11-14 21315225767713299 나이키 요가 팬츠).
+                # 맞는 주문서가 여럿이면 모두 같은 상품·옵션이라 어느 것을 결제해도 이 주문이다 — 마지막 것을 쓴다
+                fitting = []
+                for sheet in sheets:
+                    try:
+                        self.tool('switch_tab', id=str(sheet.get('id')))
+                        text = self.tool('get_page')
+                    except AgentFailure:
+                        continue
+                    if order_form_mismatch(
+                        text,
+                        expect_name(a),
+                        a.order.option,
+                        str(a.handoff.get('selected') or ''),
+                        site_name=str(a.handoff.get('product_name') or ''),
+                        product_no=str(a.handoff.get('product_no') or '') or product_no_of(a.order.product_url),
+                        trust_site=bool(a.handoff.get('product_name')),
+                    ) is None:
+                        fitting.append(sheet)
+                if fitting:
+                    self.note('결제창', f'같은 계정 주문서 {len(sheets)}개 중 이 주문과 맞는 {len(fitting)}개 — 마지막 것을 쓴다')
+                    sheets = fitting[-1:]
             if len(sheets) != 1:
                 raise AgentFailure(
                     'needs_ai',
