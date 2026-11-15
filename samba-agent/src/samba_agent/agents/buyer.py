@@ -871,20 +871,38 @@ def kr_size(text: str | None) -> str | None:
     return m.group(1) if m else None
 
 
-# 나이키 여성 상의 한국 사이즈표(상품 상세 'SIZE 여성 상의 아시아 사이즈' — 사용자 2026-11-15 롯데온 IM8085-063 화면)
-_NIKE_WOMEN_KR = {'XS': '075', 'S': '080', 'M': '085', 'L': '090', 'XL': '095', 'XXL': '100', '2XL': '100'}
+# 나이키 한국 사이즈표(상품 상세 'SIZE (아시아 사이즈)' 그림 — 사용자 2026-11-15 롯데온 화면 4장)
+#   여성 상의 XS75·S80·M85·L90·XL95·XXL100 / 남성 상의 XS85·S90·M95·L100·XL105·XXL110 / 남성 하의 S75·M80·L85·XL90·XXL95
+_NIKE_KR = {
+    ('W', 'top'): {'XS': '075', 'S': '080', 'M': '085', 'L': '090', 'XL': '095', 'XXL': '100', '2XL': '100'},
+    ('M', 'top'): {'XS': '085', 'S': '090', 'M': '095', 'L': '100', 'XL': '105', 'XXL': '110', '2XL': '110'},
+    ('M', 'bottom'): {'S': '075', 'M': '080', 'L': '085', 'XL': '090', 'XXL': '095', '2XL': '095'},
+}
+_BOTTOM_WORDS = ('팬츠', '타이츠', '레깅스', '쇼츠', '조거', '하의', '바지', '반바지')
+
+
+def nike_size_table(name: str) -> dict[str, str] | None:
+    """상품명으로 나이키 사이즈표를 고른다(여성 하의는 한국 치수 열이 없어 고르지 않는다)."""
+    if '나이키' not in (name or ''):
+        return None
+    bottom = any(w in name for w in _BOTTOM_WORDS)
+    if '여성' in name:
+        return None if bottom else _NIKE_KR[('W', 'top')]
+    if '남성' in name:
+        return _NIKE_KR[('M', 'bottom' if bottom else 'top')]
+    return None
 
 
 def nike_women_size_options(options: list[str], wanted: str | None, name: str) -> list[str]:
-    """나이키 여성 상품에서 주문 글자 사이즈(S)를 숫자 선택지(080)로 — 사이즈표 그대로. 아니면 빈 목록."""
-    if not wanted or '나이키' not in (name or '') or '여성' not in (name or ''):
+    """나이키 상품에서 주문 글자 사이즈(L)를 숫자 선택지(090·100)로 — 그 상품의 사이즈표 그대로. 아니면 빈 목록."""
+    table = nike_size_table(name)
+    if not wanted or table is None:
         return []
-    letters = [t for t in re.split(r'[\s/·]+', wanted.upper()) if t in _NIKE_WOMEN_KR]
+    letters = [t for t in re.split(r'[\s/·]+', wanted.upper()) if t in table]
     if len(letters) != 1:
         return []
-    code = _NIKE_WOMEN_KR[letters[0]]
-    live = [o for o in options if not _sold_out(o) and re.match(rf'\s*{code}(?!\d)', o)]
-    return live
+    code = table[letters[0]]
+    return [o for o in options if not _sold_out(o) and re.match(rf'\s*{code}(?!\d)', o)]
 
 
 def matching_options(options: list[str], wanted: str | None) -> list[str]:
@@ -3636,7 +3654,7 @@ class BuyerAgent(AgentBase):
             return rule
         women = nike_women_size_options(options, wanted, getattr(self, '_sku_name', ''))
         if women:
-            self.note('옵션 선택', mask_text(f'[{wanted}] → {women[0]} (나이키 여성 상의 사이즈표 XS75·S80·M85·L90·XL95·XXL100)'))
+            self.note('옵션 선택', mask_text(f'[{wanted}] → {women[0]} (나이키 상품 사이즈표)'))
             return women
         by_letter = size_letter_options(options, wanted)
         if by_letter:
