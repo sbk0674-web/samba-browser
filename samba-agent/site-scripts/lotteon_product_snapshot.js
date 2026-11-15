@@ -35,8 +35,7 @@ if(!e)return{...r,error:'product-not-found'};
 await page.click(e.id);await wf('바로 구매하기',8000);
 }
 r.product_url=await page.url();{let t=String(await page.title());if(t.includes(' : '))r.product_name=t.split(' : ')[0]}
-for(let k=0;k<8&&!r.seller;k++){let st=await tx('판매자');for(let m of st.matchAll(/(?<!다른\s?)판매자\s*:?\s*([가-힣A-Za-z][가-힣A-Za-z0-9()]{1,19})/g)){if(!/^(서비스|가|에게|정보|센터|구분)/.test(m[1])){r.seller=m[1];break}}if(!r.seller)await SL(1500)}
-if(!r.seller){let ft=(await page.get({})).tree.split('PAGE TEXT')[1]||'';let fm=ft.match(/배송비[^판]{0,30}판매자\s+([가-힣A-Za-z][가-힣A-Za-z0-9()]{1,19})/);if(fm)r.seller=fm[1]}
+for(let k=0;k<8&&!r.seller;k++){let st=(await page.get({})).tree.split('PAGE TEXT')[1]||'';for(let m of st.matchAll(/(?<!다른\s?)판매자\s*:?\s*([가-힣A-Za-z][가-힣A-Za-z0-9()]{1,19})/g)){if(!/^(서비스|가|에게|정보|센터|구분)/.test(m[1])){r.seller=m[1];break}}if(!r.seller)await SL(1500)}
 if(args.required_seller&&(!r.seller||!r.seller.includes(args.required_seller))){r.coupons[AK()]=0;return{...r,error:r.seller?'seller-not-allowed':'seller-read-failed',note:r.seller||null}}
 let am=(await tx('님')).match(/([\w가-힣*]{2,20})\s*님/);r.account=(am&&am[1])||args.account||null;
 let picked=[],pc=true,sg=false,pw=null,cs=false,fb=false;let seen=new Set();let NO='option not matched: ';
