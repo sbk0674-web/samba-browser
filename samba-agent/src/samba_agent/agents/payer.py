@@ -387,15 +387,24 @@ def order_form_mismatch(
     # (실기 2026-11-14 롯데온 나이키 맨투맨 S→085·XS→080 이 'FREE·L·M 만 보인다'로 멈췄다)
     # 고른 옵션 글자에 가격·재고가 붙어 온다('090 41,480 7개 남음') — 맨 앞 숫자 사이즈만 본다
     # (실기 2026-11-15 롯데온 나이키 남성 팬츠 XL→090 이 'FREE·L·M 만 보인다'로 멈췄다)
-    picked_num = re.match(r'\s*0?(\d{2,3})(?:\s+[\d,]+\s*(?:원)?(?:\s.*)?)?\s*$', selected or '')
+    # 주문서에서 되읽은 값은 '상품명 … CZ8831-010 080' 처럼 상품명 뒤에 사이즈가 붙는다 — 끝의 숫자 사이즈를 본다
+    picked_num = re.search(r'(?<![\w-])0?(\d{2,3})(?:\s+[\d,]+\s*(?:원)?(?:\s.*)?)?\s*$', selected or '')
     if ordered_letters and not chosen_letters and picked_num:
         num = int(picked_num.group(1))
         # 주문 옵션에 그 숫자 사이즈가 직접 적혀 있으면('M · KR 70' ↔ '070') 표보다 주문 글자가 우선이다
         # (실기 2026-11-14 롯데온 나이키 여성 요가 팬츠 21315225767713299: 허리 치수 70 을 M 표로 막았다)
         order_nums = {int(n) for n in re.findall(r'(?<![\d.])0?(\d{2,3})(?![\d.])', option or '')}
         allowed = set(order_nums)
-        for letter in ordered_letters:
-            allowed |= _LETTER_KR_SIZES.get(letter, set())
+        # 나이키는 상품 사이즈표가 정해져 있다 — 그 표의 한 값만 허용한다(넓은 표로는 080 이 M 으로 통과했다:
+        # 실기 2026-11-15 롯데온 21315225766753299 여성 M(085)인데 주문서 080 으로 결제됨)
+        from samba_agent.agents.buyer import nike_size_table
+
+        table = nike_size_table(product_name)
+        if table is not None and not order_nums:
+            allowed = {int(table[letter]) for letter in ordered_letters if letter in table}
+        else:
+            for letter in ordered_letters:
+                allowed |= _LETTER_KR_SIZES.get(letter, set())
         if num not in allowed:
             return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {selected.strip()} 이 담겼다'
     elif (
