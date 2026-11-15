@@ -116,6 +116,10 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         # 소싱처 고유 색 이름('PINE')은 글자로 못 맞춘다 — 구매 단계가 그 상품의 선택지에서 고른 것이다
         # (실기 2026-11-13 29CM 21315225592033299 '그린 M · KR 95' ↔ 'PINE [사이즈]095')
         nums = [t for t in got if re.fullmatch(r'\d{2,3}', t)]
+        # 크록스 'M7W9(260mm)' 처럼 사이즈 코드 괄호 안에 한국 치수가 있으면 그 숫자를 쓴다
+        # (실기 2026-11-15 롯데온 21315226262783299 'KR 260' ↔ '멀티 / M7W9(260mm)')
+        if not nums:
+            nums = [m for t in got for m in re.findall(r'^[a-z0-9]+\((\d{3})\)$', t)]
         if len(nums) == 1 and nums[0].lstrip('0') == kr_size.lstrip('0'):
             known = set(_KO_COLOR.values())
             want_colors = {t for t in want if t in known}
