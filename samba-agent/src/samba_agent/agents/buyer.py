@@ -925,6 +925,12 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
         free = [o for o in live if _is_free_size(o)]
         if free:
             return free
+        # 프리사이즈 주문인데 선택지가 색 하나뿐(사이즈 없음) — 그 상품의 유일한 옵션이다(색 이름은 마켓·소싱처가 다르게 적는다)
+        # (실기 2026-11-15 롯데온 뉴에라 '카모플라주 프리 사이즈' ↔ 선택지 '우드랜드 카모' 하나 — 사용자 "대부분 재고 있다")
+        names = {re.sub(r'\s*[\d,]+\s*(?:원)?\s*(?:\d+\s*개\s*남음.*)?$', '', o).strip() for o in live}
+        names.discard('')
+        if len(names) == 1 and not size_numbers(next(iter(names))) and not size_letters(next(iter(names))):
+            return [o for o in live if o.startswith(next(iter(names)))]
     # 선택지가 프리사이즈 하나뿐이고 주문 옵션에 사이즈가 없으면(색상만) 그것이다 — 색상은 상품 자체가 정한다
     # (실기 2026-09-28: 주문 '블랙 & 올리브 그린' ↔ 무신사 선택지 ['FREE'] 를 옵션 불일치로 멈췄다).
     # 상품이 맞는지는 결제 직전 주문서 대조가 다시 본다
