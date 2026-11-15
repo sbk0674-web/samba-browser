@@ -362,6 +362,12 @@ def order_form_mismatch(
     low = text.lower()
     if color_code_conflict(option, selected):
         return '주문 옵션과 선택된 색상 코드가 다르다 — 결제하지 않음'
+    # 주문 옵션의 색 코드(라코스테 'SKB/초콜릿향 3')가 주문서에 없고 주문서엔 다른 색 코드('XFJ(크림)')가 보이면 다른 색이다.
+    # 색·사이즈 2단 선택에서 사이즈만 골라 첫 색으로 결제했다(실기 2026-11-15 롯데온 21315226309723299)
+    order_codes = re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})(?=/|\s|$)', option or '')
+    sheet_codes = set(re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})\(', text))
+    if order_codes and sheet_codes and not any(c in sheet_codes or re.search(rf'(?<![A-Z]){c}(?![A-Z])', text) for c in order_codes):
+        return f'주문 색 코드 {order_codes} 대신 주문서엔 {sorted(sheet_codes)} 가 담겼다 — 결제하지 않음'
     sizes = _sizes(option, selected)
     if sizes and not any(re.search(rf'(?<![\d.]){re.escape(x)}(?![\d.])', text) for x in sizes):
         return f'옵션 {sorted(set(sizes))} 이 주문서에 없다'
