@@ -66,6 +66,8 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 판매 옵션의 '상세 이미지 참조'·'상세페이지 참고' 는 색상 자리를 비운 안내 글자다 — 값이 아니다
     # (실기 2026-11-05 4298 '상세 이미지 참조 L' ↔ 'BLACK · L', 11-04 4153·4162·4202·4261 같은 꼴)
     wanted = re.sub(r'상세\s*(?:이미지|페이지)?\s*(?:참조|참고)', ' ', str(wanted or '')).strip()
+    # 노스페이스 여성 '085(WS)' 의 W 는 여성 표시 — S 로 본다(실기 2026-11-15 21315226315593299 '핑크 S')
+    actual = re.sub(r'(?<=\()W(?=(?:XS|S|M|L|XL|XXL)\))', '', str(actual or ''))
     got, want = _tokens(actual), _tokens(wanted)
     # 낱말이 똑같으면 같은 옵션이다 — 'ONE'(원사이즈)처럼 사이즈 꼴이 아닌 값도(실기 2026-11-03 4111 'LIGHT BEIGE ONE 1개' ↔ 'LIGHT BEIGE · ONE')
     if got and sorted(got) == sorted(want):
