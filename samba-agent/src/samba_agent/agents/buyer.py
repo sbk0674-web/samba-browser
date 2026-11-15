@@ -871,6 +871,22 @@ def kr_size(text: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+# 나이키 여성 상의 한국 사이즈표(상품 상세 'SIZE 여성 상의 아시아 사이즈' — 사용자 2026-11-15 롯데온 IM8085-063 화면)
+_NIKE_WOMEN_KR = {'XS': '075', 'S': '080', 'M': '085', 'L': '090', 'XL': '095', 'XXL': '100', '2XL': '100'}
+
+
+def nike_women_size_options(options: list[str], wanted: str | None, name: str) -> list[str]:
+    """나이키 여성 상품에서 주문 글자 사이즈(S)를 숫자 선택지(080)로 — 사이즈표 그대로. 아니면 빈 목록."""
+    if not wanted or '나이키' not in (name or '') or '여성' not in (name or ''):
+        return []
+    letters = [t for t in re.split(r'[\s/·]+', wanted.upper()) if t in _NIKE_WOMEN_KR]
+    if len(letters) != 1:
+        return []
+    code = _NIKE_WOMEN_KR[letters[0]]
+    live = [o for o in options if not _sold_out(o) and re.match(rf'\s*{code}(?!\d)', o)]
+    return live
+
+
 def matching_options(options: list[str], wanted: str | None) -> list[str]:
     """주문 옵션과 맞는 후보들. 주문 옵션이 없으면 전부 후보다.
 
@@ -2236,6 +2252,7 @@ class BuyerAgent(AgentBase):
 
     def _snapshot(self, a: Assignment, account: str) -> dict[str, object]:
         """그 계정의 스냅샷 — 주문서가 열렸으면 주문서 수량이 주문 수량과 같은지 본다(다르면 사지 않는다)."""
+        self._sku_name = str(a.order.sku or '')
         snap = self._snapshot_any(a, account)
         problem = order_qty_problem(a.order.qty, snap)
         if problem:
@@ -3617,6 +3634,10 @@ class BuyerAgent(AgentBase):
         rule = matching_options(options, wanted)
         if rule or not wanted:
             return rule
+        women = nike_women_size_options(options, wanted, getattr(self, '_sku_name', ''))
+        if women:
+            self.note('옵션 선택', mask_text(f'[{wanted}] → {women[0]} (나이키 여성 상의 사이즈표 XS75·S80·M85·L90·XL95·XXL100)'))
+            return women
         by_letter = size_letter_options(options, wanted)
         if by_letter:
             self.note(
