@@ -1783,6 +1783,26 @@ class PayerAgent(AgentBase):
                         # '배송지 선택 완료되었습니다' 덮개만 남고 '배송지 관리' 창이 열린 채 닫기 단추가 안내되지 않는다
                         # (실기 2026-11-16 754370006007813 라코스테 2회: 키패드 10회 못 찾음). 선택은 이미 주문서에 반영됐다 —
                         # 고른 줄을 바꾸지 않도록 '선택완료'가 아니라 창의 '닫기'만 누른다
+                        # 창 안 단추를 잘림 없이 본다(찾기 도구는 덮개 밖 '닫기'(6795)를 줘 10번 눌러도 안 닫혔다 — 11-16 3회차)
+                        try:
+                            # 창 안 주소 줄이 수백 개라 150개 목록이 잘린다 — 창 범위(selector) + 글자(query)로 좁혀 읽는다
+                            inner = ' '.join(
+                                str(self.tool('get_page', selector='[role=dialog]', query=q))
+                                for q in ('닫기', '취소', '이전', '선택완료')
+                            )
+                            btns = [
+                                (int(m.group(1)), m.group(2))
+                                for m in re.finditer(r'\[(\d+)\] button "([^"]{1,12})"', inner)
+                                if m.group(2) not in ('수정', '삭제')
+                            ]
+                            self.note('배송지 관리 창 단추', mask_text(str(btns[-12:])[:300]))
+                            shut = [i for i, t in btns if re.fullmatch(r'닫기|레이어 닫기|팝업 닫기|close|X|취소|이전', t, re.IGNORECASE)]
+                            if shut:
+                                self.tool('click', id=shut[-1])
+                                self.tool('wait', ms=1500)
+                                self.note('배송지 관리 창', f'창 안 닫기 단추 누름({shut[-1]})')
+                        except AgentFailure as e:
+                            self.note('배송지 관리 창', mask_text(f'창 단추 읽기 실패: {e.reason}'[:120]))
                         dlg = re.search(r'\[(\d+)\] dialog "배송지 관리', box)
                         closes = [
                             int(m.group(1))
