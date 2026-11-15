@@ -385,7 +385,9 @@ def order_form_mismatch(
     # 구매가 글자 사이즈를 한국 숫자 사이즈로 골랐다(나이키 여성 S → '085') — 글자↔숫자 표로 맞는지 본다.
     # 주문서 화면 전체 글자(검색어·L.POINT 등)에서 S·M·L 을 줍는 아래 대조는 이 경우 엉뚱한 글자로 막는다
     # (실기 2026-11-14 롯데온 나이키 맨투맨 S→085·XS→080 이 'FREE·L·M 만 보인다'로 멈췄다)
-    picked_num = re.fullmatch(r'\s*0?(\d{2,3})\s*', selected or '')
+    # 고른 옵션 글자에 가격·재고가 붙어 온다('090 41,480 7개 남음') — 맨 앞 숫자 사이즈만 본다
+    # (실기 2026-11-15 롯데온 나이키 남성 팬츠 XL→090 이 'FREE·L·M 만 보인다'로 멈췄다)
+    picked_num = re.match(r'\s*0?(\d{2,3})(?:\s+[\d,]+\s*(?:원)?(?:\s.*)?)?\s*$', selected or '')
     if ordered_letters and not chosen_letters and picked_num:
         num = int(picked_num.group(1))
         # 주문 옵션에 그 숫자 사이즈가 직접 적혀 있으면('M · KR 70' ↔ '070') 표보다 주문 글자가 우선이다
