@@ -360,7 +360,16 @@ class GiftFollowup:
                 if not saved_no or saved_no != expected_no:
                     raise GiftFollowupStopped('현재 소싱 주문번호 불일치 — 선물 수락 금지')
             verified = self._check(task, before_phone)
-            if not verified and task.get('phase') == 'accept':
+            if not verified and task.get('phase') == 'verify':
+                # 수락 도중 하네스가 재시작되면 'verify' 로 남아 확인만 되풀이하고 수락을 다시 안 눌렀다
+                # (실기 2026-11-15 2026111579BDC1: 원본 '결제완료'·수락 없음인데 확인만 5회). 원본이 두 번 연속
+                # 수락 없음이면 수락 단계로 되돌린다 — 수락 화면도 '이미 받은 선물'이면 다시 누르지 않는다
+                task['verify_misses'] = int(task.get('verify_misses', 0)) + 1
+                if task['verify_misses'] >= 2:
+                    task['phase'] = 'accept'
+                    task['verify_misses'] = 0
+                self._save(job, task)
+            elif not verified and task.get('phase') == 'accept':
                 # 수락 직후 프로세스가 죽으면 먼저 원본만 재확인한다. 무조건 다시 누르지 않는다.
                 task['phase'] = 'verify'
                 self._save(job, task)
