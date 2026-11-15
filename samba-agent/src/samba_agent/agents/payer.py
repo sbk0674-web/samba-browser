@@ -1803,6 +1803,21 @@ class PayerAgent(AgentBase):
                                 self.note('배송지 관리 창', f'창 안 닫기 단추 누름({shut[-1]})')
                         except AgentFailure as e:
                             self.note('배송지 관리 창', mask_text(f'창 단추 읽기 실패: {e.reason}'[:120]))
+                        if attempt == 1:
+                            # 창을 닫아도 '결제하기'가 키패드를 못 띄웠다(11-16 3회) — 결제하기를 한 번 더 누르고 결과를 남긴다.
+                            # 비밀번호 없이는 결제가 끝나지 않으니 다시 눌러도 이중 결제가 아니다. 덮개에 막히면 진짜 마우스 클릭으로
+                            try:
+                                pay_id = _element_id(self.tool('find_elements', query='결제하기'))
+                                if pay_id is not None:
+                                    r1 = str(self.tool('click', id=pay_id, label='결제하기'))
+                                    self.note('결제하기 재클릭', mask_text(r1[:160]))
+                                    self.tool('wait', ms=3000)
+                                    if not re.search(r'L\.PAY 비밀번호', str(self.tool('find_elements', query='비밀번호'))):
+                                        r2 = str(self.tool('run_js', code=f'return String(await page.clickNative({pay_id}))'))
+                                        self.note('결제하기 마우스클릭', mask_text(r2[:160]))
+                                        self.tool('wait', ms=3000)
+                            except AgentFailure as e:
+                                self.note('결제하기 재클릭', mask_text(f'실패: {e.reason}'[:120]))
                         dlg = re.search(r'\[(\d+)\] dialog "배송지 관리', box)
                         closes = [
                             int(m.group(1))
