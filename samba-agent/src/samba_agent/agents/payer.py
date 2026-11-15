@@ -437,7 +437,12 @@ def order_form_mismatch(
     #    흔한 말 제외)이 대부분 있으면 같은 상품이다. 삼바 상품명은 한글 설명('통기성 커플샌들 빅 로우'), ABC 주문서는
     #    영문명('BIG NIKE LOW')뿐이라 단어로는 못 맞춘다(실기 2026-09-28 B15960)
     if trust_site:
-        toks = [c for c in site_tokens if len(c) >= 3 and not c.isdigit()]
+        # 한글은 두 글자도 고유 단어다('반팔') — 영문은 세 글자부터(실기 2026-11-15 무신사 21315226263283299
+        # 'THE NORTH FACE NT7US00A 메라피크 반팔 티' 주문서인데 반팔을 빼 2/5 로 막았다)
+        toks = [
+            c for c in site_tokens
+            if not c.isdigit() and (len(c) >= 3 or (len(c) >= 2 and re.search(r'[가-힣]', c)))
+        ]
         if toks and sum(1 for c in toks if c in compact_text) >= max(1, (len(toks) + 1) // 2):
             return None
     # 6) 삼바 상품명의 영문·숫자 낱말(모델명 'ZX 500 RS')이 두 개 이상이고 모두 주문서에 따로 보이면 같은 상품이다 — 한글
