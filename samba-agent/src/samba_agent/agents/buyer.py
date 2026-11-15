@@ -2589,7 +2589,8 @@ class BuyerAgent(AgentBase):
                 if (
                     a.order.option
                     and not re.search(r'[가-힣]{2,}|[A-Za-z]{3,}', re.sub(r'\([^)]*\)', '', chosen))
-                    and re.search(r'[가-힣]{2,}|[A-Z]{3}', str(a.order.option))
+                    # 한글 색 이름('블랙')만 있으면 붙이지 않는다 — 상품정보 줄('색상 블랙 치수 90~110')이 선택지로 잡혀 110 이 골라졌다
+                    and re.search(r'(?<![A-Za-z0-9])[A-Z]{3}(?=/|\s|$)', str(a.order.option))
                 ):
                     chosen = f'{a.order.option} {chosen}'
             if chosen and chosen != a.order.option:
