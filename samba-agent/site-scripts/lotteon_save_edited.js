@@ -62,7 +62,7 @@ if(!found)return{ok:false,note:'저장한 배송지 줄 없음('+dbg+')'};
 if(!r)return{ok:false,note:'저장한 줄의 이름·주소 확인 불가'};
 await page.click(r.id);await sleep(600);
 if(!(await RQ()).some(e=>e.id===r.id&&e.value==='on'))return{ok:false,note:'배송지 줄 선택 안 됨'};
-const ok=pe((await page.get({query:'선택완료'})).tree).concat(pe((await page.get({query:'확인'})).tree)).filter(e=>e.role==='button'&&/^(선택완료|확인)$/.test(e.text))[0];
+const ok=pe((await page.get({query:'선택완료'})).tree).concat(pe((await page.get({query:'확인'})).tree)).filter(e=>e.role==='button'&&/^(선택완료|확인)$/.test(e.text)).sort((x,y)=>(x.id<r.id)-(y.id<r.id)||(x.text>y.text)-(x.text<y.text)||x.id-y.id)[0];
 if(!ok)return{ok:false,note:'확인 버튼 없음'};
 await page.click(ok.id);
 try{await page.waitFor('빠른 선물',8000);}catch(e){await sleep(1800);}
