@@ -92,6 +92,14 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
             nums = [t for t in rest if re.search(r'\d', t)]
             if all(t.lstrip('0') == m.group(2).lstrip('0') for t in nums):
                 return True
+    # 라코스테: 주문 'XFJ/크림 화이트 5' ↔ 상세 'XFJ(크림) / 005(105)' — 색 코드(영문 3자)가 같고 한 자리 사이즈가 '00N(…)' 이면 같다
+    # (실기 2026-11-16 롯데온 21315226568623299 맞게 샀는데 불일치로 멈춤)
+    codes_w = {t for t in want if re.fullmatch(r'[a-z]{3}', t)}
+    codes_g = {m.group(1) for t in got for m in [re.match(r'([a-z]{3})\(', t)] if m}
+    one_w = [t for t in want if re.fullmatch(r'\d', t)]
+    lac_g = [m.group(1) for t in got for m in [re.fullmatch(r'0*(\d)\(\d{2,3}\)', t)] if m]
+    if codes_w and codes_w == codes_g and len(one_w) == 1 and lac_g == one_w:
+        return True
     # 상세가 사이즈 하나('2')뿐이고 주문은 '색 + 그 사이즈'('화이트 2') — 색 선택지가 없는 단일 색 상품이다(지정 상품 주소에서 산 것)
     # (실기 2026-11-15 무신사 21315226170523299)
     # 주문 'ONE FREE' 는 낱말이 둘 다 'free' 가 되어 나머지가 비었다 — IndexError 로 검증이 죽었다(실기 2026-11-16 754378461691916)
