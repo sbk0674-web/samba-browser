@@ -2584,6 +2584,14 @@ class BuyerAgent(AgentBase):
                 # 선택지 글자에 붙은 가격·재고('090 41,480 7개 남음')는 옵션 이름이 아니다 — 스크립트가 가격 조각 '41,480' 으로
                 # 같은 가격의 첫 옵션(080)을 골라 주문서가 다른 사이즈로 열렸다(실기 2026-11-15 롯데온 나이키 2건)
                 chosen = re.sub(r'\s+[\d,]{4,}\s*원?(?:\s.*)?$', '', chosen).strip() or chosen
+                # 고른 값이 사이즈뿐('003(95)')이면 주문 옵션의 색('SKB/초콜릿향')을 앞에 붙여 넘긴다 — 색·사이즈 2단 선택에서
+                # 색 칸을 못 맞춰 첫 색(XFJ 크림)으로 결제했다(실기 2026-11-15 롯데온 라코스테 21315226309723299)
+                if (
+                    a.order.option
+                    and not re.search(r'[가-힣]{2,}|[A-Za-z]{3,}', re.sub(r'\([^)]*\)', '', chosen))
+                    and re.search(r'[가-힣]{2,}|[A-Z]{3}', str(a.order.option))
+                ):
+                    chosen = f'{a.order.option} {chosen}'
             if chosen and chosen != a.order.option:
                 self.note('옵션 재선택', mask_text(f'[{a.order.option}] → [{chosen}] 로 다시 연다'))
                 reselected: dict[str, str] = getattr(self, '_reselected', {})
