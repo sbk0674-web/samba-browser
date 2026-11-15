@@ -414,7 +414,7 @@ def order_form_mismatch(
         # 고른 옵션의 세 자리 코드가 주문 옵션에 그대로 있으면('006(110)' ↔ 주문 '… 006/XL') 같은 사이즈다
         # (실기 2026-11-15 롯데온 라코스테 21315226153063299 가 'FREE·L·M 만 보인다'로 멈췄다)
         and not (
-            (code := re.match(r'\s*(\d{3})\(', selected or ''))
+            (code := re.search(r'(?<![\w-])(\d{3})\(', selected or ''))
             and re.search(rf'(?<!\d){code.group(1)}(?!\d)', option or '')
         )
     ):
