@@ -1779,6 +1779,23 @@ class PayerAgent(AgentBase):
                         self.tool('click', id=int(hit.group(1)))
                         self.tool('wait', ms=1200)
                         self.note('배송지 선택 창', f'키패드를 가려 닫음({hit.group(1)})')
+                    elif 'OVERLAY: "배송지 선택 완료' in box or re.search(r'dialog "배송지 관리', box):
+                        # '배송지 선택 완료되었습니다' 덮개만 남고 '배송지 관리' 창이 열린 채 닫기 단추가 안내되지 않는다
+                        # (실기 2026-11-16 754370006007813 라코스테 2회: 키패드 10회 못 찾음). 선택은 이미 주문서에 반영됐다 —
+                        # 고른 줄을 바꾸지 않도록 '선택완료'가 아니라 창의 '닫기'만 누른다
+                        dlg = re.search(r'\[(\d+)\] dialog "배송지 관리', box)
+                        closes = [
+                            int(m.group(1))
+                            for m in re.finditer(r'\[(\d+)\] button "닫기"', str(self.tool('find_elements', query='닫기')))
+                        ]
+                        if dlg:
+                            closes = [c for c in closes if c > int(dlg.group(1))] or closes
+                        if closes:
+                            self.tool('click', id=closes[0])
+                            self.tool('wait', ms=1200)
+                            self.note('배송지 관리 창', f'키패드를 가려 닫기 누름({closes[0]})')
+                        else:
+                            self.note('배송지 관리 창', '닫기 단추 없음')
                 except AgentFailure as e:
                     self.note('배송지 선택 창', mask_text(f'닫기 실패: {e.reason}'[:120]))
                 try:
