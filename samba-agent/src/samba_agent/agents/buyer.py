@@ -2580,6 +2580,10 @@ class BuyerAgent(AgentBase):
                 if resolved is not None:
                     chosen = resolved
                     self.note('옵션 선택', f'{resolved} — {picked.reason}')
+            if chosen:
+                # 선택지 글자에 붙은 가격·재고('090 41,480 7개 남음')는 옵션 이름이 아니다 — 스크립트가 가격 조각 '41,480' 으로
+                # 같은 가격의 첫 옵션(080)을 골라 주문서가 다른 사이즈로 열렸다(실기 2026-11-15 롯데온 나이키 2건)
+                chosen = re.sub(r'\s+[\d,]{4,}\s*원?(?:\s.*)?$', '', chosen).strip() or chosen
             if chosen and chosen != a.order.option:
                 self.note('옵션 재선택', mask_text(f'[{a.order.option}] → [{chosen}] 로 다시 연다'))
                 reselected: dict[str, str] = getattr(self, '_reselected', {})
