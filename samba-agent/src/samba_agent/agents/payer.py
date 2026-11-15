@@ -372,7 +372,9 @@ def order_form_mismatch(
     # (실기 2026-10-24 무신사 3060: 주문서 XL 이 맞는데 ['FREE','XL'] 주문이라며 결제를 막았다)
     if len(ordered_letters) > 1:
         ordered_letters = ordered_letters - {'FREE', 'ONE'} or ordered_letters
-    chosen_letters = size_letters(selected or '')
+    # 노스페이스 여성 표기 '085(WS)'·'090(WM)' 의 W 는 여성(Women) 표시다 — WS 는 S
+    # (실기 2026-11-15 롯데온 21315226315593299 '핑크 S' ↔ '085(WS)' 가 'FREE·L·M 만 보인다'로 멈췄다)
+    chosen_letters = size_letters(re.sub(r'(?<=\()W(?=(?:XS|S|M|L|XL|XXL)\))', '', selected or ''))
     # 선택 글자에 상품명 속 글자(예: 'M Logo' 의 M)가 섞여 들어온 경우 — 주문 사이즈가 그 안에 있으면 상품명 글자는 뺀다
     # (실기 2026-10-21 무신사 지프 맨투맨: 주문 S, 상품명 'M Logo' → ['M','S'] 로 읽혀 멈췄다)
     if ordered_letters and ordered_letters < chosen_letters:
