@@ -83,6 +83,15 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         split = _tokens(re.sub(r'(?<=[a-z가-힣])-(?=[a-z0-9가-힣])', ' ', str(actual or ''), flags=re.IGNORECASE))
         if split != got and sorted(split) == sorted(want):
             return True
+    # 상세가 '글자(숫자)' 한 덩어리('XS(085)')뿐이고 주문은 '색 + 글자/숫자'('레드 XS/85') — 글자가 같고 주문 숫자가 괄호 숫자와 같으면 같다
+    # 색은 지정 상품 주소가 정한다(실기 2026-11-16 롯데온 21315226497583299 휠라 RED 상품에서 XS(085) 맞게 샀는데 불일치로 멈춤)
+    if len(got) == 1:
+        m = re.fullmatch(r'(\d?x{0,3}[sml])\((\d{2,3})\)', got[0])
+        if m and m.group(1) in want:
+            rest = [t for t in want if t != m.group(1)]
+            nums = [t for t in rest if re.search(r'\d', t)]
+            if all(t.lstrip('0') == m.group(2).lstrip('0') for t in nums):
+                return True
     # 상세가 사이즈 하나('2')뿐이고 주문은 '색 + 그 사이즈'('화이트 2') — 색 선택지가 없는 단일 색 상품이다(지정 상품 주소에서 산 것)
     # (실기 2026-11-15 무신사 21315226170523299)
     if len(got) == 1 and len(want) == 2 and got[0] in want and not re.search(r'\d', [t for t in want if t != got[0]][0]):
