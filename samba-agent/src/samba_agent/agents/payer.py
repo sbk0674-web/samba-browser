@@ -1262,8 +1262,10 @@ class PayerAgent(AgentBase):
         if tab is not None:
             # 탭을 눌러도 QR 화면이 그대로일 때가 있다(창이 늦게 뜸) — 휴대폰번호 칸이 보일 때까지 세 번까지 다시 누른다
             # (실기 2026-11-16 29CM 21315226677313299: 'QR결제' 글자만 남아 '카톡결제 칸 없음'으로 멈춤)
-            for _ in range(3):
-                self.tool('click', id=tab)
+            for _try in range(4):
+                # 탭 요소를 눌러도 안 넘어가는 창이 있다(29CM 결제창) — 한 번 걸러 안쪽 글자 요소를 누른다
+                inner = _element_id_of(page, r'clickable "카톡결제"')
+                self.tool('click', id=inner if (_try % 2 and inner is not None) else tab)
                 self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
                 page = self.tool('get_page')
                 if _element_id_of(page, r'textbox "휴대폰번호"') is not None:

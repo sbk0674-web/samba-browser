@@ -69,6 +69,10 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
     # 노스페이스 여성 '085(WS)' 의 W 는 여성 표시 — S 로 본다(실기 2026-11-15 21315226315593299 '핑크 S')
     actual = re.sub(r'(?<=\()W(?=(?:XS|S|M|L|XL|XXL)\))', '', str(actual or ''))
     got, want = _tokens(actual), _tokens(wanted)
+    # 옵션이 하나뿐인 상품은 상세에 '단일상품'으로만 나온다 — 주문 옵션이 색 + FREE(사이즈 숫자 없음)면 같은 것이다
+    # (실기 2026-11-16 롯데온 754370006007813 '블랙(000) FREE'·754456014405654 '블랙 FREE' ↔ '단일상품')
+    if got == ['단일상품'] and 'free' in want and not any(re.fullmatch(r'\d{2,3}', t) for t in want):
+        return True
     # 낱말이 똑같으면 같은 옵션이다 — 'ONE'(원사이즈)처럼 사이즈 꼴이 아닌 값도(실기 2026-11-03 4111 'LIGHT BEIGE ONE 1개' ↔ 'LIGHT BEIGE · ONE')
     if got and sorted(got) == sorted(want):
         return True
