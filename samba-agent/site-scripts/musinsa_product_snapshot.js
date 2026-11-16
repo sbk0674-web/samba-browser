@@ -55,7 +55,7 @@ ln=await it()
 let ids=L=>af(L).filter(l=>AR.test(l)).map(ID)
 let ri=ids(ln),R=await sf(rd1,[])
 if(!R.length||R.length<ri.length){R=rd2(ln);ri=R.map(r=>r.id)}
-op=R.filter(r=>!/선택\s?안함$/.test(r.name)).map(r=>r.name+(r.so?' (품절)':''))
+op=op[0]?op:R.filter(r=>!/선택\s?안함$/.test(r.name)).map(r=>r.name+(r.so?' (품절)':''))
 let txo=!ri.length&&R.length&&!R.some(r=>/^\(옵션\d+\)$/.test(r.name)),ot=KM&&!R.some(r=>/\d{2,3}/.test(r.name))?KM:oz
 let best=-1,bs=0
 R.forEach((r,i)=>{
