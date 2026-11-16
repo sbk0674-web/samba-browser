@@ -8,6 +8,7 @@
 """
 
 import json
+import time
 
 from samba_agent.agents.base import AgentBase, AgentFailure, Decision, run_agent, split_page_dialogs
 from samba_agent.agents.contracts import AgentResult, Assignment
@@ -101,6 +102,10 @@ def _normalize(field: str, value: object) -> object:
         return value.strip()
     return value
 
+
+
+# 삼바웨이브 재배포(502·시간 초과) 동안 기입을 다시 해 보는 간격(초)
+RECORD_RETRY_WAIT_S = 20
 
 
 class RecorderAgent(AgentBase):
@@ -483,31 +488,44 @@ class RecorderAgent(AgentBase):
         if self.read_actual_cost:
             self._apply_actual_cost(a, values, sourcing_no)
         self.step('recorder: 삼바웨이브 기입')
-        try:
-            self._wave.record_sourcing(  # type: ignore[union-attr]
-                # 행 id 로 기입한다 — 같은 상품주문번호의 다른 행(다른 사이즈)에 적히지 않게
-                a.order.wave_key,
-                sourcing_order_number=sourcing_no,
-                cost=float(values.get('real_price') or 0),
-                shipping_fee=float(values.get('shipping_fee') or 0),
-                # 주문계정은 실제로 산 계정이다 — 주문에 미리 잡힌 계정과 다를 수 있다(실기: buyer05 주문을
-                # 플레이북대로 buyer01 으로 삼). 못 찾으면 주문이 들고 온 값
-                sourcing_account_id=self._bought_account_id(a),
-                # 간단메모는 정해진 한 줄(계정·수단·실결제·원가) — LLM 문장을 싣지 않는다.
-                # 도착예정일이 3일을 넘으면 그 줄을 하나 더 붙인다(사용자 2026-09-30)
-                notes=wave_notes(a, values) + (f'\n{memo}' if (memo := _arrival_memo(a, values)) else ''),
-                order_type=_order_type_value(a.expected.get('order_type')),
-                # 재구매(작업 옵션 rebuy_of) — 취소한 소싱주문번호를 새 번호로 덮어쓴다
-                replace=bool(str(a.options.get('rebuy_of') or '').strip()),
-            )
-            self.step('recorder: 기입 확인')
-            # 되읽기도 행 id 로 — 행 id 가 없는 옛 접수는 소싱주문번호로 방금 적은 행을 고른다
-            saved = self._wave.get_order(  # type: ignore[union-attr]
-                a.order.wave_key, sourcing_order_number=sourcing_no
-            )
-        except WaveError as e:
-            status = 'needs_ai' if e.reason is FailReason.DUPLICATE else 'fail'
-            raise AgentFailure(status, f'삼바웨이브 기입 실패(재결제 금지): {e}', e.reason) from e
+        # 결제는 이미 끝났다 — 삼바웨이브가 재배포 중이면(502·시간 초과) 기입만 여러 번 다시 한다.
+        # 예전엔 한 번 실패하면 bridge_down 으로 넘어가 5분 뒤 작업이 처음부터 다시 돌아 두 번 결제됐다
+        # (실기 2026-11-16 20261113101940550:001 무신사 네파: 202611161036150002·202611161053560002 중복 결제)
+        for _try in range(9):
+            try:
+                self._wave.record_sourcing(  # type: ignore[union-attr]
+                    # 행 id 로 기입한다 — 같은 상품주문번호의 다른 행(다른 사이즈)에 적히지 않게
+                    a.order.wave_key,
+                    sourcing_order_number=sourcing_no,
+                    cost=float(values.get('real_price') or 0),
+                    shipping_fee=float(values.get('shipping_fee') or 0),
+                    # 주문계정은 실제로 산 계정이다 — 주문에 미리 잡힌 계정과 다를 수 있다(실기: buyer05 주문을
+                    # 플레이북대로 buyer01 으로 삼). 못 찾으면 주문이 들고 온 값
+                    sourcing_account_id=self._bought_account_id(a),
+                    # 간단메모는 정해진 한 줄(계정·수단·실결제·원가) — LLM 문장을 싣지 않는다.
+                    # 도착예정일이 3일을 넘으면 그 줄을 하나 더 붙인다(사용자 2026-09-30)
+                    notes=wave_notes(a, values) + (f'\n{memo}' if (memo := _arrival_memo(a, values)) else ''),
+                    order_type=_order_type_value(a.expected.get('order_type')),
+                    # 재구매(작업 옵션 rebuy_of) — 취소한 소싱주문번호를 새 번호로 덮어쓴다
+                    replace=bool(str(a.options.get('rebuy_of') or '').strip()),
+                )
+                self.step('recorder: 기입 확인')
+                # 되읽기도 행 id 로 — 행 id 가 없는 옛 접수는 소싱주문번호로 방금 적은 행을 고른다
+                saved = self._wave.get_order(  # type: ignore[union-attr]
+                    a.order.wave_key, sourcing_order_number=sourcing_no
+                )
+                break
+            except WaveError as e:
+                transient = e.reason is FailReason.BRIDGE_DOWN or getattr(e, 'status', None) in (502, 503, 504)
+                if transient and _try < 8:
+                    self.note('삼바웨이브 대기', f'응답 없음({_try + 1}/9) — 20초 뒤 다시')
+                    time.sleep(RECORD_RETRY_WAIT_S)
+                    continue
+                # 결제는 끝났다 — 중복 번호(409)가 아니면 '결제 완료·기입만 실패'로 넘긴다(자동 재시도가 다시 사지 않게)
+                reason = e.reason if e.reason is FailReason.DUPLICATE else FailReason.PAY_INTERRUPTED
+                raise AgentFailure(
+                    'needs_ai', f'삼바웨이브 기입 실패(결제 완료·재결제 금지 — 소싱주문번호 {sourcing_no}): {e}', reason
+                ) from e
 
         # 응답이 돌려주는 필드만 대조한다 — 목록 모델에 없는 값(소싱주문번호 등)은 확인할 수 없다.
         # PUT 이 200 이면 저장은 된 것이고, 다른 번호가 있었다면 409 로 막혔다
