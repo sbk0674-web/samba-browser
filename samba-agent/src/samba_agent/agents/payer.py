@@ -34,10 +34,10 @@ from samba_agent.wave.client import WaveClient, WaveError
 # 결제 성공을 확인하는 문구. 이걸 보기 전에는 ok 를 내지 않는다(브리프 §완료조건)
 # a-rt.com 주문내역 첫 주문(번호·일시·금액)을 읽는 run_js 본문 — 탭 열기 다음에 붙인다
 _ART_RECENT_ORDER_JS = (
-    "await sleep(4000)\n"
+    'await sleep(4000)\n'
     "const t = ((await page.get({})).tree.split('PAGE TEXT:')[1] || '').replace(/\\s+/g, ' ')\n"
-    "const m = t.match(/주문번호 (\\d{10,}) 주문일시 (\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d) 총 결제금액 ([\\d,]+) 원/)\n"
-    "return JSON.stringify(m ? { no: m[1], at: m[2], amount: m[3] } : {})"
+    'const m = t.match(/주문번호 (\\d{10,}) 주문일시 (\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d) 총 결제금액 ([\\d,]+) 원/)\n'
+    'return JSON.stringify(m ? { no: m[1], at: m[2], amount: m[3] } : {})'
 )
 # 29CM 결제 확인 폴백 — 주문내역에서 방금 생긴 결제완료 주문을 찾는 앱 저장 스크립트(읽기만)
 CM29_RECENT_ORDER_SCRIPT = 'cm29_recent_order'
@@ -49,33 +49,33 @@ LOTTECARD_HOST = 'lottecard.co.kr'
 # 롯데카드 결제창에서 로카페이(앱카드) [결제하기]를 눌러 7자리 숫자코드를 읽는 run_js 본문.
 # 첫 화면: "로카페이(앱카드) 추천 … 결제하기 / 다른 결제" → 누르면 "숫자코드 입력 NNNNNNN 잔여시간 09:59 … [결제 완료]"
 _LOTTECARD_CODE_JS = (
-    "const L = await tabs.list()\n"
+    'const L = await tabs.list()\n'
     "const p = L.filter(t => /lottecard\\.co\\.kr/.test(t.url || '')).pop()\n"
     "if (!p) return JSON.stringify({ code: null, note: 'no lottecard window' })\n"
-    "await tabs.switch(p.id)\n"
+    'await tabs.switch(p.id)\n'
     "let T = String((await page.get({})).tree || '')\n"
-    "if (!/숫자코드/.test(T)) {\n"
-    "  const b = T.match(/^\\[(\\d+)\\] button \"결제하기\"/m)\n"
+    'if (!/숫자코드/.test(T)) {\n'
+    '  const b = T.match(/^\\[(\\d+)\\] button "결제하기"/m)\n'
     "  if (!b) return JSON.stringify({ code: null, note: 'no appcard button', text: (T.split('PAGE TEXT')[1] || '').slice(0, 200) })\n"
-    "  await page.click(parseInt(b[1]))\n"
+    '  await page.click(parseInt(b[1]))\n'
     "  for (let i = 0; i < 10 && !/숫자코드/.test(T); i++) { await sleep(1500); T = String((await page.get({})).tree || '') }\n"
-    "}\n"
+    '}\n'
     "const txt = (T.split('PAGE TEXT')[1] || T).replace(/\\s+/g, ' ')\n"
-    "const m = txt.match(/숫자코드 ?입력 ?(\\d{4,12})/)\n"
-    "const left = (txt.match(/잔여시간 ?(\\d{1,2}:\\d{2})/) || [])[1] || null\n"
-    "return JSON.stringify({ code: m ? m[1] : null, left, note: m ? null : txt.slice(0, 200) })"
+    'const m = txt.match(/숫자코드 ?입력 ?(\\d{4,12})/)\n'
+    'const left = (txt.match(/잔여시간 ?(\\d{1,2}:\\d{2})/) || [])[1] || null\n'
+    'return JSON.stringify({ code: m ? m[1] : null, left, note: m ? null : txt.slice(0, 200) })'
 )
 # 폰 승인 뒤 롯데카드 결제창의 [결제 완료](payCheck)를 누르는 run_js 본문 — 눌러야 주문서가 주문 완료로 넘어간다
 _LOTTECARD_DONE_JS = (
-    "const L = await tabs.list()\n"
+    'const L = await tabs.list()\n'
     "const p = L.filter(t => /lottecard\\.co\\.kr/.test(t.url || '')).pop()\n"
     "if (!p) return JSON.stringify({ clicked: false, note: 'window already closed' })\n"
-    "await tabs.switch(p.id)\n"
+    'await tabs.switch(p.id)\n'
     "const T = String((await page.get({})).tree || '')\n"
-    "const b = T.match(/^\\[(\\d+)\\] (?:link|button|clickable) \"결제 ?완료\"/m)\n"
+    'const b = T.match(/^\\[(\\d+)\\] (?:link|button|clickable) "결제 ?완료"/m)\n'
     "if (!b) return JSON.stringify({ clicked: false, note: (T.split('PAGE TEXT')[1] || '').slice(0, 160) })\n"
-    "await page.click(parseInt(b[1])); await sleep(4000)\n"
-    "return JSON.stringify({ clicked: true })"
+    'await page.click(parseInt(b[1])); await sleep(4000)\n'
+    'return JSON.stringify({ clicked: true })'
 )
 # 페이코 PC 결제창: 정보제공동의 체크박스를 켜고 '결제' 링크를 누르는 run_js 본문(탭 전환 다음에 붙인다)
 _PAYCO_AGREE_PAY_JS = (
@@ -83,25 +83,25 @@ _PAYCO_AGREE_PAY_JS = (
     # 동의가 켜진 게 확인될 때만 '결제'를 누른다
     # 카드 고르기 — 결제창은 마지막에 쓴 카드를 띄운다(실기 2026-09-28: 떠 있던 삼성카드로 2건 결제, 청구할인 없음).
     # 견적이 고른 카드(WANT, 차이 없으면 현대카드)가 보일 때까지 '다음'으로 넘기고, 못 찾으면 결제를 누르지 않는다
-    "let picked = null; const seen = []\n"
-    "for (let k = 0; k < 12 && !picked; k++) {\n"
-    "  const t0 = (await page.get({})).tree\n"
-    "  const cards = [...new Set([...t0.matchAll(/([가-힣A-Za-z]+카드)\\s*\\(\\d{4}\\)/g)].map(m => m[1]))]\n"
+    'let picked = null; const seen = []\n'
+    'for (let k = 0; k < 12 && !picked; k++) {\n'
+    '  const t0 = (await page.get({})).tree\n'
+    '  const cards = [...new Set([...t0.matchAll(/([가-힣A-Za-z]+카드)\\s*\\(\\d{4}\\)/g)].map(m => m[1]))]\n'
     "  seen.push(cards.join('|'))\n"
-    "  if (cards.length === 1 && WANT.some(w => cards[0].includes(w))) { picked = cards[0]; break }\n"
-    "  const nx = (await page.get({ interactive: true })).tree.match(/\\[(\\d+)\\] (?:link|clickable|button) \"다음\"/)\n"
-    "  if (!nx) break\n"
-    "  await page.click(parseInt(nx[1])); await sleep(900)\n"
-    "}\n"
+    '  if (cards.length === 1 && WANT.some(w => cards[0].includes(w))) { picked = cards[0]; break }\n'
+    '  const nx = (await page.get({ interactive: true })).tree.match(/\\[(\\d+)\\] (?:link|clickable|button) "다음"/)\n'
+    '  if (!nx) break\n'
+    '  await page.click(parseInt(nx[1])); await sleep(900)\n'
+    '}\n'
     "if (!picked) return JSON.stringify({ clicked: false, agreed: null, note: 'card-not-found', seen })\n"
     "const agreed = await page.check('전체 동의')\n"
     "if (agreed !== 'checked' && agreed !== 'already') return JSON.stringify({ clicked: false, agreed })\n"
-    "await sleep(500)\n"
-    "const tr = (await page.get({ interactive: true })).tree\n"
-    "const pay = tr.match(/\\[(\\d+)\\] (?:link|clickable|button) \"결제\"/)\n"
+    'await sleep(500)\n'
+    'const tr = (await page.get({ interactive: true })).tree\n'
+    'const pay = tr.match(/\\[(\\d+)\\] (?:link|clickable|button) "결제"/)\n'
     "if (!pay) return JSON.stringify({ clicked: false, agreed, note: 'no pay link' })\n"
-    "await page.click(parseInt(pay[1])); await sleep(1500)\n"
-    "return JSON.stringify({ clicked: true, agreed, card: picked })"
+    'await page.click(parseInt(pay[1])); await sleep(1500)\n'
+    'return JSON.stringify({ clicked: true, agreed, card: picked })'
 )
 # 페이코 결제창 카드 이름 조각 — 견적 카드 글자에서 카드사를 찾는다(농협은 'NH농협카드'·'농축협카드' 둘 다)
 _PAYCO_ISSUERS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -127,10 +127,21 @@ def payco_card_names(card: str) -> tuple[str, ...]:
             return names
     return ('현대',)
 
+
 # 롯데온 선물 주문 완료 화면은 '…님께 선물을 보냈어요' 뿐이다 — 결제·주문 완료 글자가 없다(실기 2026-11-04 750185764110345)
-PAY_SUCCESS_MARKERS = ('결제 완료', '결제완료', '주문완료', '주문 완료', '주문이 완료', 'approved', '선물을 보냈어요')
+PAY_SUCCESS_MARKERS = (
+    '결제 완료',
+    '결제완료',
+    '주문완료',
+    '주문 완료',
+    '주문이 완료',
+    'approved',
+    '선물을 보냈어요',
+)
 # 주문 완료 페이지 주소(무신사 /order/result/…, 롯데온 /order/complete/… 등) — 키패드 없이 끝난 결제를 알아보는 데 쓴다
-ORDER_DONE_URL_RE = re.compile(r'/order/(?:result|complete)/\d|orderComplete|order_complete|/order/done', re.IGNORECASE)
+ORDER_DONE_URL_RE = re.compile(
+    r'/order/(?:result|complete)/\d|orderComplete|order_complete|/order/done', re.IGNORECASE
+)
 # _press_keypad 가 키패드 없이 결제 완료 화면을 본 경우 돌려주는 값(앱 응답처럼 'ok' 로 시작한다)
 NO_KEYPAD_PAID = 'ok: paid without keypad (order complete page)'
 # 키패드가 없을 때 주문 완료 화면을 몇 번, 얼마 간격으로 더 볼지
@@ -242,7 +253,9 @@ def _keypad_not_ready(out: str) -> bool:
 
 # 결제창이 결제 대신 로그인 화면을 띄운 경우(네이버페이 창인데 프로필의 네이버 로그인이 풀림 — 실기 2026-09-27
 # ABC 214·218). 여기엔 결제 비밀번호를 넣지 않고 바로 사람에게 넘긴다
-_LOGIN_HOST_RE = re.compile(r'(^|\.)nid\.naver\.com$|(^|\.)id\.payco\.com$|(^|\.)accounts\.kakao\.com$')
+_LOGIN_HOST_RE = re.compile(
+    r'(^|\.)nid\.naver\.com$|(^|\.)id\.payco\.com$|(^|\.)accounts\.kakao\.com$'
+)
 _LOGIN_PATH_RE = re.compile(r'login', re.IGNORECASE)
 
 
@@ -276,7 +289,68 @@ NAVER_AFTER_PASSWORD_TRIES = 8
 
 # 상품명에서 대조에 쓰지 않는 흔한 말(브랜드·계절·분류) — 이것만 겹쳐서는 같은 상품이라고 보지 않는다
 _GENERIC_WORDS = frozenset(
-    ['매장정품', '정품', '봄신발', '가을신발', '여름신발', '겨울신발', '신발', '운동화', '스니커즈', '스니커', '남성', '여성', '남녀공용', '공용', '커플', '키즈', '아동', '나이키', '아디다스', '뉴발란스', '푸마', '반스', '컨버스', '리복', '아식스', '휠라', '스케쳐스', '크록스', '머렐', '노스페이스', 'NIKE', 'ADIDAS', 'PUMA', 'VANS', 'CONVERSE', 'REEBOK', 'ASICS', 'FILA', 'SKECHERS', 'CROCS', 'MERRELL', '캐주얼화', '스포츠화', '조깅화', '러닝화', '슬리퍼', '샌들', '모자', '가방', '티셔츠', '의류', '블랙', '화이트', '그레이', '네이비', 'BLACK', 'WHITE', 'GREY', 'GRAY', 'NAVY']
+    [
+        '매장정품',
+        '정품',
+        '봄신발',
+        '가을신발',
+        '여름신발',
+        '겨울신발',
+        '신발',
+        '운동화',
+        '스니커즈',
+        '스니커',
+        '남성',
+        '여성',
+        '남녀공용',
+        '공용',
+        '커플',
+        '키즈',
+        '아동',
+        '나이키',
+        '아디다스',
+        '뉴발란스',
+        '푸마',
+        '반스',
+        '컨버스',
+        '리복',
+        '아식스',
+        '휠라',
+        '스케쳐스',
+        '크록스',
+        '머렐',
+        '노스페이스',
+        'NIKE',
+        'ADIDAS',
+        'PUMA',
+        'VANS',
+        'CONVERSE',
+        'REEBOK',
+        'ASICS',
+        'FILA',
+        'SKECHERS',
+        'CROCS',
+        'MERRELL',
+        '캐주얼화',
+        '스포츠화',
+        '조깅화',
+        '러닝화',
+        '슬리퍼',
+        '샌들',
+        '모자',
+        '가방',
+        '티셔츠',
+        '의류',
+        '블랙',
+        '화이트',
+        '그레이',
+        '네이비',
+        'BLACK',
+        'WHITE',
+        'GREY',
+        'GRAY',
+        'NAVY',
+    ]
 )
 
 
@@ -291,7 +365,12 @@ def _name_words(product_name: str) -> list[str]:
     """상품명 고유 단어 — 한글 2자 이상 또는 영숫자 4자 이상, 흔한 말·순수 숫자 제외."""
     out = []
     for w in re.split(r'[\s/()\[\],·_:-]+', product_name):
-        if w.isdigit() or w in _GENERIC_WORDS or w.upper() in _GENERIC_WORDS or w.startswith('옵션'):
+        if (
+            w.isdigit()
+            or w in _GENERIC_WORDS
+            or w.upper() in _GENERIC_WORDS
+            or w.startswith('옵션')
+        ):
             continue
         if (re.search(r'[가-힣]', w) and len(w) >= 2) or len(w) >= 4:
             out.append(w)
@@ -366,7 +445,13 @@ def order_form_mismatch(
     # 색·사이즈 2단 선택에서 사이즈만 골라 첫 색으로 결제했다(실기 2026-11-15 롯데온 21315226309723299)
     order_codes = re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})(?=/|\s|$)', option or '')
     sheet_codes = set(re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})\(', text))
-    if order_codes and sheet_codes and not any(c in sheet_codes or re.search(rf'(?<![A-Z]){c}(?![A-Z])', text) for c in order_codes):
+    if (
+        order_codes
+        and sheet_codes
+        and not any(
+            c in sheet_codes or re.search(rf'(?<![A-Z]){c}(?![A-Z])', text) for c in order_codes
+        )
+    ):
         return f'주문 색 코드 {order_codes} 대신 주문서엔 {sorted(sheet_codes)} 가 담겼다 — 결제하지 않음'
     sizes = _sizes(option, selected)
     if sizes and not any(re.search(rf'(?<![\d.]){re.escape(x)}(?![\d.])', text) for x in sizes):
@@ -392,7 +477,12 @@ def order_form_mismatch(
     if len(chosen_letters) > 1 and ordered_letters and not (ordered_letters & {'FREE', 'ONE'}):
         chosen_letters = chosen_letters - {'FREE', 'ONE'} or chosen_letters
     numeric_free = bool(sizes) and ordered_letters <= {'FREE', 'ONE'}
-    if ordered_letters and chosen_letters and ordered_letters != chosen_letters and not numeric_free:
+    if (
+        ordered_letters
+        and chosen_letters
+        and ordered_letters != chosen_letters
+        and not numeric_free
+    ):
         return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {sorted(chosen_letters)} 이 담겼다'
     # 구매가 글자 사이즈를 한국 숫자 사이즈로 골랐다(나이키 여성 S → '085') — 글자↔숫자 표로 맞는지 본다.
     # 주문서 화면 전체 글자(검색어·L.POINT 등)에서 S·M·L 을 줍는 아래 대조는 이 경우 엉뚱한 글자로 막는다
@@ -400,7 +490,9 @@ def order_form_mismatch(
     # 고른 옵션 글자에 가격·재고가 붙어 온다('090 41,480 7개 남음') — 맨 앞 숫자 사이즈만 본다
     # (실기 2026-11-15 롯데온 나이키 남성 팬츠 XL→090 이 'FREE·L·M 만 보인다'로 멈췄다)
     # 주문서에서 되읽은 값은 '상품명 … CZ8831-010 080' 처럼 상품명 뒤에 사이즈가 붙는다 — 끝의 숫자 사이즈를 본다
-    picked_num = re.search(r'(?<![\w-])0?(\d{2,3})(?:\s+[\d,]+\s*(?:원)?(?:\s.*)?)?\s*$', selected or '')
+    picked_num = re.search(
+        r'(?<![\w-])0?(\d{2,3})(?:\s+[\d,]+\s*(?:원)?(?:\s.*)?)?\s*$', selected or ''
+    )
     if ordered_letters and not chosen_letters and picked_num:
         num = int(picked_num.group(1))
         # 주문 옵션에 그 숫자 사이즈가 직접 적혀 있으면('M · KR 70' ↔ '070') 표보다 주문 글자가 우선이다
@@ -438,7 +530,9 @@ def order_form_mismatch(
     if len(pno) >= 6 and _has_number(text, pno):
         return None
     words = _name_words(product_name)
-    if not words or any(w.lower() in low or any(x in low for x in _NAME_SYNONYMS.get(w, ())) for w in words):
+    if not words or any(
+        w.lower() in low or any(x in low for x in _NAME_SYNONYMS.get(w, ())) for w in words
+    ):
         return None
     site_words = _name_words(site_name)
     if site_words and _mostly_found(words, site_name) and _mostly_found(site_words, text):
@@ -456,7 +550,12 @@ def order_form_mismatch(
     # 마켓명 '다이아나핑'(티니핑 오타)이라 단어로 못 맞춰 결제가 두 번 막혔다)
     for tok in re.split(r'\s+', product_name.lower()):
         core = re.sub(r'^\d+', '', re.sub(r'[^0-9a-z]', '', tok))
-        if len(core) >= 8 and re.search(r'[a-z]', core) and re.search(r'\d', core) and core in compact_text:
+        if (
+            len(core) >= 8
+            and re.search(r'[a-z]', core)
+            and re.search(r'\d', core)
+            and core in compact_text
+        ):
             return None
     site_tokens = [
         re.sub(r'[^0-9a-z가-힣]', '', tok)
@@ -473,7 +572,8 @@ def order_form_mismatch(
         # 한글은 두 글자도 고유 단어다('반팔') — 영문은 세 글자부터(실기 2026-11-15 무신사 21315226263283299
         # 'THE NORTH FACE NT7US00A 메라피크 반팔 티' 주문서인데 반팔을 빼 2/5 로 막았다)
         toks = [
-            c for c in site_tokens
+            c
+            for c in site_tokens
             if not c.isdigit() and (len(c) >= 3 or (len(c) >= 2 and re.search(r'[가-힣]', c)))
         ]
         if toks and sum(1 for c in toks if c in compact_text) >= max(1, (len(toks) + 1) // 2):
@@ -485,7 +585,9 @@ def order_form_mismatch(
     opt_toks = set(re.findall(r'[a-z0-9]+', f'{option or ""} {selected or ""}'.lower()))
     base_name = re.sub(r'\[[^\]]*\]', ' ', product_name.lower())
     latin = [t for t in re.findall(r'[a-z0-9]+', base_name) if len(t) >= 2 and t not in opt_toks]
-    if len(latin) >= 2 and all(re.search(rf'(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])', low) for t in latin):
+    if len(latin) >= 2 and all(
+        re.search(rf'(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])', low) for t in latin
+    ):
         return None
     return f'상품명 단어 {words[:6]} 가 주문서에 없다' + (
         f'(사이트 상품명 {site_words[:6]} 로도 못 맞춤)' if site_words else ''
@@ -757,10 +859,18 @@ TOSS_TAB_WAIT_MS = 1000
 TOSS_POPUP_POLL_TRIES = 12
 TOSS_PUSH_WAIT_MS = 4000
 # 카카오페이 폰 키패드를 앱이 못 읽었을 때(보안 키패드) 사람 입력을 기다리는 응답·횟수·간격 — 약 3분
-KAKAO_HUMAN_FALLBACK_WORDS = ('layout-incomplete', 'password-failed', 'tool timeout', 'stuck', 'verify-failed')
+KAKAO_HUMAN_FALLBACK_WORDS = (
+    'layout-incomplete',
+    'password-failed',
+    'tool timeout',
+    'stuck',
+    'verify-failed',
+)
 KAKAO_HUMAN_WAIT_TRIES = 36
 # 카카오페이 결제창(팝업)이 카카오 주소로 바뀔 때까지 찾는 횟수(1.5초 간격)
 KAKAO_POPUP_TRIES = 12
+
+
 def _tabs_list(raw: object) -> list[dict[str, object]]:
     """list_tabs 원문을 탭 사전 목록으로(못 읽으면 빈 목록)."""
     try:
@@ -883,11 +993,11 @@ def recent_art_order(agent: AgentBase, a: Assignment) -> str | None:
         return None
     code = (
         f"await tabs.open({{ url: 'https://{host}/mypage/claim/claim-order-main', "
-        f"profile: {json.dumps(account)} }})\n" + _ART_RECENT_ORDER_JS
+        f'profile: {json.dumps(account)} }})\n' + _ART_RECENT_ORDER_JS
     )
     try:
         raw = agent.tool('run_js', code=code, safety='no_pay')
-        found = json.loads(raw[raw.index('{'):]) if '{' in raw else {}
+        found = json.loads(raw[raw.index('{') :]) if '{' in raw else {}
     except (AgentFailure, ValueError):
         return None
     no, at = str(found.get('no') or ''), str(found.get('at') or '')
@@ -923,7 +1033,7 @@ def recent_cm29_order(agent: AgentBase, a: Assignment) -> str | None:
             name=CM29_RECENT_ORDER_SCRIPT,
             args=json.dumps(args, ensure_ascii=False),
         )
-        found = json.loads(raw[raw.index('{'):]) if '{' in raw else {}
+        found = json.loads(raw[raw.index('{') :]) if '{' in raw else {}
     except (AgentFailure, ValueError):
         return None
     if not isinstance(found, dict):
@@ -982,14 +1092,20 @@ class PayerAgent(AgentBase):
         source = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source))
         account = str(a.handoff.get('account') or a.order.account or '')
         if (
-            a.dry_run or result.status != 'ok' or result.payload.get('paid') is not True
+            a.dry_run
+            or result.status != 'ok'
+            or result.payload.get('paid') is not True
             or str(result.payload.get('card') or '').strip() != '무신사머니'
-            or source is None or source.id != 'MUSINSA' or account not in ACCOUNTS
+            or source is None
+            or source.id != 'MUSINSA'
+            or account not in ACCOUNTS
             or self.money_balance_alert is None
         ):
             return
         try:
-            raw = self.tool('run_js', code='const PROFILE=' + json.dumps(account) + ';\n' + MUSINSA_BALANCE_JS)
+            raw = self.tool(
+                'run_js', code='const PROFILE=' + json.dumps(account) + ';\n' + MUSINSA_BALANCE_JS
+            )
             value = json.loads(split_page_dialogs(raw)[0])
             if not isinstance(value, dict) or value.get('verified') is not True:
                 return
@@ -998,7 +1114,9 @@ class PayerAgent(AgentBase):
                 self.money_balance_alert(account, [{'method': '무신사머니', 'balance': balance}])
         except Exception as exc:
             # 이미 결제 성공. 알림 장애가 성공 결과를 실패로 바꾸거나 재결제를 유발하면 안 된다.
-            logging.getLogger(__name__).warning('결제 후 무신사머니 알림 확인 실패: %s', type(exc).__name__)
+            logging.getLogger(__name__).warning(
+                '결제 후 무신사머니 알림 확인 실패: %s', type(exc).__name__
+            )
 
     def _recheck_wave(self, a: Assignment) -> None:
         """결제창 진입 전 SAMBA 재조회(플레이북 §5-1) — 그사이 누가 샀거나 상태가 바뀌었는지 본다.
@@ -1021,7 +1139,9 @@ class PayerAgent(AgentBase):
         # 삼바웨이브에 남은 번호가 그 번호와 같을 때만 통과한다(실기 2026-09-28: 카드 잘못 결제 2건 취소 뒤 재구매)
         rebuy_of = str(a.options.get('rebuy_of') or '').strip()
         if rebuy_of and sourcing_no == rebuy_of:
-            self.note('결제 직전 재조회', f'재구매 — 취소한 소싱주문 {rebuy_of} 을 새 주문으로 바꾼다')
+            self.note(
+                '결제 직전 재조회', f'재구매 — 취소한 소싱주문 {rebuy_of} 을 새 주문으로 바꾼다'
+            )
             return
         if sourcing_no:
             raise AgentFailure(
@@ -1153,8 +1273,11 @@ class PayerAgent(AgentBase):
                 # 팝업만 봐서 휴대폰·생년월일을 안 넣고 폰 승인으로 넘어가 no-account 로 거절)
                 try:
                     toss = [
-                        t for t in json.loads(self.tool('list_tabs'))
-                        if isinstance(t, dict) and t.get('id') and 'toss.im' in str(t.get('url') or '')
+                        t
+                        for t in json.loads(self.tool('list_tabs'))
+                        if isinstance(t, dict)
+                        and t.get('id')
+                        and 'toss.im' in str(t.get('url') or '')
                     ]
                 except (AgentFailure, ValueError):
                     toss = []
@@ -1188,7 +1311,11 @@ class PayerAgent(AgentBase):
             (r'textbox "휴대폰번호"', 'payment.phone', 'digits'),
             (r'textbox "생년월일', 'payment.birth', 'yymmdd'),
         )
-        attempts: list[tuple[str, str | None]] = [('toss', None), *[('toss', lab) for lab in labels], ('kakao', None)]
+        attempts: list[tuple[str, str | None]] = [
+            ('toss', None),
+            *[('toss', lab) for lab in labels],
+            ('kakao', None),
+        ]
         for pattern, field, fmt in fields:
             element_id = _element_id_of(page, pattern)
             if element_id is None:
@@ -1244,7 +1371,11 @@ class PayerAgent(AgentBase):
             if 'kakaopay.com' in page.splitlines()[0] if page else False:
                 break
             popups, _active = self._list_tabs_popups()
-            kp = [q for q in popups if 'kakaopay.com' in str(q.get('url') or '')] or [q for q in _tabs_list(getattr(self, '_last_listed', '')) if 'kakaopay.com' in str(q.get('url') or '')]
+            kp = [q for q in popups if 'kakaopay.com' in str(q.get('url') or '')] or [
+                q
+                for q in _tabs_list(getattr(self, '_last_listed', ''))
+                if 'kakaopay.com' in str(q.get('url') or '')
+            ]
             if kp:
                 self.tool('switch_tab', id=str(kp[-1]['id']))
                 page = self.tool('get_page')
@@ -1261,7 +1392,10 @@ class PayerAgent(AgentBase):
         # 결제창 주소는 떴는데 화면이 아직 안 그려진 때가 있다 — 요소가 하나도 없고 글은 스크립트뿐이었다
         # (실기 2026-11-16 29CM 21315226677313299 4회: 창을 읽은 지 7초 만에 '칸 없음'으로 멈춤). 탭이나 입력칸이 보일 때까지 기다린다
         for _ in range(12):
-            if _element_id_of(page, r'tab "카톡결제"') is not None or _element_id_of(page, r'textbox "휴대폰번호"') is not None:
+            if (
+                _element_id_of(page, r'tab "카톡결제"') is not None
+                or _element_id_of(page, r'textbox "휴대폰번호"') is not None
+            ):
                 break
             self.tool('wait', ms=1500)
             page = self.tool('get_page')
@@ -1272,7 +1406,9 @@ class PayerAgent(AgentBase):
             for _try in range(4):
                 # 탭 요소를 눌러도 안 넘어가는 창이 있다(29CM 결제창) — 한 번 걸러 안쪽 글자 요소를 누른다
                 inner = _element_id_of(page, r'clickable "카톡결제"')
-                clicked = str(self.tool('click', id=inner if (_try % 2 and inner is not None) else tab))
+                clicked = str(
+                    self.tool('click', id=inner if (_try % 2 and inner is not None) else tab)
+                )
                 # 눌러도 안 넘어가는 이유를 남긴다(29CM 21315226677313299: 두 번 고쳐도 원인 불명 — 추측 수리 금지, 사실부터)
                 self.note('카톡결제 탭', mask_text(f'{_try + 1}회 누름 결과: {clicked[:140]}'))
                 self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
@@ -1389,21 +1525,30 @@ class PayerAgent(AgentBase):
     def _check_order_form(self, a: Assignment) -> None:
         """지금 화면(주문서)에 이 주문의 옵션과 상품명 고유 단어가 있는지 본다. 없으면 결제하지 않고 멈춘다."""
         # sku 는 삼바웨이브 상품명(+[옵션])이다(queue/orders._normalize). 교차 구매면 산 사이트의 상품명
-        name, option, selected = expect_name(a), a.order.option, str(a.handoff.get('selected') or '')
+        name, option, selected = (
+            expect_name(a),
+            a.order.option,
+            str(a.handoff.get('selected') or ''),
+        )
         self._arrival_memo: str | None = None
         if not order_form_keys(name, option, selected):
             return  # 대조할 단어·사이즈가 없다(시험 표본 등)
         # 구매가 만든 주문서 탭을 먼저 앞으로 — 활성 탭이 다른 페이지면 엉뚱한 화면을 대조한다
         # (결제 진입 스크립트도 같은 tab 을 받아 그 탭에서 따로 대조한다)
         order_tab = a.handoff.get('order_tab')
-        if not order_tab and str(a.handoff.get('buy_source') or a.order.source or '').upper() == 'LOTTEON':
+        if (
+            not order_tab
+            and str(a.handoff.get('buy_source') or a.order.source or '').upper() == 'LOTTEON'
+        ):
             # 롯데온 구매는 주문서 탭 id 를 안 넘긴다 — 활성 탭이 상품·매장 페이지면 엉뚱한 화면을 대조해 맞는 주문서를
             # 다르다고 막았다(실기 2026-11-14 21315225604823299 컨버스). 이 계정의 주문서 탭이 하나면 그것을 본다
             try:
                 profile = str(a.handoff.get('account') or a.order.account or '')
                 sheets = [
-                    t for t in json.loads(self.tool('list_tabs'))
-                    if isinstance(t, dict) and 'orderSheet' in str(t.get('url') or '')
+                    t
+                    for t in json.loads(self.tool('list_tabs'))
+                    if isinstance(t, dict)
+                    and 'orderSheet' in str(t.get('url') or '')
                     and (not profile or str(t.get('profile') or '') == profile)
                 ]
                 if len(sheets) == 1:
@@ -1437,7 +1582,9 @@ class PayerAgent(AgentBase):
         )
         if problem:
             raise AgentFailure(
-                'needs_ai', f'주문서가 이 주문과 다르다 — 결제하지 않음: {mask_text(problem)}', FailReason.VERIFY_MISMATCH
+                'needs_ai',
+                f'주문서가 이 주문과 다르다 — 결제하지 않음: {mask_text(problem)}',
+                FailReason.VERIFY_MISMATCH,
             )
         # 받는 분 주소 — 구매가 넣은 도로명+번호(handoff ship_key)가 주문서에 보여야 한다. 주문서에 다른 도로명 주소만
         # 보이면 배송지가 엉뚱하게 들어간 것(실기 2026-10-02 롯데온 선물: 주소 검색이 다른 도시 '화전남1길 10'을 골라 경주로 감)
@@ -1482,10 +1629,9 @@ class PayerAgent(AgentBase):
         지금 화면의 키패드를 바로 찾는다. 비밀번호 값은 어디서도 다루지 않는다.
         """
         # 결제창 로그인 시도는 주문(작업)마다 한 번 — 에이전트 객체는 작업을 넘어 재사용되므로 여기서 초기화한다
-        if (
-            web_pay_provider(str(a.handoff.get('card') or a.options.get('card') or '')) == 'naver'
-            and not getattr(self, '_naver_payment', None)
-        ):
+        if web_pay_provider(
+            str(a.handoff.get('card') or a.options.get('card') or '')
+        ) == 'naver' and not getattr(self, '_naver_payment', None):
             self._prepare_naver_card(a)
         # 결제창은 중간 창(money.musinsapayments.com/bridge)이 닫히고 /payment 창이 새로 뜬다 — 그 사이엔
         # '결제하기'가 없고, 처음 본 창은 사라진다. 매번 결제창 목록을 다시 읽어 가장 최근 창에서 버튼을 찾는다
@@ -1512,10 +1658,17 @@ class PayerAgent(AgentBase):
             self.tool('wait', ms=PAY_BUTTON_POLL_WAIT_MS)
         # 무신사머니 결제창(money.musinsapayments.com)이 about:blank 뒤 9초 넘게 걸려 뜨는 날이 있다 — 버튼을 못 보고
         # 키패드로 넘어가 결제 미확정으로 멈췄다(실기 2026-11-10 202611106D7339 2회). 그 창이면 15초 더 기다린다
-        if pay_btn is None and str(a.handoff.get('buy_source') or a.order.source).upper() == 'MUSINSA':
+        if (
+            pay_btn is None
+            and str(a.handoff.get('buy_source') or a.order.source).upper() == 'MUSINSA'
+        ):
             for _ in range(20):
                 popups, _active = self._list_tabs_popups()
-                mm = [p for p in popups if p.get('id') and 'musinsapayments' in str(p.get('url') or '')]
+                mm = [
+                    p
+                    for p in popups
+                    if p.get('id') and 'musinsapayments' in str(p.get('url') or '')
+                ]
                 if mm:
                     seen_popup = True
                     self.tool('switch_tab', id=str(mm[-1]['id']))
@@ -1554,7 +1707,12 @@ class PayerAgent(AgentBase):
                 f'{expected} 다 — 그 프로필에서 네이버를 {expected} 로 로그인해야 한다. 결제 비밀번호는 넣지 않았다(결제 안 됨)',
                 FailReason.PERMISSION_DENIED,
             )
-        if low.startswith('refused') or '거절: refused' in low or 'not found' in low or 'ambiguous' in low:
+        if (
+            low.startswith('refused')
+            or '거절: refused' in low
+            or 'not found' in low
+            or 'ambiguous' in low
+        ):
             raise AgentFailure(
                 'needs_ai',
                 f'결제 비밀번호를 앱이 넣지 못했다 — 사람이 직접 누른다: {mask_text(out[:100])}',
@@ -1578,8 +1736,11 @@ class PayerAgent(AgentBase):
             listed = json.loads(str(getattr(self, '_last_listed', '') or '[]'))
             if isinstance(listed, list):
                 same_tab = [
-                    t for t in listed
-                    if isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                    t
+                    for t in listed
+                    if isinstance(t, dict)
+                    and t.get('active')
+                    and _is_login_url(str(t.get('url') or ''))
                 ]
         except ValueError:
             same_tab = []
@@ -1609,10 +1770,14 @@ class PayerAgent(AgentBase):
                             except ValueError:
                                 now = []
                             tab_login = any(
-                                isinstance(t, dict) and t.get('active') and _is_login_url(str(t.get('url') or ''))
+                                isinstance(t, dict)
+                                and t.get('active')
+                                and _is_login_url(str(t.get('url') or ''))
                                 for t in (now if isinstance(now, list) else [])
                             )
-                            if not tab_login and not any(_is_login_url(str(q.get('url') or '')) for q in popups_now):
+                            if not tab_login and not any(
+                                _is_login_url(str(q.get('url') or '')) for q in popups_now
+                            ):
                                 return
                             if any('/certificate/' in str(q.get('url') or '') for q in popups_now):
                                 # 로그인은 됐고 결제 앱이 새 기기 휴대폰 인증을 요구한다 — 사람이 그 프로필에서 한 번 인증한다
@@ -1662,10 +1827,16 @@ class PayerAgent(AgentBase):
 
         amount = _amount_krw(a.handoff.get('paid'))
         if amount is None:
-            raise AgentFailure('needs_ai', '네이버 결제액 미확인 — 결제하지 않음', FailReason.VERIFY_MISMATCH)
+            raise AgentFailure(
+                'needs_ai', '네이버 결제액 미확인 — 결제하지 않음', FailReason.VERIFY_MISMATCH
+            )
         popups, _active = self._list_tabs_popups()
         self._stop_if_login_popup(popups, a)
-        naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
+        naver = [
+            popup
+            for popup in popups
+            if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay'
+        ]
         if naver:
             self.tool('switch_tab', id=str(naver[-1]['id']))
         else:
@@ -1675,8 +1846,10 @@ class PayerAgent(AgentBase):
             try:
                 tabs = json.loads(self.tool('list_tabs'))
                 pay_tabs = [
-                    t for t in tabs
-                    if isinstance(t, dict) and t.get('kind') == 'tab'
+                    t
+                    for t in tabs
+                    if isinstance(t, dict)
+                    and t.get('kind') == 'tab'
                     and _pay_host_provider(str(t.get('url') or '')) == 'naverpay'
                 ]
                 if pay_tabs:
@@ -1688,7 +1861,9 @@ class PayerAgent(AgentBase):
         # 금액은 숫자가 굴러가는 그림이라 다 멈추기 전에 읽으면 숫자가 섞인다(실기 2026-11-12: 37,112·36,738 로 읽힘).
         # 결제액 불일치면 조금 기다렸다 다시 읽는다 — 그래도 다르면 그대로 멈춘다
         for _ in range(6):
-            if not (isinstance(prepared, dict) and '결제액 불일치' in str(prepared.get('error') or '')):
+            if not (
+                isinstance(prepared, dict) and '결제액 불일치' in str(prepared.get('error') or '')
+            ):
                 break
             self.tool('wait', ms=2000)
             prepared = self._read_naver_card(amount)
@@ -1700,8 +1875,15 @@ class PayerAgent(AgentBase):
             if not sheet_total and 0 < lpoint < amount:
                 sheet_total = amount - lpoint
             if sheet_total and sheet_total != amount and 0 < sheet_total < amount:
-                self.note('네이버 결제액', f'주문서 최종 결제금액 {sheet_total:,}원(포인트 사용 반영)으로 다시 대조 — 견적 {amount:,}원')
-                naver = [p for p in self._list_tabs_popups()[0] if _pay_host_provider(str(p.get('url') or '')) == 'naverpay']
+                self.note(
+                    '네이버 결제액',
+                    f'주문서 최종 결제금액 {sheet_total:,}원(포인트 사용 반영)으로 다시 대조 — 견적 {amount:,}원',
+                )
+                naver = [
+                    p
+                    for p in self._list_tabs_popups()[0]
+                    if _pay_host_provider(str(p.get('url') or '')) == 'naverpay'
+                ]
                 if naver:
                     self.tool('switch_tab', id=str(naver[-1]['id']))
                 prepared = self._read_naver_card(sheet_total)
@@ -1711,7 +1893,10 @@ class PayerAgent(AgentBase):
             self.step('payer: 네이버페이 비밀번호(앱 입력)')
             out = self._press_keypad(a, 'naver', account)
             self.note('네이버 비밀번호 입력', mask_text(out[:200]))
-            if out.lstrip().lower().startswith(('handoff', 'refused')) or naverpay_mismatch(out) is not None:
+            if (
+                out.lstrip().lower().startswith(('handoff', 'refused'))
+                or naverpay_mismatch(out) is not None
+            ):
                 raise AgentFailure(
                     'needs_ai',
                     f'네이버페이 비밀번호를 앱이 넣지 못했다 — 결제하지 않음: {mask_text(out[:100])}',
@@ -1728,12 +1913,19 @@ class PayerAgent(AgentBase):
                 except ValueError:
                     listed = []
                 if isinstance(listed, list) and any(
-                    isinstance(t, dict) and ORDER_DONE_URL_RE.search(str(t.get('url') or '')) for t in listed
+                    isinstance(t, dict) and ORDER_DONE_URL_RE.search(str(t.get('url') or ''))
+                    for t in listed
                 ):
-                    self.note('네이버 비밀번호 입력', '비밀번호 뒤 주문 완료 화면 — 결제 확인으로 간다')
+                    self.note(
+                        '네이버 비밀번호 입력', '비밀번호 뒤 주문 완료 화면 — 결제 확인으로 간다'
+                    )
                     self._naver_payment = {'paid_after_password': True}
                     return True
-                naver = [popup for popup in popups if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay']
+                naver = [
+                    popup
+                    for popup in popups
+                    if _pay_host_provider(str(popup.get('url') or '')) == 'naverpay'
+                ]
                 if naver:
                     self.tool('switch_tab', id=str(naver[-1]['id']))
                 prepared = self._read_naver_card(amount)
@@ -1748,7 +1940,8 @@ class PayerAgent(AgentBase):
                     FailReason.PAY_INTERRUPTED,
                 )
         if (
-            not isinstance(prepared, dict) or prepared.get('ok') is not True
+            not isinstance(prepared, dict)
+            or prepared.get('ok') is not True
             or prepared.get('card_issuer') != '현대카드'
             or prepared.get('payment_kind') != 'card'
             or prepared.get('payment_verified') is not True
@@ -1759,8 +1952,15 @@ class PayerAgent(AgentBase):
             or prepared['naver_reward'] < 0
         ):
             reason = prepared.get('error') if isinstance(prepared, dict) else '검증 응답 없음'
-            raise AgentFailure('needs_ai', f'네이버 현대카드 검증 실패: {reason} — 결제하지 않음', FailReason.VERIFY_MISMATCH)
-        self._naver_payment = {k: prepared[k] for k in ('card_issuer', 'payment_kind', 'naver_reward', 'payment_verified')}
+            raise AgentFailure(
+                'needs_ai',
+                f'네이버 현대카드 검증 실패: {reason} — 결제하지 않음',
+                FailReason.VERIFY_MISMATCH,
+            )
+        self._naver_payment = {
+            k: prepared[k]
+            for k in ('card_issuer', 'payment_kind', 'naver_reward', 'payment_verified')
+        }
         self.note('네이버 결제수단 검증', '현대카드 선택·금액·네이버 적립 확인, 머니 결제 차단')
         self.tool('click', id=int(prepared['agree']), label='동의하고 결제하기')
         self.tool('wait', ms=PAY_POPUP_WAIT_MS)
@@ -1777,7 +1977,9 @@ class PayerAgent(AgentBase):
         KEYPAD_FILL_MAX_CALLS 를 넘지 않고, 끝까지 키패드가 없으면 결제 확인으로 가지 않고 바로 멈춘다."""
         out = ''
         calls = 0
-        entered = False  # 앱이 '아직 아님'이 아닌 답을 한 번이라도 했다 — 이후 절대 다시 부르지 않는다
+        entered = (
+            False  # 앱이 '아직 아님'이 아닌 답을 한 번이라도 했다 — 이후 절대 다시 부르지 않는다
+        )
         for attempt in range(KEYPAD_POLL_TRIES):
             popups, _active = self._list_tabs_popups()
             if dry_run_digits is None:
@@ -1792,7 +1994,9 @@ class PayerAgent(AgentBase):
                     and ORDER_DONE_URL_RE.search(str(t.get('url') or ''))
                     for t in listed
                 ):
-                    self.note('키패드 입력', '현재 계정 탭이 주문 완료 화면 — 기존 결제 검증으로 진행')
+                    self.note(
+                        '키패드 입력', '현재 계정 탭이 주문 완료 화면 — 기존 결제 검증으로 진행'
+                    )
                     return NO_KEYPAD_PAID
             self._stop_if_login_popup(popups, a)
             if str(a.handoff.get('buy_source') or a.order.source).upper() == 'LOTTEON':
@@ -1805,7 +2009,9 @@ class PayerAgent(AgentBase):
                         self.tool('click', id=int(hit.group(1)))
                         self.tool('wait', ms=1200)
                         self.note('배송지 선택 창', f'키패드를 가려 닫음({hit.group(1)})')
-                    elif 'OVERLAY: "배송지 선택 완료' in box or re.search(r'dialog "배송지 관리', box):
+                    elif 'OVERLAY: "배송지 선택 완료' in box or re.search(
+                        r'dialog "배송지 관리', box
+                    ):
                         # '배송지 선택 완료되었습니다' 덮개만 남고 '배송지 관리' 창이 열린 채 닫기 단추가 안내되지 않는다
                         # (실기 2026-11-16 754370006007813 라코스테 2회: 키패드 10회 못 찾음). 선택은 이미 주문서에 반영됐다 —
                         # 고른 줄을 바꾸지 않도록 '선택완료'가 아니라 창의 '닫기'만 누른다
@@ -1822,13 +2028,23 @@ class PayerAgent(AgentBase):
                                 if m.group(2) not in ('수정', '삭제')
                             ]
                             self.note('배송지 관리 창 단추', mask_text(str(btns[-12:])[:300]))
-                            shut = [i for i, t in btns if re.fullmatch(r'닫기|레이어 닫기|팝업 닫기|close|X|취소|이전', t, re.IGNORECASE)]
+                            shut = [
+                                i
+                                for i, t in btns
+                                if re.fullmatch(
+                                    r'닫기|레이어 닫기|팝업 닫기|close|X|취소|이전',
+                                    t,
+                                    re.IGNORECASE,
+                                )
+                            ]
                             if shut:
                                 self.tool('click', id=shut[-1])
                                 self.tool('wait', ms=1500)
                                 self.note('배송지 관리 창', f'창 안 닫기 단추 누름({shut[-1]})')
                         except AgentFailure as e:
-                            self.note('배송지 관리 창', mask_text(f'창 단추 읽기 실패: {e.reason}'[:120]))
+                            self.note(
+                                '배송지 관리 창', mask_text(f'창 단추 읽기 실패: {e.reason}'[:120])
+                            )
                         if attempt == 1:
                             # 창을 닫아도 '결제하기'가 키패드를 못 띄웠다(11-16 3회) — 결제하기를 한 번 더 누르고 결과를 남긴다.
                             # 비밀번호 없이는 결제가 끝나지 않으니 다시 눌러도 이중 결제가 아니다. 덮개에 막히면 진짜 마우스 클릭으로
@@ -1838,8 +2054,16 @@ class PayerAgent(AgentBase):
                                     r1 = str(self.tool('click', id=pay_id, label='결제하기'))
                                     self.note('결제하기 재클릭', mask_text(r1[:160]))
                                     self.tool('wait', ms=3000)
-                                    if not re.search(r'L\.PAY 비밀번호', str(self.tool('find_elements', query='비밀번호'))):
-                                        r2 = str(self.tool('run_js', code=f'return String(await page.clickNative({pay_id}))'))
+                                    if not re.search(
+                                        r'L\.PAY 비밀번호',
+                                        str(self.tool('find_elements', query='비밀번호')),
+                                    ):
+                                        r2 = str(
+                                            self.tool(
+                                                'run_js',
+                                                code=f'return String(await page.clickNative({pay_id}))',
+                                            )
+                                        )
                                         self.note('결제하기 마우스클릭', mask_text(r2[:160]))
                                         self.tool('wait', ms=3000)
                             except AgentFailure as e:
@@ -1847,7 +2071,10 @@ class PayerAgent(AgentBase):
                         dlg = re.search(r'\[(\d+)\] dialog "배송지 관리', box)
                         closes = [
                             int(m.group(1))
-                            for m in re.finditer(r'\[(\d+)\] button "닫기"', str(self.tool('find_elements', query='닫기')))
+                            for m in re.finditer(
+                                r'\[(\d+)\] button "닫기"',
+                                str(self.tool('find_elements', query='닫기')),
+                            )
                         ]
                         if dlg:
                             closes = [c for c in closes if c > int(dlg.group(1))] or closes
@@ -1890,15 +2117,21 @@ class PayerAgent(AgentBase):
                     if out.lstrip().startswith('handoff'):
                         # 앱이 사람에게 넘겼다 — 왜 못 눌렀는지(배치 인식·금고 잠김)는 단계 기록에만 있다
                         failed = [label for label, ok in getattr(self, 'last_steps', ()) if not ok]
-                        self.note('키패드 넘김 사유', mask_text(' / '.join(failed)[:300]) or '기록 없음')
+                        self.note(
+                            '키패드 넘김 사유', mask_text(' / '.join(failed)[:300]) or '기록 없음'
+                        )
                         try:
                             # 어떤 화면에서 넘겼는지(키패드가 아닌 안내·오류 화면일 수 있다) 앞부분만 남긴다
                             seen = self.tool('get_page')
                             text = seen[seen.find('PAGE TEXT') :] if 'PAGE TEXT' in seen else seen
-                            self.note('키패드 넘김 화면', mask_text(seen[:120] + ' … ' + text[:400]))
+                            self.note(
+                                '키패드 넘김 화면', mask_text(seen[:120] + ' … ' + text[:400])
+                            )
                             # 요소 종류·이름 앞부분만(값은 없다) — 버튼을 왜 못 찾았는지 본다
                             kinds = [ln[:48] for ln in seen.splitlines() if ln.startswith('[')]
-                            self.note('키패드 넘김 요소', f'{len(kinds)}개: ' + ' ; '.join(kinds[:40]))
+                            self.note(
+                                '키패드 넘김 요소', f'{len(kinds)}개: ' + ' ; '.join(kinds[:40])
+                            )
                         except AgentFailure as e:
                             self.note('키패드 넘김 화면', mask_text(f'못 읽음: {e.reason}'[:160]))
                     break
@@ -1913,8 +2146,8 @@ class PayerAgent(AgentBase):
             try:
                 listed = json.loads(str(self.tool('list_tabs')))
                 seen = [
-                    f"{t.get('kind')}{'*' if t.get('active') else ''}:{str(t.get('url') or '').split('//')[-1][:50]}"
-                    f"|{str(t.get('title') or '')[:14]}"
+                    f'{t.get("kind")}{"*" if t.get("active") else ""}:{str(t.get("url") or "").split("//")[-1][:50]}'
+                    f'|{str(t.get("title") or "")[:14]}'
                     for t in (listed if isinstance(listed, list) else [])
                     if isinstance(t, dict) and (t.get('kind') == 'popup' or t.get('active'))
                 ]
@@ -1939,7 +2172,9 @@ class PayerAgent(AgentBase):
                     except AgentFailure:
                         done_tabs = ''
                     if ORDER_DONE_URL_RE.search(done_tabs):
-                        self.note('키패드 입력', '키패드 없이 결제 완료 화면 — 비밀번호 없는 결제로 본다')
+                        self.note(
+                            '키패드 입력', '키패드 없이 결제 완료 화면 — 비밀번호 없는 결제로 본다'
+                        )
                         return NO_KEYPAD_PAID
                     if wait_i + 1 < NO_KEYPAD_DONE_CHECKS:
                         self.tool('wait', ms=NO_KEYPAD_DONE_WAIT_MS)
@@ -1961,7 +2196,9 @@ class PayerAgent(AgentBase):
         def failed_page(text: str) -> bool:
             # 결제 실패 화면(롯데온 /p/order/fail)에도 메뉴 등에 '결제완료' 글자가 있어 성공으로 읽었다
             # (실기 2026-11-12 21315224977733299: URL …/p/order/fail 을 결제 성공으로 기록 → 주문번호 없음)
-            return bool(re.search(r'/order/fail|orderFail|payFail', text.split('\n', 1)[0], re.IGNORECASE))
+            return bool(
+                re.search(r'/order/fail|orderFail|payFail', text.split('\n', 1)[0], re.IGNORECASE)
+            )
 
         if failed_page(page):
             raise AgentFailure(
@@ -1984,7 +2221,9 @@ class PayerAgent(AgentBase):
             recent_no = self._recent_art_order(a) or self._recent_cm29_order(a)
             if recent_no:
                 page = f'결제완료 주문번호 {recent_no}'
-        if not any(m in page for m in PAY_SUCCESS_MARKERS) and not getattr(self, '_naver_fds_done', False):
+        if not any(m in page for m in PAY_SUCCESS_MARKERS) and not getattr(
+            self, '_naver_fds_done', False
+        ):
             # 네이버페이가 결제하기 뒤 이상거래 확인(FDS)으로 비밀번호를 한 번 더 묻는다 — 주소 'authentication/pw/check …
             # order_fds_failed'. 결제는 아직 안 끝났다. 그 탭을 앞으로 올려 앱이 키마스터 비밀번호를 한 번 넣게 하고
             # 완료 화면을 다시 본다(실기 2026-11-12 롯데온 20261112738095·21315225160483299·753123710615576 세 건 멈춤)
@@ -1992,14 +2231,21 @@ class PayerAgent(AgentBase):
             try:
                 listed = json.loads(self.tool('list_tabs'))
                 fds = next(
-                    (t for t in listed if isinstance(t, dict) and 'pay.naver.com/authentication/pw/check' in str(t.get('url') or '')),
+                    (
+                        t
+                        for t in listed
+                        if isinstance(t, dict)
+                        and 'pay.naver.com/authentication/pw/check' in str(t.get('url') or '')
+                    ),
                     None,
                 )
             except (AgentFailure, ValueError):
                 fds = None
             if fds is not None:
                 self._naver_fds_done = True
-                self.note('네이버 재인증', '결제하기 뒤 네이버페이 비밀번호 재확인 창 — 앱이 한 번 넣는다')
+                self.note(
+                    '네이버 재인증', '결제하기 뒤 네이버페이 비밀번호 재확인 창 — 앱이 한 번 넣는다'
+                )
                 try:
                     self.tool('reveal_tab', id=str(fds['id']))
                 except AgentFailure:
@@ -2010,7 +2256,7 @@ class PayerAgent(AgentBase):
                     probe = self.tool(
                         'run_js',
                         code=(
-                            "JSON.stringify({vis:document.visibilityState,focus:document.hasFocus(),w:innerWidth,h:innerHeight,"
+                            'JSON.stringify({vis:document.visibilityState,focus:document.hasFocus(),w:innerWidth,h:innerHeight,'
                             "frames:document.querySelectorAll('iframe').length,"
                             "btn:[...document.querySelectorAll('button')].slice(0,18).map(b=>{const r=b.getBoundingClientRect();"
                             "const st=getComputedStyle(b);return [Math.round(r.width),Math.round(r.height),(b.innerText||'').trim().slice(0,4),"
@@ -2056,7 +2302,10 @@ class PayerAgent(AgentBase):
                     ship_mismatch = True
             if ship_mismatch:
                 self.note('완료 화면 배송지', '고객 주소 없음·사무실 주소 보임 — 오배송 의심')
-                toast('오배송 의심', f'{a.order.order_no}: 주문완료 화면 배송지가 고객 주소가 아니다(사무실)')
+                toast(
+                    '오배송 의심',
+                    f'{a.order.order_no}: 주문완료 화면 배송지가 고객 주소가 아니다(사무실)',
+                )
             elif want and want in flat_done:
                 self.note('완료 화면 배송지', '고객 주소 일치')
         except AgentFailure as e:
@@ -2107,7 +2356,9 @@ class PayerAgent(AgentBase):
             return self._lottecard_appcard(a, card, issuer, window)
         self.note(
             '카드 직접 결제',
-            mask_text(f'{issuer} 결제창({entered.get("pay_window") or "-"} {window[:80]}) — 사람이 폰으로 승인한다. 에이전트는 누르지 않는다'),
+            mask_text(
+                f'{issuer} 결제창({entered.get("pay_window") or "-"} {window[:80]}) — 사람이 폰으로 승인한다. 에이전트는 누르지 않는다'
+            ),
         )
         self.step(f'payer: {issuer} 결제창 — 사람 승인(폰) 대기')
         order_tab = str(a.handoff.get('order_tab') or '')
@@ -2141,7 +2392,9 @@ class PayerAgent(AgentBase):
         except AgentFailure as e:
             raise AgentFailure(
                 'needs_ai',
-                mask_text(f'{issuer} 결제창에서 앱카드 숫자코드를 못 읽었다({e.reason[:80]}) — 결제하지 않았다'),
+                mask_text(
+                    f'{issuer} 결제창에서 앱카드 숫자코드를 못 읽었다({e.reason[:80]}) — 결제하지 않았다'
+                ),
                 FailReason.PAY_INTERRUPTED,
             ) from e
         self.note('롯데카드 앱카드', mask_text(out[:160]))
@@ -2149,12 +2402,16 @@ class PayerAgent(AgentBase):
         if m is None:
             raise AgentFailure(
                 'needs_ai',
-                mask_text(f'{issuer} 결제창에 앱카드 숫자코드가 안 보인다 — 결제하지 않았다: {out[:120]}'),
+                mask_text(
+                    f'{issuer} 결제창에 앱카드 숫자코드가 안 보인다 — 결제하지 않았다: {out[:120]}'
+                ),
                 FailReason.PAY_INTERRUPTED,
             )
         amount = _amount_krw(a.handoff.get('cost'))
         if amount is None:
-            raise AgentFailure('needs_ai', '결제 금액을 모른다 — 폰 승인을 부르지 않는다', FailReason.UNKNOWN)
+            raise AgentFailure(
+                'needs_ai', '결제 금액을 모른다 — 폰 승인을 부르지 않는다', FailReason.UNKNOWN
+            )
         self.step('payer: 폰 승인(롯데카드 앱카드)')
         approved = self.tool(
             'phone_approve_payment',
@@ -2169,7 +2426,9 @@ class PayerAgent(AgentBase):
         if low.startswith(('refused', 'error')) or any(k in approved for k in DECLINED_MARKERS):
             raise AgentFailure(
                 'needs_ai',
-                mask_text(f'롯데카드 앱카드 폰 승인 실패: {approved[:120]} — 결제창은 열어 둔다(재결제 금지)'),
+                mask_text(
+                    f'롯데카드 앱카드 폰 승인 실패: {approved[:120]} — 결제창은 열어 둔다(재결제 금지)'
+                ),
                 FailReason.PAY_INTERRUPTED,
             )
         # 앱에서 본인인증이 끝났으면 결제창의 [결제 완료]를 눌러야 주문이 완료된다
@@ -2178,7 +2437,12 @@ class PayerAgent(AgentBase):
             done = self.tool('run_js', code=_LOTTECARD_DONE_JS)
             self.note('롯데카드 앱카드', mask_text(done[:160]))
         except AgentFailure as e:
-            self.note('롯데카드 앱카드', mask_text(f'[결제 완료] 누르기 실패({e.reason[:80]}) — 주문 완료 화면을 그대로 본다'))
+            self.note(
+                '롯데카드 앱카드',
+                mask_text(
+                    f'[결제 완료] 누르기 실패({e.reason[:80]}) — 주문 완료 화면을 그대로 본다'
+                ),
+            )
         return self._confirm_paid(a, card)
 
     def _payco_agree_and_pay(self, card: str = '') -> bool:
@@ -2210,7 +2474,9 @@ class PayerAgent(AgentBase):
             # 결제는 누르지 않았다 — 다른 카드로 내면 청구할인이 없어 견적과 원가가 달라진다
             raise AgentFailure(
                 'needs_ai',
-                mask_text(f'페이코 결제창에서 견적 카드를 못 찾았다 — 결제하지 않았다: {out[:120]}'),
+                mask_text(
+                    f'페이코 결제창에서 견적 카드를 못 찾았다 — 결제하지 않았다: {out[:120]}'
+                ),
                 FailReason.CARD_MISSING,
             )
         return '"clicked":true' in out.replace(' ', '')
@@ -2305,7 +2571,11 @@ class PayerAgent(AgentBase):
     def _pay(self, a: Assignment) -> AgentResult:
         self.evidence = []
         if self.gift_only and a.handoff.get('order_type') != 'gift':
-            raise AgentFailure('needs_ai', '사무실 확인 대기 범위 — 실제 선물 배송이 아닌 결제 차단', FailReason.UNKNOWN)
+            raise AgentFailure(
+                'needs_ai',
+                '사무실 확인 대기 범위 — 실제 선물 배송이 아닌 결제 차단',
+                FailReason.UNKNOWN,
+            )
         # 요청자가 지정한 카드가 먼저, 없으면 구매 에이전트가 고른 카드다(리뷰 지적 — C3)
         card = a.options.get('card') or a.handoff.get('card')
         card = str(card) if card else None
@@ -2366,11 +2636,18 @@ class PayerAgent(AgentBase):
             'name': str(a.handoff.get('product_name') or '') or expect_name(a),
             'option': a.order.option or '',
             # 신세계백화점 상품은 되읽은 옵션 앞에 상품명이 붙는다('… 옵션 : 245') — 옵션 값만 대조한다(실기 2026-11-03 SSG 4059)
-            'selected': re.sub(r'^.*옵션\s*[:：]\s*', '', str(a.handoff.get('selected') or '')).strip(),
+            'selected': re.sub(
+                r'^.*옵션\s*[:：]\s*', '', str(a.handoff.get('selected') or '')
+            ).strip(),
             # 구매가 스냅샷에서 읽은 번호 우선 — 교차 비교로 다른 사이트에서 사면 주문 URL 번호는 다른 사이트 것이다
-            'product_no': str(a.handoff.get('product_no') or '') or product_no_of(a.order.product_url),
+            'product_no': str(a.handoff.get('product_no') or '')
+            or product_no_of(a.order.product_url),
             # 구매 스냅샷이 도착한 상품 주소(SSG 처럼 지정 몰 상품으로 바꿔 사는 소싱처만 준다)
-            **({'product_url': str(a.handoff.get('product_url'))} if a.handoff.get('product_url') else {}),
+            **(
+                {'product_url': str(a.handoff.get('product_url'))}
+                if a.handoff.get('product_url')
+                else {}
+            ),
         }
         # 결제수단 견적이 고른 카드사(SSGPAY 안의 '현대카드' 등) — 결제 진입 스크립트가 등록 카드를 고른다.
         # 카드사를 모르면 스크립트가 추측하지 않고 멈춘다(checkout_enter_ssg)
@@ -2381,7 +2658,9 @@ class PayerAgent(AgentBase):
                 payload['kakao_card'] = True
         bought = default_sources().by_id(str(a.handoff.get('buy_source') or a.order.source or ''))
         if bought is not None and bought.allow_department:
-            payload['allow_department'] = True  # SSG: 신세계백화점(6009) 상품도 결제한다(사용자 2026-09-27)
+            payload['allow_department'] = (
+                True  # SSG: 신세계백화점(6009) 상품도 결제한다(사용자 2026-09-27)
+            )
         amount = a.handoff.get('paid')
         if isinstance(amount, int | float) and not isinstance(amount, bool) and amount > 0:
             payload['amount'] = amount
@@ -2396,8 +2675,10 @@ class PayerAgent(AgentBase):
             # 그 주문서로 L.PAY 결제를 시도했다(실기 2026-11-04). 이 계정 프로필의 주문서 탭이 하나일 때만 그것을 쓴다
             try:
                 sheets = [
-                    t for t in json.loads(self.tool('list_tabs'))
-                    if isinstance(t, dict) and 'orderSheet' in str(t.get('url') or '')
+                    t
+                    for t in json.loads(self.tool('list_tabs'))
+                    if isinstance(t, dict)
+                    and 'orderSheet' in str(t.get('url') or '')
                     and str(t.get('profile') or '') == str(profile)
                 ]
             except (AgentFailure, ValueError):
@@ -2413,18 +2694,25 @@ class PayerAgent(AgentBase):
                         text = self.tool('get_page')
                     except AgentFailure:
                         continue
-                    if order_form_mismatch(
-                        text,
-                        expect_name(a),
-                        a.order.option,
-                        str(a.handoff.get('selected') or ''),
-                        site_name=str(a.handoff.get('product_name') or ''),
-                        product_no=str(a.handoff.get('product_no') or '') or product_no_of(a.order.product_url),
-                        trust_site=bool(a.handoff.get('product_name')),
-                    ) is None:
+                    if (
+                        order_form_mismatch(
+                            text,
+                            expect_name(a),
+                            a.order.option,
+                            str(a.handoff.get('selected') or ''),
+                            site_name=str(a.handoff.get('product_name') or ''),
+                            product_no=str(a.handoff.get('product_no') or '')
+                            or product_no_of(a.order.product_url),
+                            trust_site=bool(a.handoff.get('product_name')),
+                        )
+                        is None
+                    ):
                         fitting.append(sheet)
                 if fitting:
-                    self.note('결제창', f'같은 계정 주문서 {len(sheets)}개 중 이 주문과 맞는 {len(fitting)}개 — 마지막 것을 쓴다')
+                    self.note(
+                        '결제창',
+                        f'같은 계정 주문서 {len(sheets)}개 중 이 주문과 맞는 {len(fitting)}개 — 마지막 것을 쓴다',
+                    )
                     sheets = fitting[-1:]
             if len(sheets) != 1:
                 raise AgentFailure(
@@ -2448,9 +2736,10 @@ class PayerAgent(AgentBase):
                 # 왜 못 찾았는지 남긴다 — 주문서 탭 수·종류·프로필(주소는 경로만)
                 try:
                     seen = [
-                        f"{t.get('kind')}:{t.get('profile')}:{urlsplit(str(t.get('url') or '')).path[:30]}"
+                        f'{t.get("kind")}:{t.get("profile")}:{urlsplit(str(t.get("url") or "")).path[:30]}'
                         for t in json.loads(listed_tabs)
-                        if isinstance(t, dict) and _ORDER_FORM_URL_RE.search(str(t.get('url') or ''))
+                        if isinstance(t, dict)
+                        and _ORDER_FORM_URL_RE.search(str(t.get('url') or ''))
                     ]
                 except ValueError:
                     seen = []
@@ -2471,10 +2760,23 @@ class PayerAgent(AgentBase):
         if script == 'checkout_enter_lotteon' and self._sheet_tab:
             try:
                 self.tool('switch_tab', id=self._sheet_tab)
-                lp = re.search(r'L\.?POINT\s*([\d,]+)\s*P\s*전액사용', re.sub(r'\s+', ' ', self.tool('get_page')))
+                lp = re.search(
+                    r'L\.?POINT\s*([\d,]+)\s*P\s*전액사용',
+                    re.sub(r'\s+', ' ', self.tool('get_page')),
+                )
                 self._lpoint = int(lp.group(1).replace(',', '')) if lp else 0
+                if self._lpoint and str(payload.get('card') or '').startswith(('카카오', '간편')):
+                    # 카드 즉시할인은 주문금액 최소 조건이 있어 포인트를 쓰면 10%가 5%로 내려가거나 없어진다 — 결제 진입이
+                    # 이때는 '전액사용'을 누르지 않는다(실기 2026-11-17 롯데온 컨버스·아디다스: 카카오페이 카드 할인없음·결제액>견적)
+                    self.note(
+                        'L.POINT',
+                        f'주문서 보유 {self._lpoint:,}P — 카드 즉시할인 유지를 위해 쓰지 않는다',
+                    )
+                    self._lpoint = 0
                 if self._lpoint:
-                    self.note('L.POINT', f'주문서 보유 {self._lpoint:,}P — 결제 진입이 전액 사용한다')
+                    self.note(
+                        'L.POINT', f'주문서 보유 {self._lpoint:,}P — 결제 진입이 전액 사용한다'
+                    )
             except AgentFailure:
                 self._lpoint = 0
         raw_enter = self.tool(
@@ -2507,8 +2809,13 @@ class PayerAgent(AgentBase):
                     listed = json.loads(self.tool('list_tabs'))
                 except (AgentFailure, ValueError):
                     listed = []
-                if any(isinstance(t, dict) and ORDER_DONE_URL_RE.search(str(t.get('url') or '')) for t in listed):
-                    self.note('결제창', '스크립트 시간 초과 뒤 주문 완료 화면 확인 — 결제 확인으로 간다')
+                if any(
+                    isinstance(t, dict) and ORDER_DONE_URL_RE.search(str(t.get('url') or ''))
+                    for t in listed
+                ):
+                    self.note(
+                        '결제창', '스크립트 시간 초과 뒤 주문 완료 화면 확인 — 결제 확인으로 간다'
+                    )
                     return self._confirm_paid(a, card)
                 self.tool('wait', ms=5000)
             raise AgentFailure(
@@ -2522,8 +2829,16 @@ class PayerAgent(AgentBase):
                 'needs_ai',
                 f'결제창을 열지 못했다: {mask_text(str(entered.get("error") or entered.get("note"))[:80])}'
                 + (f' — {mask_text(str(entered.get("why"))[:160])}' if entered.get('why') else '')
-                + (f' — 경고창: {mask_text(" | ".join(enter_dialogs)[:120])}' if enter_dialogs else '')
-                + (f' — 화면: {mask_text(str(entered.get("note"))[:160])}' if entered.get('error') and entered.get('note') else ''),
+                + (
+                    f' — 경고창: {mask_text(" | ".join(enter_dialogs)[:120])}'
+                    if enter_dialogs
+                    else ''
+                )
+                + (
+                    f' — 화면: {mask_text(str(entered.get("note"))[:160])}'
+                    if entered.get('error') and entered.get('note')
+                    else ''
+                ),
                 FailReason.UNKNOWN,
             )
 

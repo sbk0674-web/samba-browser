@@ -1,4 +1,4 @@
-let PC=i=>page.click(i),GQ=q=>page.get({query:q}),S=ms=>sleep(ms),PI=parseInt,ON=l=>/value="on"/.test(l),ID=l=>PI(l.slice(1)),F=e=>({ok:false,error:e});
+let PC=i=>page.click(i),IO=q=>page.idOf(q),CT=q=>page.clickText(q),GQ=q=>page.get({query:q}),S=ms=>sleep(ms),PI=parseInt,ON=l=>/value="on"/.test(l),ID=l=>PI(l.slice(1)),F=e=>({ok:false,error:e});
 let AT=async()=>String((await page.get({})).tree||'');
 let cardCompanies=['롯데카드','신한카드','KB국민카드','삼성카드','현대카드','BC카드','하나카드','우리BC카드','우리카드','NH농협카드'];
 let simplePays=['간편결제','카카오페이','네이버페이','토스페이','삼성페이','퀵계좌이체'];
@@ -10,32 +10,32 @@ if(ot.length>1&&!(await good())){for(let t of ot){await tabs.switch(t.id);await 
 let url=await page.url();
 if(!/orderSheet/.test(url))return F('no sheet');
 for(let i=0;i<6&&!/결제수단/.test((await GQ('결제수단')).tree);i++){
-let c=await page.idOf('계속하기');if(c<0)break;await PC(c);await S(2500);
+let c=await IO('계속하기');if(c<0)break;await PC(c);await S(2500);
 }
-let fu=await page.idOf('전액사용');if(fu>=0){await PC(fu);await S(2500)}
+if(!/^(카카오페이|간편결제)$/.test(card)){let fu=await IO('전액사용');if(fu>=0){await PC(fu);await S(2500)}}
 let method=null;
 let mc=cardCompanies.find(c=>c.includes(card)||(card&&card.length>0&&c.replace('카드','').includes(card)));
 if(mc){
-await page.clickText('신용카드');
+await CT('신용카드');
 await S(600);
-let sel=await page.idOf('카드를 선택해 주세요.');
+let sel=await IO('카드를 선택해 주세요.');
 if(sel<0)return F('no card');
 await PC(sel);
 await S(600);
-await page.clickText(mc);
+await CT(mc);
 method=mc;
 } else {
 let mp=simplePays.find(p=>p.includes(card)||(card&&card.length>0&&p.includes(card)));
 if(!mp)return F('no method');
 let KP=mp==='카카오페이',KK=args.kakao_card?'카카오페이 카드':'카카오페이 머니';
 let LC=mp==='간편결제';
-await page.clickText(mp);await S(1500);
+await CT(mp);await S(1500);
 {
 let Q=async(q,re)=>(await GQ(q)).tree.split('\n').filter(l=>re.test(l));
 let hi=ls=>ls.length?Math.max(...ls.map(l=>ID(l))):-1;
 let disc=async()=>{let t=(await GQ('주문할인금액')).tree;let m=(t.split('PAGE TEXT')[1]||t).match(/주문할인금액\s*할인변경\s*(-?[\d,]+)원/);return m?PI(m[1].replace(/[,-]/g,''),10):0};
 if(LC||!(await disc())){
-let hb=await page.idOf('할인변경');var nd=hb<0;
+let hb=await IO('할인변경');var nd=hb<0;
 if(hb>=0){await PC(hb);await S(2000);
 let rs=(KP?await Q(KK,new RegExp('radio "'+KK+'\\d+%')):LC?await Q('롯데카드',/radio "롯데카드\s*\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:ID(l),p:+(l.match(/(\d+)%/)||[])[1],on:ON(l)}));let QK=KP?KK:'롯데카드',TX=(await GQ('즉시할인')).tree.replace(/\s+/g,' '),AM=r=>+((TX.match(QK+' ?'+r.p+'% 즉시할인.{0,9}-([0-9,]+)')||[])[1]||'0').replace(/,/g,'');
 let mx=rs.length?Math.max(...rs.map(x=>x.id)):0;let cs=rs.filter(r=>r.id>mx-20).sort((a,b)=>(AM(b)-AM(a))||b.p-a.p);let best=cs[0];
@@ -49,7 +49,7 @@ let ap=hi(await Q('적용하기',/button "적용하기"/));if(ap>0){await PC(ap)
 }
 if((KP&&!nd||typeof want!=='undefined')&&!(await disc()))return{ok:false,error:(KP?KK+' 즉시할인':LC?'롯데카드 즉시할인':'장바구니 쿠폰')+' 안 붙음'};
 }
-await page.clickText(mp);
+await CT(mp);
 method=mp;
 if(mp==='간편결제'){
 await S(1200);
@@ -85,7 +85,7 @@ if(st&&!/value="[^"]+"/.test(st)){let hn=((await GQ('님로그아웃')).tree.mat
 try{let ra=(await GQ('받는 분 주소로 보내기')).tree.split('\n').find(l=>/^\[\d+\] radio "받는 분 주소로/.test(l));
 if(ra&&!ON(ra)){await PC(PI(ra.slice(1)));await S(1500)}}catch(e){}
 if(args.gift&&!ON(((await GQ('받는 분 주소로 보내기')).tree.match(/radio "받는 분 주소로[^\n]*/)||[''])[0]))return F('선물 주문서 아님');
-if(args.amount){let m=(await AT()).replace(/\s+/g,' ').match(/총 결제금액.{0,200}?총 ?\d+ ?건 ?([\d,]+)/);if(m&&+m[1].replace(/,/g,'')>args.amount+10)return F('결제액>견적')}let payId=await page.idOf('결제하기');
+if(args.amount){let m=(await AT()).replace(/\s+/g,' ').match(/총 결제금액.{0,200}?총 ?\d+ ?건 ?([\d,]+)/);if(m&&+m[1].replace(/,/g,'')>args.amount+10)return F('결제액>견적')}let payId=await IO('결제하기');
 if(payId<0)return{ok:false,error:'결제하기?',method};
 let pr=String(await PC(payId));
 let LP=/dialog "L\.PAY 비밀번호/,DN=/order\/complete/;for(let k=0;k<4;k++){
@@ -97,7 +97,7 @@ if(!h){let b=await Z('닫기',/button "닫기"/);if(b.length){await PC(Math.max(
 if(/OVERLAY: "[^"]*할인 결제수단으로만/.test(T)){let b=await Z('적용하기',/button "적용하기"/);if(b.length){await PC(Math.max(...b));await S(2500);h=1}}
 if(/OVERLAY: "혜택이 변경/.test(T)){await S(2500);continue}
 if(!h)break;
-let a=await page.idOf('결제하기');if(a<0)break;pr=String(await PC(a))}
+let a=await IO('결제하기');if(a<0)break;pr=String(await PC(a))}
 await S(3000);
 if(/OVERLAY: "[^"]*주문할인혜택/.test((await AT())))return{ok:false,error:'할인창',method};
 if(/네이버페이/.test(method)){
