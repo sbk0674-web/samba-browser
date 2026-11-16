@@ -41,8 +41,8 @@ let si=null;for(let i=0;i<6&&!si;i++){si=L(await E('올림픽로 300'),e=>X(e)&&
 if(!si)return F('addr-input-nf');
 let NS=s=>String(s).replace(/\s+/g,'');let roadKey=((full.match(/[가-힣A-Za-z.]+로\s*\d+번길(?=\s*\d)/)||full.match(/[가-힣A-Za-z0-9.]+(?:로|길)(?=\s*\d)/)||full.match(/[가-힣]+(?:동|리|가)(?=\s+\d)/)||[''])[0]);
 let guKeys=(full.match(/[가-힣]{1,6}(?:시|군|구)(?=\s)/g)||[]).filter(k=>!/(특별자치|광역|특별)시$/.test(k));
-let pz=String(A.postal_code||'').trim();
-let okLine=t=>{let n=NS(t);if(roadKey&&!n.includes(NS(roadKey)))return false;if(pz&&n.includes('['+pz+']'))return true;if(guKeys.length&&!guKeys.some(k=>n.includes(k)))return false;return true};
+let pz=String(A.postal_code||'').trim(),rb=roadKey?NS(roadKey+((full.split(roadKey)[1]||'').match(/^\s*\d+(-\d+)?/)||[''])[0]):'~';
+let okLine=t=>{let n=NS(t);if(roadKey&&!n.includes(NS(roadKey)))return false;if(pz&&n.includes('['+pz+']'))return true;if(guKeys.length&&!guKeys.some(k=>n.includes(k))&&!n.endsWith(rb))return false;return true};
 async function search(q,po){await page.type(si.id,q,true);
 let sb=(await E('검색')).filter(e=>B(e)&&e.text==='검색'&&e.id>si.id)[0];if(sb)await C(sb.id);
 for(let i=0;i<6;i++){await S(400);let ls=(await E('[',null)).filter(e=>e.role==='link'&&/^\[\d{5}\]/.test(e.text));
