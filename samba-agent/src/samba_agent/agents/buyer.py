@@ -204,7 +204,9 @@ def split_road_detail(shipping: dict[str, object]) -> dict[str, object]:
     if det:
         return shipping
     # 도로명('…로 123')뿐 아니라 지번('…1가 237'·'…동 12-3')도 번지까지가 주소다(실기 2026-11-10 '…7가 237 101동 …호')
-    m = re.match(r'(.*?[가-힣A-Za-z0-9.]+(?:로|길|동|리|가)\s*\d+(?:-\d+)?)(?![\d-])\s*,?\s*(.+)$', addr)
+    m = re.match(
+        r'(.*?[가-힣A-Za-z0-9.]+(?:로|길|동|리|가)\s*\d+(?:-\d+)?)(?![\d-])\s*,?\s*(.+)$', addr
+    )
     if not m:
         return shipping
     rest = re.sub(r'\([^)]*\)\s*$', '', m.group(2)).strip(' ,')
@@ -232,6 +234,16 @@ def join_jibun(shipping: dict[str, object]) -> dict[str, object]:
             cut += 1
         det = det[cut:].strip()
         shipping = {**shipping, 'address_detail': det}
+    # 번지의 부번만 상세주소로 떨어져 오는 마켓도 있다('…동 123' + '-4번지 101호') — 부번을 주소에 다시 붙인다.
+    # 안 붙이면 주소 검색이 '표준화 지번 및 도로명 주소가 존재하지 않습니다' 로 끝나 배송지가 저장되지 않는다
+    # (실기 2026-11-16 롯데온 754595479306280)
+    sub = re.match(r'-\s*(\d+)\s*(?:번지)?(?![\d-]|\s*[동호층])[,\s]*(.*)$', det)
+    if sub and re.search(r'(?:동|리|가|로|길)\s*\d+$', addr):
+        return {
+            **shipping,
+            'address': f'{addr}-{sub.group(1)}',
+            'address_detail': sub.group(2).strip(),
+        }
     m = re.match(r'(\d+(?:-\d+)?)(?![\d-])[,\s]*(.*)$', det)
     if not m or not re.search(r'[가-힣0-9](?:동|리|가)$', addr):
         return shipping
@@ -308,7 +320,12 @@ def shipping_matches(expected: dict[str, object], applied: dict[str, object]) ->
     # 2024 구 부활) 끝 괄호 참고항목을 입력칸 글자 수 제한으로 잘라 되읽는다(실기 2026-11-12 롯데온 20261111065484·066890,
     # 직접 재현: '…부천시 지봉로51번길 16-14(…아파트)' → '…부천시 원미구 지봉로51번길 16-14(…아파')
     rk_e, rk_a = road_key(expected.get('address')), road_key(applied.get('address'))
-    if rk_e and rk_e == rk_a and re.search(r'\d', rk_e) and (not exp_d or not app_d or exp_d & app_d):
+    if (
+        rk_e
+        and rk_e == rk_a
+        and re.search(r'\d', rk_e)
+        and (not exp_d or not app_d or exp_d & app_d)
+    ):
         return True
     # 주문 주소에 건물번호가 없고 상세주소가 번호로 시작하면('…로' + '29, 5층') 포함 관계만으로는 건물번호를
     # 확인하지 못한다('…로 31' 도 품는다) — 아래의 주소+상세 숫자 비교로 넘긴다
@@ -874,8 +891,24 @@ def kr_size(text: str | None) -> str | None:
 # 나이키 한국 사이즈표(상품 상세 'SIZE (아시아 사이즈)' 그림 — 사용자 2026-11-15 롯데온 화면 4장)
 #   여성 상의 XS75·S80·M85·L90·XL95·XXL100 / 남성 상의 XS85·S90·M95·L100·XL105·XXL110 / 남성 하의 S75·M80·L85·XL90·XXL95
 _NIKE_KR = {
-    ('W', 'top'): {'XS': '075', 'S': '080', 'M': '085', 'L': '090', 'XL': '095', 'XXL': '100', '2XL': '100'},
-    ('M', 'top'): {'XS': '085', 'S': '090', 'M': '095', 'L': '100', 'XL': '105', 'XXL': '110', '2XL': '110'},
+    ('W', 'top'): {
+        'XS': '075',
+        'S': '080',
+        'M': '085',
+        'L': '090',
+        'XL': '095',
+        'XXL': '100',
+        '2XL': '100',
+    },
+    ('M', 'top'): {
+        'XS': '085',
+        'S': '090',
+        'M': '095',
+        'L': '100',
+        'XL': '105',
+        'XXL': '110',
+        '2XL': '110',
+    },
     ('M', 'bottom'): {'S': '075', 'M': '080', 'L': '085', 'XL': '090', 'XXL': '095', '2XL': '095'},
 }
 _BOTTOM_WORDS = ('팬츠', '타이츠', '레깅스', '쇼츠', '조거', '하의', '바지', '반바지')
@@ -915,7 +948,9 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
     live = [o for o in options if not _sold_out(o) and not color_code_conflict(wanted, o)]
     # 선택지 조각(재고 '4개 남음 (품절임박)'·가격 '137,400')은 옵션이 아니다 — 주문 옵션의 숫자 4 가 재고 조각에 걸려
     # 엉뚱한 줄을 골랐다(실기 2026-11-13 롯데온 21315225409303299 라코스테 'SKB/초콜릿향 4' → '4개 남음')
-    real = [o for o in live if not re.fullmatch(r'\s*(?:\d+\s*개\s*남음.*|\d{1,3}(?:,\d{3})+)\s*', o)]
+    real = [
+        o for o in live if not re.fullmatch(r'\s*(?:\d+\s*개\s*남음.*|\d{1,3}(?:,\d{3})+)\s*', o)
+    ]
     live = real or live
     if not wanted:
         return live
@@ -927,9 +962,15 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
             return free
         # 프리사이즈 주문인데 선택지가 색 하나뿐(사이즈 없음) — 그 상품의 유일한 옵션이다(색 이름은 마켓·소싱처가 다르게 적는다)
         # (실기 2026-11-15 롯데온 뉴에라 '카모플라주 프리 사이즈' ↔ 선택지 '우드랜드 카모' 하나 — 사용자 "대부분 재고 있다")
-        names = {re.sub(r'\s*[\d,]+\s*(?:원)?\s*(?:\d+\s*개\s*남음.*)?$', '', o).strip() for o in live}
+        names = {
+            re.sub(r'\s*[\d,]+\s*(?:원)?\s*(?:\d+\s*개\s*남음.*)?$', '', o).strip() for o in live
+        }
         names.discard('')
-        if len(names) == 1 and not size_numbers(next(iter(names))) and not size_letters(next(iter(names))):
+        if (
+            len(names) == 1
+            and not size_numbers(next(iter(names)))
+            and not size_letters(next(iter(names)))
+        ):
             return [o for o in live if o.startswith(next(iter(names)))]
     # 선택지가 프리사이즈 하나뿐이고 주문 옵션에 사이즈가 없으면(색상만) 그것이다 — 색상은 상품 자체가 정한다
     # (실기 2026-09-28: 주문 '블랙 & 올리브 그린' ↔ 무신사 선택지 ['FREE'] 를 옵션 불일치로 멈췄다).
@@ -950,7 +991,11 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
         if marked:
             return marked
         # 선택지가 앞에 0 을 붙여 적는다('PINE 095') — 주문 'KR 95' 와 같은 치수다(실기 2026-11-13 29CM 21315225592033299)
-        by_kr = [o for o in live if not kr_size(o) and kr.lstrip('0') in {n.lstrip('0') for n in size_numbers(o)}]
+        by_kr = [
+            o
+            for o in live
+            if not kr_size(o) and kr.lstrip('0') in {n.lstrip('0') for n in size_numbers(o)}
+        ]
         if by_kr:
             return by_kr
     w = wanted.strip()
@@ -1180,9 +1225,22 @@ def _sold_out(option: str) -> bool:
 # 블랙·화이트 등 8색만 영문으로 바꾼다(앱 스크립트 8,000자 한도라 사전을 못 늘림) — 나머지 색은 여기서 바꿔 넘긴다
 # (실기 2026-11-09 4730 락피쉬 클로그: COCOA 230 재고가 있는데 '옵션 불일치 []' 로 멈췄다)
 _MUSINSA_COLOR_EN = {
-    '코코아': 'COCOA', '초코': 'CHOCO', '체스트넛': 'CHESTNUT', '브라운': 'BROWN', '카키': 'KHAKI',
-    '블루': 'BLUE', '그린': 'GREEN', '핑크': 'PINK', '레드': 'RED', '차콜': 'CHARCOAL', '퍼플': 'PURPLE',
-    '옐로우': 'YELLOW', '오렌지': 'ORANGE', '민트': 'MINT', '실버': 'SILVER', '골드': 'GOLD',
+    '코코아': 'COCOA',
+    '초코': 'CHOCO',
+    '체스트넛': 'CHESTNUT',
+    '브라운': 'BROWN',
+    '카키': 'KHAKI',
+    '블루': 'BLUE',
+    '그린': 'GREEN',
+    '핑크': 'PINK',
+    '레드': 'RED',
+    '차콜': 'CHARCOAL',
+    '퍼플': 'PURPLE',
+    '옐로우': 'YELLOW',
+    '오렌지': 'ORANGE',
+    '민트': 'MINT',
+    '실버': 'SILVER',
+    '골드': 'GOLD',
 }
 
 
@@ -1214,12 +1272,12 @@ def snapshot_args(agent_name: str, order: OrderRef, account: str | None = None) 
     """
     args: dict[str, object] = {'sku': product_ref(agent_name, order), 'qty': order.qty}
     if order.option:
-        args['size'] = (
-            musinsa_color_en(order.option) if 'musinsa' in agent_name else order.option
-        )
+        args['size'] = musinsa_color_en(order.option) if 'musinsa' in agent_name else order.option
         # '옵션:선택안함' 은 고를 옵션이 없다는 뜻 — 무신사 스크립트는 '없음'일 때 '선택안함' 칸을 고른다
         # (실기 2026-11-10 20261109C14534 마스마룰즈 백팩: 키링 옵션 후보 중에서 고르다 멈췄다)
-        if 'musinsa' in agent_name and re.fullmatch(r'(?:옵션\s*[:：]\s*)?선택\s*안\s*함', str(order.option).strip()):
+        if 'musinsa' in agent_name and re.fullmatch(
+            r'(?:옵션\s*[:：]\s*)?선택\s*안\s*함', str(order.option).strip()
+        ):
             args['size'] = '없음'
         elif 'musinsa' in agent_name and re.match(r'\s*옵션\s*[:：]', str(args['size'])):
             # '옵션:14 Inch' 의 '옵션:' 은 이름표다 — 붙여 넘기면 선택지를 못 골랐다(실기 2026-11-10 20261110C95003 마스마룰즈 노트북 가방)
@@ -3490,7 +3548,9 @@ class BuyerAgent(AgentBase):
         if src.key == 'cm29' and base > 0:
             raw_quotes = [
                 {**q, 'cost': base}
-                if isinstance(q, dict) and '페이코' in str(q.get('method') or '') and 0 < _as_float(q.get('cost')) < base
+                if isinstance(q, dict)
+                and '페이코' in str(q.get('method') or '')
+                and 0 < _as_float(q.get('cost')) < base
                 else q
                 for q in raw_quotes
             ]
@@ -3517,14 +3577,20 @@ class BuyerAgent(AgentBase):
         # 롯데온 할인은 매번 바뀐다. 모르는 더 싼 수단이 있는데 아는 수단으로 사면 비싸게 산 것이다(사용자 2026-11-13)
         unsupported = [u for u in (out.get('unsupported') or []) if isinstance(u, dict)]
         if unsupported:
-            self.note('미지원 할인 줄', ', '.join(f"{u.get('name')} {u.get('percent')}% -{_as_float(u.get('amount')):,.0f}" for u in unsupported))
+            self.note(
+                '미지원 할인 줄',
+                ', '.join(
+                    f'{u.get("name")} {u.get("percent")}% -{_as_float(u.get("amount")):,.0f}'
+                    for u in unsupported
+                ),
+            )
             chosen_cut = base - _as_float(best.get('paid')) if base > 0 else 0.0
             bigger = [u for u in unsupported if _as_float(u.get('amount')) > chosen_cut + 1]
             if bigger:
                 top = max(bigger, key=lambda u: _as_float(u.get('amount')))
                 raise AgentFailure(
                     'needs_ai',
-                    f"더 큰 할인({top.get('name')} {top.get('percent')}% -{_as_float(top.get('amount')):,.0f}원)이 있는데 "
+                    f'더 큰 할인({top.get("name")} {top.get("percent")}% -{_as_float(top.get("amount")):,.0f}원)이 있는데 '
                     f'하네스가 그 수단으로 못 산다 — 고른 수단 할인 {chosen_cut:,.0f}원. 사지 않음',
                     FailReason.UNKNOWN,
                 )
@@ -3670,7 +3736,12 @@ class BuyerAgent(AgentBase):
         # 사이즈 숫자가 이미 맞았으면 괄호 속 글자 사이즈는 보조 표기다(실기: '090(S)' 주문에 'LIGHT BEIGE · 090')
         # 주문 사이즈 글자가 FREE·ONE 뿐이면 사이즈가 아니다 — 주문서에 FREE 글자가 안 보여도 된다
         # (실기 2026-11-16 무신사 파우치 20261113101957078:001 'FREE / 선택안함' ↔ 주문서 '선택안함 · 선택안함')
-        if letters and not sizes and not (letters <= {'FREE', 'ONE'}) and not (size_letters(selected) & letters):
+        if (
+            letters
+            and not sizes
+            and not (letters <= {'FREE', 'ONE'})
+            and not (size_letters(selected) & letters)
+        ):
             return False
         return bool(self._match_options([selected], wanted))
 
@@ -3978,7 +4049,10 @@ class BuyerAgent(AgentBase):
         if sale > 0 and other > sale * 2:
             # 짝 사이트 원가가 판매가의 두 배를 넘으면 같은 상품이 아니다(묶음·다른 상품) — 대체로 쓰지 않는다
             # (실기 2026-11-10 무신사 품절 아디다스 양말 KR8960 37,500원 → 롯데온 정가 139,000원 상품을 골랐다)
-            self.note('교차 비교', f'{sib_src.id} {other:,.0f}원 — 판매가 {sale:,.0f}원의 두 배 넘음, 다른 상품으로 보고 버림')
+            self.note(
+                '교차 비교',
+                f'{sib_src.id} {other:,.0f}원 — 판매가 {sale:,.0f}원의 두 배 넘음, 다른 상품으로 보고 버림',
+            )
             return None
         if fallback:
             own_txt = '견적 없음(봇 차단·품절)'
@@ -4672,7 +4746,9 @@ class BuyerAgent(AgentBase):
                 # 앞 시도의 주문서 탭을 닫는다 — 남기면 결제 단계가 '주문서 탭 2개'로 멈춘다(실기 2026-11-10 752400788766783)
                 self._close_lotteon_sheets(account)
                 snap = self._snapshot_once(a, account)
-            pno = (re.search(r'/p/product/([A-Z]{2}\d+)', a.order.product_url or '') or [None, ''])[1]
+            pno = (re.search(r'/p/product/([A-Z]{2}\d+)', a.order.product_url or '') or [None, ''])[
+                1
+            ]
             if (
                 snap.get('cost') is None
                 and not snap.get('methods')
@@ -4913,7 +4989,10 @@ class BuyerAgent(AgentBase):
         if head_brand and not is_fixed_kkadaegi(order):
             # 판매 상품명엔 없는데 소싱처 화면 글(가격 앞 250자)에서 브랜드를 찾았다 — 근거를 남긴다
             # (실기 2026-11-09 4735 다이나핏 패딩이 까대기로 사졌다: 어느 글자가 걸렸는지 기록이 없었다)
-            self.note('배송 종류 근거', mask_text(f'상품명 줄 브랜드 [{head_brand.group(0)}] … {head[-120:]}'))
+            self.note(
+                '배송 종류 근거',
+                mask_text(f'상품명 줄 브랜드 [{head_brand.group(0)}] … {head[-120:]}'),
+            )
         if not forced and (is_fixed_kkadaegi(order) or head_brand):
             # 고정 5개 브랜드는 사무실로 받는다 — 단 손님 결제액이 정가보다 낮으면 선물하기(사용자 2026-11-08)
             forced = 'kkadaegi'
@@ -5119,7 +5198,9 @@ class BuyerAgent(AgentBase):
                     applied = str(
                         self.tool(
                             'run_js',
-                            code=_APPLY_LOTTEON_DISCOUNT_JS.replace('__TAB__', json.dumps(self._ship_tab)),
+                            code=_APPLY_LOTTEON_DISCOUNT_JS.replace(
+                                '__TAB__', json.dumps(self._ship_tab)
+                            ),
                             safety='no_pay',
                         )
                     )
@@ -5370,11 +5451,11 @@ class BuyerAgent(AgentBase):
             try:
                 self.note(
                     '배송지 대조',
-                    f"이름 {'같음' if _same_name(str(shipping.get('name', '')), str(applied.get('name', ''))) else '다름'} · "
-                    f"시군구 겹침 {bool(address_districts(shipping.get('address')) & address_districts(applied.get('address')))} · "
-                    f"주소 {len(str(shipping.get('address') or ''))}/{len(str(applied.get('address') or ''))}자 · "
-                    f"우편번호 {bool(shipping.get('postal_code'))}/{bool(applied.get('zip') or applied.get('postal_code'))} · "
-                    f"되읽은 키 {sorted(k for k, v in applied.items() if v not in (None, ''))}",
+                    f'이름 {"같음" if _same_name(str(shipping.get("name", "")), str(applied.get("name", ""))) else "다름"} · '
+                    f'시군구 겹침 {bool(address_districts(shipping.get("address")) & address_districts(applied.get("address")))} · '
+                    f'주소 {len(str(shipping.get("address") or ""))}/{len(str(applied.get("address") or ""))}자 · '
+                    f'우편번호 {bool(shipping.get("postal_code"))}/{bool(applied.get("zip") or applied.get("postal_code"))} · '
+                    f'되읽은 키 {sorted(k for k, v in applied.items() if v not in (None, ""))}',
                 )
             except Exception:  # noqa: BLE001 — 진단 메모 실패는 무시
                 pass
@@ -5409,7 +5490,10 @@ class BuyerAgent(AgentBase):
                 if m is None:
                     # 선물 주문서엔 '배송정보' 칸이 없고 '받는 분 주소로 보내기' 아래 주소 입력칸에 들어간다(실기 2026-11-12
                     # 753123710615576: 주소칸에 고객 주소가 맞게 들어갔는데 이 검사가 칸을 못 찾아 멈췄다)
-                    m = re.search(r'textbox"주소"value="([^"]*)"', re.sub(r'\s+', '', self.tool('get_page', query='주소')))
+                    m = re.search(
+                        r'textbox"주소"value="([^"]*)"',
+                        re.sub(r'\s+', '', self.tool('get_page', query='주소')),
+                    )
             except AgentFailure:
                 m = None
             seen = re.sub(r'\s+', '', m.group(1)) if m else ''
