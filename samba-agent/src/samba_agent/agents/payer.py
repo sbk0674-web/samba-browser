@@ -1265,7 +1265,9 @@ class PayerAgent(AgentBase):
             for _try in range(4):
                 # 탭 요소를 눌러도 안 넘어가는 창이 있다(29CM 결제창) — 한 번 걸러 안쪽 글자 요소를 누른다
                 inner = _element_id_of(page, r'clickable "카톡결제"')
-                self.tool('click', id=inner if (_try % 2 and inner is not None) else tab)
+                clicked = str(self.tool('click', id=inner if (_try % 2 and inner is not None) else tab))
+                # 눌러도 안 넘어가는 이유를 남긴다(29CM 21315226677313299: 두 번 고쳐도 원인 불명 — 추측 수리 금지, 사실부터)
+                self.note('카톡결제 탭', mask_text(f'{_try + 1}회 누름 결과: {clicked[:140]}'))
                 self.tool('wait', ms=KAKAO_TAB_WAIT_MS)
                 page = self.tool('get_page')
                 if _element_id_of(page, r'textbox "휴대폰번호"') is not None:
@@ -1278,6 +1280,11 @@ class PayerAgent(AgentBase):
         for pattern, field, fmt in fields:
             element_id = _element_id_of(page, pattern)
             if element_id is None:
+                try:
+                    self.note('카톡결제 창 목록', mask_text(str(self.tool('list_tabs'))[:400]))
+                    self.note('카톡결제 창 글', mask_text(re.sub(r'\s+', ' ', str(page))[:500]))
+                except AgentFailure:
+                    pass
                 raise AgentFailure(
                     'needs_ai', f'카카오페이 카톡결제 칸 없음({field})', FailReason.UNKNOWN
                 )
