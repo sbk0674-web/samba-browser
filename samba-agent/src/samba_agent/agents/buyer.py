@@ -2508,6 +2508,13 @@ class BuyerAgent(AgentBase):
             # 롯데온: 포이즌 외에는 '선물하기' 주문서로 들어간다(사용자 2026-09-27). 제주·도서산간·배대지처럼 직배·까대기로
             # 판정된 주문은 바로구매 주문서로 연다(실기 2026-09-30 제주 선물 불가)
             args['gift'] = True
+            # 롯데ON 몰 주소의 '선물하기'는 "롯데백화점몰에서 구매" 확인창에 막혀 스냅샷이 75초 상한을 넘겨 버린다 —
+            # 결과가 안 와서 아래 mall_no=2 재시도도 못 탔다(실기 2026-11-16 202611167CD0BC 4회 시간 초과).
+            # 선물은 처음부터 롯데백화점몰(mall_no=2) 주소로 연다
+            _sku = str(args.get('sku') or '')
+            _pno = re.search(r'lotteon\.com/p/product/([A-Z]{2}\d+)', _sku)
+            if source.key == 'lotteon' and _pno and 'mall_no=' not in _sku:
+                args['sku'] = f'https://www.lotteon.com/p/product/{_pno.group(1)}?mall_no=2'
         elif (
             source.gift_unless_poison
             and not is_poison_seller(a.order.seller)
