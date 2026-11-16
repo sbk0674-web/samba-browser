@@ -69,6 +69,17 @@ _LEGACY_COLUMNS = (
 )
 
 
+def _priority_since(db_path: Path) -> str | None:
+    """먼저 살 주문의 기준 시각(ISO). queue_priority.json 이 없거나 잘못되면 None."""
+    try:
+        raw = json.loads((Path(db_path).parent / 'queue_priority.json').read_text(encoding='utf-8'))
+        since = str(raw.get('since') or '').strip()
+        datetime.fromisoformat(since)
+        return since or None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 @dataclass(frozen=True)
 class Job:
     """큐의 한 행."""
@@ -270,13 +281,19 @@ class JobQueue:
                     return None
                 scope_args = tuple(self.allowed_job_ids)
                 scope_sql = 'AND attempts=0 AND id IN (' + ','.join('?' for _ in scope_args) + ') '
+            # 먼저 살 날짜(사용자 2026-11-16 "16일부터 다 구매하고 예전 거") — 폴더의 queue_priority.json
+            # {"since": "2026-11-15T15:00:00+00:00"} 이 있으면 그 시각 이후에 받은 주문을 먼저, 그 안에서는 오래된 순.
+            # 파일이 없거나 읽지 못하면 예전처럼 가장 오래된 주문부터
+            since = _priority_since(self.path)
             row = self._db.execute(
                 "SELECT * FROM jobs WHERE state='queued' "
                 + scope_sql +
                 "ORDER BY CASE WHEN json_extract(options, '$._daangn_single_stock') = 1 "
                 "THEN 0 ELSE 1 END, "
+                "CASE WHEN ? IS NOT NULL AND coalesce(julianday(json_extract(options, '$._order_received_at')), "
+                "julianday(created_at)) >= julianday(?) THEN 0 ELSE 1 END, "
                 "coalesce(julianday(json_extract(options, '$._order_received_at')), "
-                "julianday(created_at)), id LIMIT 1", scope_args
+                "julianday(created_at)), id LIMIT 1", (*scope_args, since, since)
             ).fetchone()
             if row is None:
                 return None
