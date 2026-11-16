@@ -387,6 +387,10 @@ def order_form_mismatch(
         chosen_letters = chosen_letters - (size_letters(product_name or '') - ordered_letters)
     # 주문이 숫자 사이즈 + FREE 뿐이면(양말 '260MM FREE') FREE 는 사이즈 글자가 아니다 — 숫자 사이즈는 위에서 이미 맞췄다.
     # 사이트가 '260MM(L)' 처럼 글자를 덧붙여도 같은 옵션이다(실기 2026-11-05 롯데온 노스페이스 양말 4250)
+    # 주문서 쪽에만 FREE 가 덧붙은 경우 — 선택 상자가 둘(사이즈 + FREE 하나뿐인 둘째 상자)인 상품이다
+    # (실기 2026-11-16 무신사 아이더 20261113101933879:001 '02(XS)' 주문 ↔ 주문서 '02(XS) · FREE' 가 ['FREE','XS'] 로 막혔다)
+    if len(chosen_letters) > 1 and ordered_letters and not (ordered_letters & {'FREE', 'ONE'}):
+        chosen_letters = chosen_letters - {'FREE', 'ONE'} or chosen_letters
     numeric_free = bool(sizes) and ordered_letters <= {'FREE', 'ONE'}
     if ordered_letters and chosen_letters and ordered_letters != chosen_letters and not numeric_free:
         return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {sorted(chosen_letters)} 이 담겼다'
