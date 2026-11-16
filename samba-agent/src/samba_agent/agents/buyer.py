@@ -5506,7 +5506,19 @@ class BuyerAgent(AgentBase):
                 and jb.group(1) in seen
                 and all(d in seen for d in address_districts(shipping.get('address')))
             )
-            if m is None or (self._ship_key not in seen and not jibun_ok):
+            # 리(里) 지번은 도로명으로 바뀌면 리 이름이 아예 안 남는다('교산리 155 라비두스아파트' → '교산중앙길 23(함양읍,
+            # 라비두스아파트)') — 번지 뒤 건물 이름과 시·군·구가 모두 보이면 같은 곳으로 본다(실기 2026-11-17 754762320314371)
+            bld = re.search(
+                r'(?:동|리|가)\s*\d[\d-]*\s+([가-힣A-Za-z0-9]{3,})',
+                str(shipping.get('address') or ''),
+            )
+            bld_ok = bool(
+                jb
+                and bld
+                and bld.group(1) in seen
+                and all(d in seen for d in address_districts(shipping.get('address')))
+            )
+            if m is None or (self._ship_key not in seen and not jibun_ok and not bld_ok):
                 raise AgentFailure(
                     'needs_ai',
                     '주문서 배송정보에 고객 주소가 안 들어갔다(배송지 창 저장 안 됨) — 결제하지 않음',
