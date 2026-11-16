@@ -3618,6 +3618,10 @@ class BuyerAgent(AgentBase):
             why = (
                 f'주문서 옵션 불일치({selected})'
                 if selected
+                # 무신사 구매 수량 한도(예: 7일간 1인당 최대 3개) — 옵션은 담기는데 '구매하기'가 주문서로 안 넘어간다.
+                # 사이트는 알림창으로만 알려 줘서 하네스에는 사유가 안 보였다(실기 2026-11-16 노스페이스 버킷햇 2건, 4계정 모두 소진)
+                else '주문서 옵션 못 읽음(구매 수량 한도 — 이 계정은 한도가 풀릴 때까지 못 삼)'
+                if snap.get('lim')
                 else f'주문서 옵션 못 읽음({snap.get("note") or snap.get("error") or "모름"})'
             )
             self.note('계정 견적', mask_text(f'{account}: 불가({why})'))

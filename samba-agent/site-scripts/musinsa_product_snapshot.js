@@ -57,7 +57,7 @@ let ri=ids(ln),R=await sf(rd1,[])
 if(!R.length||R.length<ri.length){R=rd2(ln);ri=R.map(r=>r.id)}
 op=op[0]?op:R.filter(r=>/안함/.test(w)||!/선택\s?안함$/.test(r.name)).map(r=>r.name+(r.so?' (품절)':''))
 let txo=!ri.length&&R.length&&!R.some(r=>/^\(옵션\d+\)$/.test(r.name)),ot=KM&&!R.some(r=>/\d{2,3}/.test(r.name))?KM:oz
-let best=-1,bs=0
+let B=-1,bs=0
 R.forEach((r,i)=>{
 if(r.so)return
 let n=nz(r.name).replace(/^0+(?=[a-z])/,''),s=cs(r.name)||(n&&n===ot?500:n&&(n.length<3?TK.includes(n):w.includes(n))?100+n.length:(r.name.replace(/mm$/i,'').match(/\w+/g)||[]).filter(t=>TK.includes(t.toLowerCase())).length)
@@ -65,18 +65,18 @@ let lw=nz(P(r.name))
 if(SZ.test(ot)&&SZ.test(lw))s=lw===ot?s+50:0
 if(s<1&&(R.length==1||/^(free|f|프리)/.test(n)&&/프리|free/.test(w)))s=150
 if(NN)s=/선택\s?안함|없음/.test(r.name)?600:0
-if(s>bs){bs=s;best=i}})
-if(best<0||bs<1)break
-let sb=R.slice(0,best).filter(r=>r.so).length
+if(s>bs){bs=s;B=i}})
+if(B<0||bs<1)break
+let sb=R.slice(0,B).filter(r=>r.so).length
 if(txo){
-let k=best-sb,L3=await it()
+let k=B-sb,L3=await it()
 if(!H(L3,CL)){await o1(af(L3));L3=await it()}
 let ti=avl(L3)
 if(!ti[k])break
 await ck(ti[k])
-}else if(R[best].id)await ck(R[best].id)
+}else if(R[B].id)await ck(R[B].id)
 else{let all=[],tg=0
-let soM=R.some(r=>r.so),idf=soM?avl:ids,bx=soM||ri.length<R.length?best-sb:best
+let soM=R.some(r=>r.so),idf=soM?avl:ids,bx=soM||ri.length<R.length?B-sb:B
 for(let k=0;k<20&&!tg;k++){
 let cur=idf(ln)
 cur.forEach(i=>all.includes(i)||all.push(i))
@@ -88,7 +88,7 @@ try{await page.scroll('down',an)}catch{break}
 ln=await it()}
 if(!tg)break
 await ck(tg)}
-cho=R[best].name
+cho=R[B].name
 let l2=await it()
 for(let q=0;q<6&&!(pk=await dl());q++){await z();l2=await it()}}}
 if(!pk)return{options:op,note:'nopick'}
@@ -112,4 +112,4 @@ if(cs(P(sel)))sel+=' '+A
 if(KM&&nz(sel)===KM){sel+=' '+A;op=op.map(o=>nz(o)===KM?o+' '+A:o)}
 let s0=t.lastIndexOf('결제 수단'),ms=t.slice(s0,s0+400),methods='무신사머니 무신사페이 토스페이 카카오페이 페이코 네이버페이 카드'.split(' ').filter(n=>ms.includes(n))
 if(!op.length)op=sel?[P(sel)]:[]
-return{product_name:PN,cost,options:op,methods,selected:sel,chosen:cho||op[0]||'',qty:+(tl.match(/\/\s*(\d+)개/)||[])[1]||null}
+return{product_name:PN,cost,options:op,methods,selected:sel,chosen:cho||op[0]||'',lim:/1인당 최대 \d/.test(t),qty:+(tl.match(/\/\s*(\d+)개/)||[])[1]||null}
