@@ -1258,6 +1258,13 @@ class PayerAgent(AgentBase):
                 '카카오페이 결제창이 안 떠 폰으로 결제요청을 못 보냈다 — 결제 안 됨(재결제 전 주문내역 확인)',
                 FailReason.PAY_INTERRUPTED,
             )
+        # 결제창 주소는 떴는데 화면이 아직 안 그려진 때가 있다 — 요소가 하나도 없고 글은 스크립트뿐이었다
+        # (실기 2026-11-16 29CM 21315226677313299 4회: 창을 읽은 지 7초 만에 '칸 없음'으로 멈춤). 탭이나 입력칸이 보일 때까지 기다린다
+        for _ in range(12):
+            if _element_id_of(page, r'tab "카톡결제"') is not None or _element_id_of(page, r'textbox "휴대폰번호"') is not None:
+                break
+            self.tool('wait', ms=1500)
+            page = self.tool('get_page')
         tab = _element_id_of(page, r'tab "카톡결제"')
         if tab is not None:
             # 탭을 눌러도 QR 화면이 그대로일 때가 있다(창이 늦게 뜸) — 휴대폰번호 칸이 보일 때까지 세 번까지 다시 누른다
