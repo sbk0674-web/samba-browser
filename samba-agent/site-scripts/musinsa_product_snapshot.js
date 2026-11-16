@@ -6,7 +6,7 @@ if(!oo)await page.waitFor('구매하기',6e3).catch(z)
 let PN=oo?'':String(await page.title()).replace(/\s+-\s+사이즈.*$|\s*\|\s*무신사$/,'').trim(),sf=async(fn,d)=>{for(let i=0;i<3;i++){try{return await fn()}catch{await z()}}return d},
 tx=async s=>{let t=(await page.get(s?{selector:s}:{})).tree;return t.slice(t.indexOf('PAGE TEXT'))},
 it=async()=>(await sf(()=>page.get({interactive:true}),{tree:''})).tree.split('\n'),
-H=(L,re)=>L.some(l=>re.test(l)),rf=async()=>{for(let i=0;i<3&&/옵션 정보를 불러오지 못/.test(await sf(tx,''));i++){await sf(()=>page.clickText('새로고침',0));await S(2e3)}}
+H=(L,re)=>L.some(l=>re.test(l)),rf=async()=>{for(let i=0;i<3&&/옵션 정보를 불러오지 못/.test(await sf(tx,''));i++){await sf(()=>page.clickText('새로고침'));await S(2e3)}}
 let ln=await it(),BY=/button "(?![^"]*장바구니)[^"]*구매하기/,OPN=/선택 목록 열기/,ID=l=>+l.match(/^\[(\d+)\]/)[1],ck=i=>page.click(i),iL=(a,re)=>{let l=a.find(x=>re.test(x));return l&&ID(l)},
 CL=/선택 목록 닫기/,dl=async()=>/\] button "옵션 삭제/.test(await page.find('옵션 삭제')),CM=/^\[(\d+)\] clickable "([^"]+)"/,
 o1=async L=>{let o=iL(L,OPN);if(o){await ck(o);await z()}},hs=H(ln,/선택 목록 (열기|닫기)/)
@@ -55,7 +55,7 @@ ln=await it()
 let ids=L=>af(L).filter(l=>AR.test(l)).map(ID)
 let ri=ids(ln),R=await sf(rd1,[])
 if(!R.length||R.length<ri.length){R=rd2(ln);ri=R.map(r=>r.id)}
-op=op[0]?op:R.filter(r=>!/선택\s?안함$/.test(r.name)).map(r=>r.name+(r.so?' (품절)':''))
+op=op[0]?op:R.filter(r=>/안함/.test(w)||!/선택\s?안함$/.test(r.name)).map(r=>r.name+(r.so?' (품절)':''))
 let txo=!ri.length&&R.length&&!R.some(r=>/^\(옵션\d+\)$/.test(r.name)),ot=KM&&!R.some(r=>/\d{2,3}/.test(r.name))?KM:oz
 let best=-1,bs=0
 R.forEach((r,i)=>{
@@ -71,9 +71,9 @@ let sb=R.slice(0,best).filter(r=>r.so).length
 if(txo){
 let k=best-sb,L3=await it()
 if(!H(L3,CL)){await o1(af(L3));L3=await it()}
-let tids=avl(L3)
-if(!tids[k])break
-await ck(tids[k])
+let ti=avl(L3)
+if(!ti[k])break
+await ck(ti[k])
 }else if(R[best].id)await ck(R[best].id)
 else{let all=[],tg=0
 let soM=R.some(r=>r.so),idf=soM?avl:ids,bx=soM||ri.length<R.length?best-sb:best
@@ -95,7 +95,7 @@ if(!pk)return{options:op,note:'nopick'}
 for(let W=+args.qty,k=0,L,i;W>1&&!oo&&k<12;k++){L=await it();i=L.findIndex(l=>/x value="\d/.test(l));if(i<0||+L[i].split('"')[1]>=W)break;await ck(ID(L[i+1]));await z()}
 if(!oo){
 let bi=iL(ln,BY)
-bi?await ck(bi):await page.clickText('구매하기',0)
+bi?await ck(bi):await page.clickText('구매하기')
 await z()
 let bb=iL(await it(),/button "바로 구매하기"/);bb&&await ck(bb)}
 let t=''

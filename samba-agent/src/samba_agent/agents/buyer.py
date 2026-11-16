@@ -3657,7 +3657,9 @@ class BuyerAgent(AgentBase):
         # 사이즈 글자(S·M·L·XL·FREE…)도 꼭 맞아야 한다(실기: '상아색 S' 주문에 색만 담긴 'IVORY' 가 통과)
         letters = size_letters(wanted)
         # 사이즈 숫자가 이미 맞았으면 괄호 속 글자 사이즈는 보조 표기다(실기: '090(S)' 주문에 'LIGHT BEIGE · 090')
-        if letters and not sizes and not (size_letters(selected) & letters):
+        # 주문 사이즈 글자가 FREE·ONE 뿐이면 사이즈가 아니다 — 주문서에 FREE 글자가 안 보여도 된다
+        # (실기 2026-11-16 무신사 파우치 20261113101957078:001 'FREE / 선택안함' ↔ 주문서 '선택안함 · 선택안함')
+        if letters and not sizes and not (letters <= {'FREE', 'ONE'}) and not (size_letters(selected) & letters):
             return False
         return bool(self._match_options([selected], wanted))
 
