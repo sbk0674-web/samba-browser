@@ -36,11 +36,12 @@ for (const opt of parts) {
   ls = [...await lines({ interactive: true }), ...await lines({ query: opt || '선택' })]
   // 칸이 하나뿐이고 그 안에 '색 / 사이즈' 가 합쳐져 있으면 쪼개지 말고 통째로 고른다 — '퍼플' 만 찾으면 '퍼플 / M'·'퍼플 / L'… 여럿이 걸린다
   // (실기 2026-11-17 SSG 다이나핏 반팔티: 숨은 '선택하세요' 칸 때문에 칸이 둘로 세어져 옵션을 쪼갰다)
+  // 반복 변수 opt 는 쪼갠 조각이다 — 통째 옵션은 args.option 으로 본다
   if (parts.length > 1) {
     const fk = s => s.replace(/\s*\(남은수량[^)]*\)\s*$/, '').replace(/[\s/]+/g, '')
-    const fu = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] (?:link|button) "/.test(l) && fk(lab(l)) === fk(opt))
+    const fu = [...new Map(ls.map(l => [idL(l), l])).values()].filter(l => /^\[\d+\] (?:link|button) "/.test(l) && fk(lab(l)) === fk(nz(args.option)))
     if (fu.length === 1) {
-      if (/품절|매진/.test(lab(fu[0]))) return { ...R, error: 'sold_out', note: '옵션 품절: ' + opt }
+      if (/품절|매진/.test(lab(fu[0]))) return { ...R, error: 'sold_out', note: '옵션 품절: ' + nz(args.option) }
       await page.click(idL(fu[0]))
       await sleep(1800)
       ls = await lines({ interactive: true })
