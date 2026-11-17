@@ -1450,6 +1450,13 @@ class PayerAgent(AgentBase):
             raise AgentFailure('needs_ai', '카카오페이 결제요청 버튼 없음', FailReason.UNKNOWN)
         self.tool('click', id=button)
         self.tool('wait', ms=KAKAO_REQUEST_WAIT_MS)
+        # 요청을 눌렀다고 폰에 푸시가 간 것은 아니다 — 눌러도 창이 오류 글을 띄우는지 사실부터 남긴다
+        # (사용자 2026-11-18 "카카오로 결제요청 실제로 안옴": 로그는 '요청 보냄'인데 폰엔 요청 알림이 없었다)
+        try:
+            after = re.sub(r'\s+', ' ', str(self.tool('get_page')).split('PAGE TEXT')[-1])
+            self.note('카톡결제 요청 뒤 창 글', mask_text(after[:300]))
+        except AgentFailure:
+            pass
         self.note('카카오페이', '카톡결제 요청 보냄(휴대폰·생년월일은 키마스터 값)')
         # 폰 승인은 지금 앞 탭의 사이트 계정으로 결제 계정을 고른다 — 카카오페이 화면이 앞이면 계정을 못 찾아
         # 'no-account' 로 거절된다(실기 2026-09-30). 승인 동안 구매 계정 프로필로 소싱처 첫 화면을 앞에 둔다
