@@ -201,6 +201,10 @@ def enter_search(
             return None
     phone.tap(box.x, box.y)
     sleep(0.5)
+    # 검색창에 남은 글자를 먼저 지운다 — 사람이 이름을 붙여 넣은 채 두면 'ON' 이 그 뒤에 이어 쳐져('이명자ON')
+    # 적중 0 으로 끝나 송장을 못 읽는다(실기 2026-11-17 폰 검색창에 이름이 남아 있었다). 끝으로 보내 지운다
+    phone.key('123')  # KEYCODE_MOVE_END
+    phone._run('shell', 'input', 'keyevent', *(['67'] * 60))  # KEYCODE_DEL × 60
     phone._run('shell', 'input', 'text', word)
     phone.key('66')  # Enter
     sleep(1.8)
