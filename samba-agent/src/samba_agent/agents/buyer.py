@@ -980,7 +980,9 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
         live
         # 같은 FREE 줄이 가격 붙은 꼴·없는 꼴 두 번 나온다('FREE 59,500'·'FREE') — 전부 프리사이즈면 하나로 본다(2026-11-13 21515225469689257)
         and all(_is_free_size(o) for o in live)
-        and not re.search(r'\d', wanted)
+        # 색 이름 앞의 번호('01초콜릿'·'02토프')는 사이즈가 아니다 — 그 앞번호를 빼고 숫자가 남을 때만 사이즈로 본다
+        # (실기 2026-11-18 지오다노 머플러 '01초콜릿' ↔ ['FREE'] 를 옵션 불일치로 멈췄다)
+        and not re.search(r'\d', re.sub(r'(?<![\d.])\d{1,2}(?=[가-힣A-Za-z])', '', wanted))
         and not size_letters(wanted)
     ):
         return live
