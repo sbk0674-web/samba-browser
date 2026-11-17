@@ -135,9 +135,11 @@ def open_room(phone: Phone, *, sleep: Callable[[float], None] = time.sleep) -> b
             return _in_room(phone.nodes())
         # 새로 연 카카오톡은 '친구' 탭에서 시작한다 — 채팅 탭으로 간 뒤 목록에서 방을 찾는다(실기 2026-10-03:
         # 읽기가 끝나면 카카오톡을 끝내게 한 뒤부터 매번 친구 탭이라 방을 못 찾아 3분마다 실패했다)
-        chat_tab = next((n for n in nodes if n.text == '채팅' and n.y > 1300), None) or find_text(
-            nodes, '채팅'
-        )
+        # 카카오톡이 바뀌어 아래 탭이 '채팅 탭 63개의 새로운 업데이트' 처럼 글이 길어졌다(실기 2026-11-18 — 방을 못 열었다)
+        chat_tab = next(
+            (n for n in nodes if n.y > 1300 and (n.text == '채팅' or n.desc.startswith('채팅 탭'))),
+            None,
+        ) or find_text(nodes, '채팅')
         if chat_tab is not None and not _in_room(nodes):
             phone.tap(chat_tab.x, chat_tab.y) if chat_tab.y > 1300 else phone.tap(180, 1490)
             sleep(2)
@@ -532,8 +534,11 @@ def start_lotteon_gift_tracking_loop(
                     )
                 if res is None:
                     # 2분마다 다시 열면 폰을 쓰는 다른 작업(앱 결제 등)과 계속 부딪친다(2026-10-03)
+                    wait = (
+                        30 * 60
+                    )  # 방을 못 열면 3시간을 통째로 건너뛰지 않고 30분 뒤 다시(카카오톡 화면이 바뀐 날 하루를 날렸다)
                     log.info(
-                        '[롯데ON 선물 송장] 방을 못 열었거나 주문 작업이 시작돼 멈춤 — 3시간 뒤 다시'
+                        '[롯데ON 선물 송장] 방을 못 열었거나 주문 작업이 시작돼 멈춤 — 30분 뒤 다시'
                     )
                 else:
                     log.info(
