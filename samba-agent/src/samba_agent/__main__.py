@@ -248,11 +248,16 @@ def main() -> None:
     queue = JobQueue(settings.db_path)
     from samba_agent.queue.office_scope import load_office_scope
 
-    queue.allowed_job_ids = load_office_scope(settings.db_path, settings.root / 'office-safe-scope.json')
+    queue.allowed_job_ids = load_office_scope(
+        settings.db_path, settings.root / 'office-safe-scope.json'
+    )
     office_scoped = queue.allowed_job_ids is not None
     if office_scoped:
         os.environ['SAMBA_NO_AUTO_CANCEL'] = '1'
-        log.warning('사무실 안전 범위: 신규 선물 %s건만 허용, 사무실 배송·기존 보류 재실행 금지', len(queue.allowed_job_ids))
+        log.warning(
+            '사무실 안전 범위: 신규 선물 %s건만 허용, 사무실 배송·기존 보류 재실행 금지',
+            len(queue.allowed_job_ids),
+        )
     releases = ReleaseStore(settings.root / 'releases.sqlite')
     events = EventLog(settings.root / 'events.sqlite')
     crosscheck_ledger = configure_crosscheck(settings.root / 'ledger.sqlite')
@@ -314,12 +319,15 @@ def main() -> None:
     has_lanes = bridge.supports_lanes()
     # 앱의 자식 탭 추적 수정 적용 전에는 기존 본 작업 통로를 유지한다.
     agent_bridge = bridge
-    agents = build_agents(reg, agent_bridge, decide, wave, settings.compare_accounts_max,
-                          gift_only=office_scoped)
+    agents = build_agents(
+        reg, agent_bridge, decide, wave, settings.compare_accounts_max, gift_only=office_scoped
+    )
     if office_scoped:
         scoped_buyers = [a for a in agents.values() if isinstance(a, BuyerAgent)]
         scoped_buyers += [a.sibling for a in scoped_buyers if a.sibling is not None]
-        if not agents['payer'].gift_only or not all(a.office_shipping_blocked for a in scoped_buyers):
+        if not agents['payer'].gift_only or not all(
+            a.office_shipping_blocked for a in scoped_buyers
+        ):
             raise RuntimeError('사무실 배송 보호 배선 미확인 — 작업 시작 중지')
         log.warning('선물 한정 결제·사무실 배송 보호 배선 확인: True')
     repair_on = settings.repair_enabled
@@ -335,12 +343,17 @@ def main() -> None:
         if settings.repair_api_tiers:
             from samba_agent.repair.tiers import TieredRepairer
 
-            repairer = TieredRepairer(root=settings.root, claude_model=settings.repair_model,
-                                     timeout_s=settings.repair_timeout_s)
+            repairer = TieredRepairer(
+                root=settings.root,
+                claude_model=settings.repair_model,
+                timeout_s=settings.repair_timeout_s,
+            )
             repairer.record(0, 'configuration', 'active', 'Claude API -> Codex SDK -> chat monitor')
             log.info('AI 수리 연결: 1차 Claude API → 2차 Codex SDK → 3차 대화 감시')
         else:
-            repairer = ScriptRepairer(model=settings.repair_model, timeout_s=settings.repair_timeout_s)
+            repairer = ScriptRepairer(
+                model=settings.repair_model, timeout_s=settings.repair_timeout_s
+            )
         script_source = FileScriptSource(settings.site_scripts_file)
         script_history = ScriptHistory(settings.root / 'script-history')
         for agent in agents.values():
@@ -449,12 +462,17 @@ def main() -> None:
             except BridgeError as e:
                 return f'Error: {e}'
 
-        operator_agent = OperatorAgent(model=settings.operator_model, timeout_s=settings.operator_timeout_s)
+        operator_agent = OperatorAgent(
+            model=settings.operator_model, timeout_s=settings.operator_timeout_s
+        )
         if settings.repair_api_tiers:
             from samba_agent.repair.tiers import TieredOperator
 
-            operator_agent = TieredOperator(root=settings.root, claude_model=settings.operator_model,
-                                            timeout_s=settings.operator_timeout_s)
+            operator_agent = TieredOperator(
+                root=settings.root,
+                claude_model=settings.operator_model,
+                timeout_s=settings.operator_timeout_s,
+            )
         operator_service = OperatorService(
             operator_agent,
             call=_operator_call,
@@ -510,7 +528,9 @@ def main() -> None:
                 queue,
                 accept=make_after_done(
                     source_of_followup,
-                    gift_repair=GiftScreenRepairer(model=settings.repair_model) if settings.repair_enabled else None,
+                    gift_repair=GiftScreenRepairer(model=settings.repair_model)
+                    if settings.repair_enabled
+                    else None,
                 ),
                 source_of_job=_source_sku_of,
                 read_detail=detail_reader(bridge),
@@ -519,8 +539,12 @@ def main() -> None:
                 read_order=wave.get_order if wave is not None else None,
                 add_memo=wave.add_memo if wave is not None else None,
             ),
-            operator=operator_service.submit if operator_service is not None and not office_scoped else None,
-            operator_drain=operator_service.drain if operator_service is not None and not office_scoped else None,
+            operator=operator_service.submit
+            if operator_service is not None and not office_scoped
+            else None,
+            operator_drain=operator_service.drain
+            if operator_service is not None and not office_scoped
+            else None,
             # 중국 크림(식화) 주문은 폰 得物 앱으로 산다 — 알리페이 비밀번호는 앱 폰 결제 도구가 키마스터에서 넣는다
             phone_sources=(
                 {
@@ -544,8 +568,12 @@ def main() -> None:
     )
 
     if office_scoped:
-        if (worker.d.flag_order is not None or worker.d.phone_sources
-                or worker.d.operator is not None or worker.d.operator_drain is not None):
+        if (
+            worker.d.flag_order is not None
+            or worker.d.phone_sources
+            or worker.d.operator is not None
+            or worker.d.operator_drain is not None
+        ):
             raise RuntimeError('제한 범위 밖 실행 통로가 열려 있다 — 작업 시작 중지')
         log.warning('선물 제한 범위: 폰 구매·기존 보류 자동 재실행 비활성 확인')
 
@@ -563,9 +591,9 @@ def main() -> None:
         start_dewu_tracking_loop(
             wave, idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live())
         )
-        # 롯데ON 선물 주문 송장(폰 카카오톡 읽기) — 기본 꺼짐. 폰을 다른 자동화(당근 등록)와 같이 쓰면
-        # 카톡이 앞으로 튀어나와 충돌해 2026-10-20 사용자 지시로 끔. 필요하면 SAMBA_LOTTEON_GIFT_TRACKING=1
-        if os.environ.get('SAMBA_LOTTEON_GIFT_TRACKING') == '1':
+        # 롯데ON 선물 주문 송장(폰 카카오톡 읽기) — 기본 켜짐. 2026-10-20 에 당근 폰 자동화와 겹쳐 끈 적이 있으나
+        # 당근 작업을 한 달째 안 해 이유가 사라졌다(사용자 2026-11-18). 끄려면 SAMBA_LOTTEON_GIFT_TRACKING=0
+        if os.environ.get('SAMBA_LOTTEON_GIFT_TRACKING') != '0':
             start_lotteon_gift_tracking_loop(
                 wave,
                 idle=lambda: not any(j.state in ('queued', 'running') for j in queue.live()),
@@ -573,7 +601,9 @@ def main() -> None:
             )
     bot = SambaBot(slack_app, worker, queue, settings, _diagnose_text)
     if settings.money_alert_receiver and settings.wave_tenant_id:
-        sms = SambaSmsSender(settings.money_alert_receiver, settings.wave_tenant_id, container=settings.sms_container)
+        sms = SambaSmsSender(
+            settings.money_alert_receiver, settings.wave_tenant_id, container=settings.sms_container
+        )
         money_alerts = MoneyBalanceAlerts(settings.db_path.parent / 'money-alerts.sqlite', sms.send)
         for agent in agents.values():
             if isinstance(agent, PayerAgent):
