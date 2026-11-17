@@ -503,18 +503,29 @@ def start_lotteon_gift_tracking_loop(
     seen = SeenStore(state_dir / SEEN_FILE)
 
     def loop() -> None:
-        wait = INTERVAL_S
+        # 켜자마자 곧 한 번 돈다 — 3시간 뒤에야 처음 돌면 그동안 송장이 밀린다. 못 돌았을 때(작업 중·폰 연결 없음)는
+        # 3시간을 통째로 건너뛰지 않고 RETRY_S 뒤에 다시 본다(2026-11-18 야간에 폰 연결이 없어 조용히 건너뛰었다)
+        wait = 120
         while True:
             time.sleep(wait)
             wait = INTERVAL_S
             try:
                 if not idle():
+                    wait = RETRY_S
+                    log.info(
+                        '[롯데ON 선물 송장] 주문 작업이 있어 건너뜀 — %d분 뒤 다시', RETRY_S // 60
+                    )
                     continue
                 serial = find_phone_serial(adb_path, want)
                 if serial is None:
+                    wait = RETRY_S
+                    log.info(
+                        '[롯데ON 선물 송장] 폰 연결을 못 찾아 건너뜀 — %d분 뒤 다시', RETRY_S // 60
+                    )
                     continue
                 with PHONE_BUSY:
                     if not idle():
+                        wait = RETRY_S
                         continue
                     res = collect_lotteon_gift_tracking(
                         wave, Phone(adb_path, serial), seen, idle=idle
