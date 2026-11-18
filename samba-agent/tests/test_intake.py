@@ -6,7 +6,7 @@ import pytest
 from samba_agent.agents.registry import Registry
 from samba_agent.failures import FailReason
 from samba_agent.queue.db import JobQueue
-from samba_agent.queue.intake import Intake, intake_line, twin_order_no
+from samba_agent.queue.intake import Intake, intake_line, twin_order_no, twin_order_nos
 from samba_agent.settings import DEFAULT_ROOT
 from samba_agent.wave.client import WaveError, WaveOrder
 
@@ -649,6 +649,37 @@ def test_twin_order_no_는_구분자만_바꾼다():
     assert twin_order_no('20261025100544087:003') == '20261025100544087-003'
     assert twin_order_no('746941046456350') is None
     assert twin_order_no('A-SN241012963') is None
+
+
+def test_twin_order_nos_는_구분자_콜론_대시_공백만_바꾼다():
+    # 롯데홈쇼핑: 같은 주문이 '20261118J71863:1142232850' 과 '20261118J71863 1142232850' 로 두 번 들어왔다(2026-11-18)
+    assert twin_order_nos('20261118J71863:1142232850') == ['20261118J71863-1142232850', '20261118J71863 1142232850']
+    assert twin_order_nos('20261118J71863 1142232850') == ['20261118J71863:1142232850', '20261118J71863-1142232850']
+    assert twin_order_nos('3483411388 2913276128') == ['3483411388:2913276128', '3483411388-2913276128']
+    # 구분자만 다른 것이 아니면 쌍둥이가 아니다
+    assert twin_order_nos('746941046456350') == []
+    assert twin_order_nos('A-SN241012963') == []
+    assert twin_order_nos('') == []
+
+
+def test_롯데홈쇼핑_번호가_공백으로_다시_들어오면_쌍둥이가_이행했어도_접수하지_않는다(setup):
+    q, slack, make = setup
+    job, _ = q.enqueue('20261118J71863:1142232850', 'U_colon', {}, 'ts0')
+    q.finish(job.id, 'done')
+    intake, _w = make([wave_order('20261118J71863 1142232850', wave_id='U_space')])
+    report = intake.run_once()
+    assert (report.enqueued, report.skipped_live) == (0, 1)
+    assert q.get('U_space') is None
+
+
+def test_뒤_숫자가_다르면_같은_주문이_아니다(setup):
+    # 같은 앞부분에 다른 끝 번호 = 다른 주문줄이다 — 막지 않는다
+    q, slack, make = setup
+    job, _ = q.enqueue('20261118J71863:1142232850', 'U_a', {}, 'ts0')
+    q.finish(job.id, 'done')
+    intake, _w = make([wave_order('20261118J71863 1142232851', wave_id='U_b')])
+    report = intake.run_once()
+    assert report.enqueued == 1
 
 
 def test_kakao_unapproved_requeues_with_kakao_after_wait(tmp_path):

@@ -53,6 +53,20 @@ def twin_order_no(order_no: str) -> str | None:
     return f'{m.group(1)}{sep}{m.group(3)}'
 
 
+# 앞부분 + 구분자(':' '-' 공백) + 끝 숫자 — 롯데홈쇼핑 '20261118J71863:1142232850' ↔ '20261118J71863 1142232850' 같은
+# 17자리가 아닌 번호도 구분자만 바뀐 채 한 번 더 들어온다(실기 2026-11-18 스노우피크 티: 두 계정으로 이중 결제)
+_LOOSE_TWIN_ORDER_NO = re.compile(r'^(\S+?)([-: ])(\d{3,12})$')
+
+
+def twin_order_nos(order_no: str) -> list[str]:
+    """같은 마켓 주문이 구분자(':' '-' 공백)만 바뀐 채 다시 들어온 표기들. 그런 꼴이 아니면 빈 목록."""
+    m = _LOOSE_TWIN_ORDER_NO.match(order_no or '')
+    if not m:
+        return []
+    head, sep, tail = m.groups()
+    return [f'{head}{x}{tail}' for x in (':', '-', ' ') if x != sep]
+
+
 @dataclass(frozen=True)
 class IntakeReport:
     """한 바퀴 결과. 슬랙 `주문처리 전체` 답장이 이 숫자를 그대로 읽어 준다."""
@@ -394,8 +408,7 @@ class Intake:
             # 같은 마켓 주문이 다른 수집 경로로 한 번 더 들어온 행(KT알파 '…:001' ↔ 플레이오토 '…-001')이면
             # 이미 산 것을 또 사지 않는다(실기 2026-10-26: 202610261605060003 뒤 202610261703190004 이중 구매).
             # 삼바웨이브 쪽 수집기도 거르지만, 여기서도 막아야 수집기 회귀 때 결제까지 가지 않는다
-            twin = twin_order_no(order.order_no)
-            if twin:
+            for twin in twin_order_nos(order.order_no):
                 twin_job = self._queue.find(twin, None)
                 # 쌍둥이가 큐에 어떤 상태로든 있으면 이 행은 중복 수집이다 — 예전엔 done 일 때만 막아서
                 # 쌍둥이가 needs_ai(주문 조회 실패)로 멈춰 있는 사이 대시 행이 들어와 사러 갔다
