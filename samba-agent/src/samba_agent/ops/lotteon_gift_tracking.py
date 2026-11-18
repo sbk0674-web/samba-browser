@@ -548,7 +548,10 @@ def start_lotteon_gift_tracking_loop(
                         res['skipped'],
                     )
             except Exception:
-                log.exception('[롯데ON 선물 송장] 수집 실패 — 다음 바퀴에 다시')
+                wait = (
+                    30 * 60
+                )  # adb 가 잠깐 끊긴 것(실기 2026-11-18 input text 시간 초과)이 3시간을 날리지 않게
+                log.exception('[롯데ON 선물 송장] 수집 실패 — 30분 뒤 다시')
 
     th = threading.Thread(target=loop, name='lotteon-gift-tracking', daemon=True)
     th.start()
