@@ -5632,7 +5632,7 @@ class BuyerAgent(AgentBase):
             raise AgentFailure(
                 'needs_ai',
                 # 원인을 알 수 있게 되읽은 값의 모양(개인정보 가림)을 같이 남긴다(2026-11-09 선물 주문 3건 note 빈칸)
-                f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:80])} '
+                f'배송지 저장 확인 실패: {mask_text(str(saved.get("note") or "")[:700])} '
                 f'[ok={saved.get("ok")} 이름일치={shipping_matches(shipping, saved)} '
                 # 어느 항목에서 어긋났는지(개인정보 없이) — 이름·도시·우편번호 각각(2026-11-10 20261109102050 원인 불명)
                 f'이름={_same_name(str(shipping.get("name", "")), str(saved.get("name", "")))} '
