@@ -6,7 +6,7 @@ let WF=/화이트|white|아이보리|크림/i;let BC='블랙|black,화이트|whi
 let CODE=k=>/^(?=.*\d)(?=.*[A-Za-z])\w{5,}$/.test(k);
 function pe(t){let o=[];for(let l of t.split('\n')){let m=l.match(/^\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?/);if(m)o.push({id:parseInt(m[1]),role:m[2],text:m[3]||''})}return o}
 let gr=async s=>pe((await page.get({selector:s})).tree);
-function sc(ov,size){let t=String(size||'').trim();let o=cl(ov);if(!t||!o)return 0;if(nm(o)===nm(t))return 100;let toks=TK(t);
+function sc(ov,size){let t=cl(String(size||'')).trim();let o=cl(ov);if(!t||!o)return 0;if(nm(o)===nm(t))return 100;let toks=TK(t);
 for(let k of toks)if(nm(k)===nm(o)||nm(bz(k))===nm(o))return 90;
 let ob=o.match(/\(([^)]+)\)/);if(ob)for(let k of toks)if(nm(k)===nm(ob[1]))return 85;
 for(let k of toks)if(k.length>1&&nm(k)&&!/^(x{0,3}[sml]|free)$/i.test(k)&&(nm(o).includes(nm(k))||nm(k).includes(nm(o))))return 70;

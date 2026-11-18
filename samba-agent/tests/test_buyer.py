@@ -2457,3 +2457,26 @@ def test_무신사_옵션_이름표를_떼고_넘긴다():
 
     order = OrderRef(order_no='N2', source='MUSINSA', seller='롯데홈쇼핑', sku='가방', option='옵션:14 Inch', qty=1)
     assert json.loads(snapshot_args('buyer.musinsa', order))['size'] == '14 Inch'
+
+
+def test_남성_상품의_글자_사이즈_주문은_남성_표의_숫자_옵션과_맞춘다():
+    from samba_agent.agents.buyer import men_size_table_options
+
+    opts = [
+        '[품절] 95 95,400 품절',
+        '[품절] 100 95,400 품절',
+        '105 95,400 1개 남음 (품절임박)',
+        '110 95,400 1개 남음 (품절임박)',
+        '[품절] 115 95,400 품절',
+    ]
+    name = '컨버스 자켓 남성용 아웃도어 멀티포켓 카라 검정 재킷'
+    # 2XL → 110
+    assert men_size_table_options(opts, '블랙 2XL', name) == ['110 95,400 1개 남음 (품절임박)']
+    # XL → 105
+    assert men_size_table_options(opts, '블랙 XL', name) == ['105 95,400 1개 남음 (품절임박)']
+    # 여성 상품·성별 표기 없는 상품·숫자가 든 주문 옵션은 이 규칙을 쓰지 않는다
+    assert men_size_table_options(opts, '블랙 2XL', '여성 패딩 자켓') == []
+    assert men_size_table_options(opts, '블랙 2XL', '컨버스 자켓') == []
+    assert men_size_table_options(opts, '블랙 2XL 110', name) == []
+    # 표의 숫자가 품절이면 고르지 않는다
+    assert men_size_table_options(opts, '블랙 3XL', name) == []

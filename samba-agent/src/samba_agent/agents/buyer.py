@@ -1137,6 +1137,38 @@ def size_letter_options(options: list[str], wanted: str | None) -> list[str]:
     return same if len(same) == 1 else []
 
 
+# 한국 남성 상의 표 — 글자 사이즈 ↔ 선택지의 숫자 사이즈. 여성 표(S80·M85·L90)와 달라 남성 상품일 때만 쓴다
+_MEN_LETTER_KR_SIZE = {'S': 90, 'M': 95, 'L': 100, 'XL': 105, '2XL': 110, '3XL': 115}
+_LEADING_KR_SIZE_RE = re.compile(r'^0*(\d{2,3})(?=\s|\(|$)')
+
+
+def men_size_table_options(options: list[str], wanted: str | None, name: str) -> list[str]:
+    """남성 상품의 글자 사이즈 주문(블랙 2XL)을 선택지의 숫자 사이즈(110)와 표로 맞춘다 — 후보가 하나일 때만.
+
+    AI 옵션 매칭은 같은 입력에도 답이 바뀐다(실기 2026-11-18 롯데온 컨버스 21315227737463299: 같은 [블랙 2XL] ↔
+    '105·110' 을 한 번은 110 으로, 다음엔 '없음'으로 답했다). 상품명에 '남성'이 있고 '여성'이 없을 때, 주문 옵션이
+    글자 사이즈 하나뿐이고 숫자가 없으면, 남성 표의 숫자와 같은 품절 아닌 후보가 정확히 하나일 때만 그것을 준다.
+    """
+    if '남성' not in name and '남자' not in name:
+        return []
+    if '여성' in name or '여자' in name:
+        return []
+    letters = size_letters(wanted or '')
+    if len(letters) != 1 or size_numbers(wanted or ''):
+        return []
+    target = _MEN_LETTER_KR_SIZE.get(next(iter(letters)))
+    if target is None:
+        return []
+    hit = []
+    for o in options:
+        if _sold_out(o):
+            continue
+        m = _LEADING_KR_SIZE_RE.match(o.strip())
+        if m and int(m.group(1)) == target:
+            hit.append(o)
+    return hit if len(hit) == 1 else []
+
+
 def numeric_overlap_options(options: list[str], wanted: str | None) -> list[str]:
     """AI 옵션 매칭에 넘길 후보 — 품절이 아니고, 주문 옵션에 사이즈 숫자가 있으면 그 숫자가 하나라도 든 것만.
 
@@ -3769,6 +3801,13 @@ class BuyerAgent(AgentBase):
                 mask_text(f'[{wanted}] → {by_letter[0]} (사이즈 글자 일치, 선택지에 색 표기 없음)'),
             )
             return by_letter
+        by_men = men_size_table_options(options, wanted, getattr(self, '_sku_name', ''))
+        if by_men:
+            self.note(
+                '옵션 선택',
+                mask_text(f'[{wanted}] → {by_men[0]} (남성 사이즈표: 글자 사이즈 ↔ 숫자 사이즈)'),
+            )
+            return by_men
         by_code = single_digit_code_options(options, wanted)
         if len(by_code) == 1:
             self.note(
