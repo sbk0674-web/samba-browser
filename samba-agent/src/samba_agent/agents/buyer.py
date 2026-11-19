@@ -5559,7 +5559,9 @@ class BuyerAgent(AgentBase):
                 and bld.group(1) in seen
                 and all(d in seen for d in address_districts(shipping.get('address')))
             )
-            if m is None or (self._ship_key not in seen and not jibun_ok and not bld_ok):
+            if getattr(self, '_gift_quick_saved', False):
+                pass  # 선물 '빠른 선물' 주문서는 주소 칸이 없거나 비어 있다 — 위 저장 확인이 이미 이름·주소를 되읽어 맞췄다
+            elif m is None or (self._ship_key not in seen and not jibun_ok and not bld_ok):
                 raise AgentFailure(
                     'needs_ai',
                     '주문서 배송정보에 고객 주소가 안 들어갔다(배송지 창 저장 안 됨) — 결제하지 않음',
@@ -5657,6 +5659,7 @@ class BuyerAgent(AgentBase):
 
     def _save_edited_shipping(self, shipping: dict[str, object], args: dict[str, object]) -> None:
         """덮어쓴 둘째 배송지를 저장하고 골라 주문서에 반영한다. 주문서에서 되읽은 값이 달라야 멈춘다."""
+        self._gift_quick_saved = False
         saved = self.script_json(
             f'{source_of(self.spec.name).key}_save_edited',
             {k: v for k, v in args.items() if k in ('name', 'address', 'tab', 'gift')},
@@ -5682,6 +5685,9 @@ class BuyerAgent(AgentBase):
             )
         # 롯데온이 지번 주소를 도로명으로 바꿔 저장한다 — 주문서 대조 열쇠는 롯데온이 되돌려 준 주소에서 뽑는다(2026-11-12)
         self._ship_resolved = str(saved.get('address') or '')
+        # 저장 스크립트가 고객 이름·주소를 되읽어 맞다고 확인했고 '빠른 선물'까지 켰다 — 이 상태의 선물 주문서는
+        # 주소 칸이 화면에서 없어져 결제 직전 주소 확인이 칸을 못 찾는다(실기 2026-11-19 755590556958737·755593681584158)
+        self._gift_quick_saved = bool(saved.get('ok') and saved.get('quick_gift'))
 
     def _confirm_shipping(self, shipping: dict[str, object], args: dict[str, object]) -> None:
         """팝업 폼 사이트는 전화까지 채운 폼을 저장/적용해야 주문서에 반영된다(sources.yaml shipping_confirm).
