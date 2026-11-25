@@ -24,7 +24,11 @@ from samba_agent.agents.buyer import (
     size_letters,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment
-from samba_agent.agents.order_identity import _LETTER_KR_SIZES, color_code_conflict
+from samba_agent.agents.order_identity import (
+    _LETTER_KR_SIZES,
+    color_code_conflict,
+    cross_color_conflict,
+)
 from samba_agent.export.desktop import toast
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
@@ -381,6 +385,16 @@ def _sizes(option: str | None, selected: str) -> list[str]:
     return re.findall(r'(?<![\d.])(\d{2,3}(?:\.5)?)(?![\d.])', f'{option or ""} {selected}')
 
 
+def _shoe_mm(text: str | None) -> set[int]:
+    """글자 속 신발 mm 사이즈(220~329 중 5 의 배수). 가격('127,250')은 먼저 뺀다."""
+    plain = re.sub(r'\d{1,3}(?:,\d{3})+', ' ', text or '')
+    return {
+        int(n)
+        for n in re.findall(r'(?<![\d.])(2[2-9]\d|3[0-2]\d)(?![\d.])', plain)
+        if int(n) % 5 == 0
+    }
+
+
 def order_form_keys(product_name: str, option: str | None, selected: str = '') -> bool:
     """대조할 근거(고유 단어·사이즈)가 있는가."""
     return bool(_name_words(product_name) or _sizes(option, selected))
@@ -441,9 +455,18 @@ def order_form_mismatch(
     low = text.lower()
     if color_code_conflict(option, selected):
         return '주문 옵션과 선택된 색상 코드가 다르다 — 결제하지 않음'
+    # 주문 옵션 색(BLACK)과 주문서에 담긴 옵션 색(CRE(CREAM))이 둘 다 있고 안 겹치면 다른 색이다 — 결제하지 않음
+    # (실기 2026-11-23 6276 노스페이스 토트 'BLACK ONE' 주문에 'CRE(CREAM) ONE' 이 담겨 결제·사무실 도착)
+    if cross_color_conflict(option, selected):
+        return '주문 옵션 색과 주문서에 담긴 색이 다르다 — 결제하지 않음'
     # 주문 옵션의 색 코드(라코스테 'SKB/초콜릿향 3')가 주문서에 없고 주문서엔 다른 색 코드('XFJ(크림)')가 보이면 다른 색이다.
     # 색·사이즈 2단 선택에서 사이즈만 골라 첫 색으로 결제했다(실기 2026-11-15 롯데온 21315226309723299)
-    order_codes = re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})(?=/|\s|$)', option or '')
+    # 'ONE'(원사이즈)·'XXL' 같은 사이즈 글자는 색 코드가 아니다 — 'BLACK ONE' 의 ONE 이 색 코드로 잡혀 이 검사를 건너뛰고 통과했다
+    order_codes = [
+        c
+        for c in re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})(?=/|\s|$)', option or '')
+        if c not in {'ONE', 'XXL', 'XXS', 'ALL', 'FRE'}
+    ]
     sheet_codes = set(re.findall(r'(?<![A-Za-z0-9])([A-Z]{3})\(', text))
     if (
         order_codes
@@ -453,6 +476,26 @@ def order_form_mismatch(
         )
     ):
         return f'주문 색 코드 {order_codes} 대신 주문서엔 {sorted(sheet_codes)} 가 담겼다 — 결제하지 않음'
+    # 주문서에 '사이즈 : AS' 처럼 담긴 사이즈 줄이 있으면, 주문 옵션 끝 조각(A3XL)과 정확히 같아야 한다
+    # (실기 2026-11-22 SSG 선물 아디다스 '블랙 / A3XL' 주문인데 AS 가 담겨 결제됐다 — 'A' 붙은 사이즈를 아래 글자 대조가 몰랐다)
+    chosen_line = re.search(r'사이즈\s*:\s*([A-Za-z0-9()./]+)', text)
+    ordered_tail = [t for t in re.split(r'[\s/,·]+', (option or '').strip()) if t][-1:]
+    if chosen_line and ordered_tail:
+        tail = ordered_tail[0].upper()
+        chosen_size = chosen_line.group(1).upper()
+        size_pat = r'[AJ]?(?:\d?X{0,3}[SML]|XS|XL|\d?XL)'
+        if (
+            re.fullmatch(size_pat, tail)
+            and re.fullmatch(size_pat, chosen_size)
+            and tail != chosen_size
+        ):
+            return f'옵션 사이즈 [{tail}] 주문인데 주문서엔 [{chosen_size}] 이 담겼다'
+    # 신발 mm 사이즈(220~329, 5 단위) — 주문 옵션과 주문서에 담긴 옵션의 mm 가 다르면 결제하지 않는다
+    # (실기 2026-11-22 롯데온 노스페이스 270 주문인데 260 이 담겨 결제됐다 — 품번 'NS94R72L' 속 숫자가 주문서에 있어 아래 대조를 통과했다)
+    ordered_mm = _shoe_mm(option)
+    chosen_mm = _shoe_mm(selected)
+    if ordered_mm and chosen_mm and not (ordered_mm & chosen_mm):
+        return f'옵션 신발 사이즈 {sorted(ordered_mm)} 주문인데 주문서엔 {sorted(chosen_mm)} 이 담겼다'
     sizes = _sizes(option, selected)
     if sizes and not any(re.search(rf'(?<![\d.]){re.escape(x)}(?![\d.])', text) for x in sizes):
         return f'옵션 {sorted(set(sizes))} 이 주문서에 없다'
@@ -526,6 +569,20 @@ def order_form_mismatch(
         page_letters = size_letters(text)
         if page_letters and not (ordered_letters & page_letters):
             return f'옵션 사이즈 {sorted(ordered_letters)} 주문인데 주문서엔 {sorted(page_letters)} 만 보인다'
+    # 품번 대조 — 주문 상품명의 모델코드(NN2PS07J)와 주문서의 모델코드(NN2PR80B_CRE)가 앞 네 글자(같은 브랜드 라인)는
+    # 같은데 코드 자체가 다르면 다른 상품이다. 이름 단어 하나('토트')만 겹쳐도 같은 상품으로 통과해, 삼바에 잘못 연결된
+    # 다른 상품(크림 어반 패딩 토트)을 'BLACK 린덴 토트백' 주문으로 샀다(실기 2026-11-23 6276, 사용자 "블랙인데 왜 크림")
+    base_for_code = re.sub(r'\[[^\]]*\]', ' ', product_name or '')
+    order_models = {
+        m.upper() for m in re.findall(r'(?<![A-Za-z0-9])([A-Za-z]{2,4}\d[A-Za-z0-9]{4,})(?![A-Za-z0-9])', base_for_code)
+    }
+    sheet_models = {
+        m.upper() for m in re.findall(r'(?<![A-Za-z0-9])([A-Za-z]{2,4}\d[A-Za-z0-9]{4,})', text)
+    }
+    if order_models and sheet_models and not (order_models & sheet_models):
+        near = [(o, s) for o in order_models for s in sheet_models if o[:4] == s[:4] and o != s]
+        if near and not any(o in text.upper() for o in order_models):
+            return f'상품 품번 {sorted(order_models)} 주문인데 주문서엔 {sorted(sheet_models)} 가 담겼다 — 결제하지 않음'
     pno = re.sub(r'\D', '', product_no or '')
     if len(pno) >= 6 and _has_number(text, pno):
         return None

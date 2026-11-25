@@ -10,11 +10,13 @@ from samba_agent.agents.buyer import (
     OFFICE_SHIPPING,
     BuyerAgent,
     address_districts,
+    purchase_limit_suspected,
     road_key,
     shipping_matches,
     snapshot_args,
 )
 from samba_agent.agents.contracts import Assignment, OrderRef
+from samba_agent.agents.order_identity import option_color_filter
 from samba_agent.agents.registry import Registry
 from samba_agent.bridge.client import BridgeClient
 from samba_agent.failures import FailReason
@@ -2480,3 +2482,66 @@ def test_남성_상품의_글자_사이즈_주문은_남성_표의_숫자_옵션
     assert men_size_table_options(opts, '블랙 2XL 110', name) == []
     # 표의 숫자가 품절이면 고르지 않는다
     assert men_size_table_options(opts, '블랙 3XL', name) == []
+
+
+def test_purchase_limit_suspected_only_when_order_form_never_opened() -> None:
+    # 옵션 칸이 없는 상품: 구매하기가 주문서로 안 넘어가고 '1인당 최대 N개' 안내만 있으면 구매 한도(실기 2026-11-23 6302)
+    assert purchase_limit_suspected({'options': [], 'selected': '', 'cost': None, 'lim': True})
+    # 주문서가 열려 원가·옵션을 읽었으면 한도가 아니다(안내 문구는 정상 상품에도 있다)
+    assert not purchase_limit_suspected(
+        {'options': ['NE3CS51B'], 'selected': 'ONE', 'cost': 28860, 'lim': True}
+    )
+    assert not purchase_limit_suspected({'options': [], 'selected': '', 'cost': 28860, 'lim': True})
+    # 한도 안내가 없으면 옵션 못 읽음은 다른 사유다
+    assert not purchase_limit_suspected({'options': [], 'selected': '', 'cost': None, 'lim': False})
+
+
+def test_selected_color_conflict_blocks_even_after_bare_size_reselect():
+    # 실기 2026-11-23 6276: AI 가 'ONE' 만 골라 다시 열면 재선택 글자 포함 검사가 색을 안 봐서 크림이 통과했다
+    agent = object.__new__(BuyerAgent)
+    agent._reselected = {'BLACK ONE': 'ONE'}
+    assert agent._selected_matches('CRE(CREAM) ONE', 'BLACK ONE') is False
+
+
+def test_color_filter_rejects_bare_size_when_listed_colors_miss_the_ordered_color():
+    # 실기 2026-11-23 6276: 목록 'CRE(CREAM) ONE, CRE(CREAM), ONE, ONE' 에 BLACK 이 없는데 'ONE' 만 골라 크림이 결제됐다
+    opts = ['CRE(CREAM) ONE', 'CRE(CREAM)', 'ONE', 'ONE']
+    assert option_color_filter('BLACK ONE', opts, ['ONE']) == []
+    assert option_color_filter('BLACK ONE', opts, ['CRE(CREAM) ONE']) == []
+
+
+def test_color_filter_keeps_same_color_and_single_color_products():
+    assert option_color_filter('BLACK ONE', ['BLK(BLACK) ONE', 'CRE(CREAM) ONE'], ['BLK(BLACK) ONE']) == ['BLK(BLACK) ONE']
+    # 목록에 색이 전혀 없는 상품(색이 하나뿐)은 사이즈만 맞으면 통과한다
+    assert option_color_filter('블랙 ONE', ['ONE'], ['ONE']) == ['ONE']
+    # 주문에 색이 없으면 건드리지 않는다
+    assert option_color_filter('270', ['CRE(CREAM) 270'], ['CRE(CREAM) 270']) == ['CRE(CREAM) 270']
+    # 넓힌 색 이름(올리브·라일락)도 대조한다
+    assert option_color_filter('올리브 M', ['LILAC M'], ['LILAC M']) == []
+
+
+def test_29cm_주문서의_LG는_L_사이즈다():
+    # 실기 2026-11-25 29CM 21315230448703299: '화이트 L' 주문이 주문서 '화이트-LG' 라서 불일치로 멈췄다
+    agent = object.__new__(BuyerAgent)
+    agent._reselected = {}
+    assert agent._selected_matches('화이트-LG', '화이트 L') is True
+    # 다른 사이즈·다른 색은 여전히 다르다
+    assert agent._selected_matches('화이트-MD', '화이트 L') is False
+    assert agent._selected_matches('블랙-LG', '화이트 L') is False
+
+
+def test_당근_주문은_손님_주소가_없으면_까대기로_본다():
+    # 실기 2026-11-25 FMIB261125061555PGJD7P: 태그가 비어 직배로 읽혀 '배송지를 받지 못했다' 로 멈췄다
+    agent = object.__new__(BuyerAgent)
+    agent.spec = type('S', (), {'name': 'buyer.musinsa'})()
+    agent._shipping_fn = lambda key, kind: {'name': '', 'address': ''}
+    order = OrderRef(order_no='FMIB1', source='무신사', seller='당근마켓', sku='티셔츠 100', qty=1)
+    assert agent._daangn_without_address(order) is True
+    assert agent.order_type_of(order, {}) == 'kkadaegi'
+    # 주소가 있으면 예전 판정 그대로
+    agent._shipping_fn = lambda key, kind: {'name': '김', 'address': '서울'}
+    assert agent._daangn_without_address(order) is False
+    # 당근이 아니면 건드리지 않는다
+    other = OrderRef(order_no='A2', source='무신사', seller='쿠팡', sku='SKU', qty=1)
+    agent._shipping_fn = lambda key, kind: {'name': '', 'address': ''}
+    assert agent._daangn_without_address(other) is False

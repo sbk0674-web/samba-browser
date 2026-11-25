@@ -91,8 +91,15 @@ def _paid_key(order: WaveOrder) -> tuple[int, float]:
     return (0, paid.timestamp())
 
 
+def _is_daangn(order: WaveOrder) -> bool:
+    """당근 주문인가 — 주문번호가 '당근 N' 이거나 판매자·채널이 당근마켓(상품주문번호 FMIB… 모양)."""
+    return (order.order_number or '').startswith('당근 ') or any(
+        (value or '').strip().startswith('당근마켓') for value in (order.seller, order.channel_name)
+    )
+
+
 def _daangn_single_stock(order: WaveOrder) -> bool:
-    return (order.order_number.startswith('당근 ')
+    return (_is_daangn(order)
             and (order.source_site or '').upper() == 'MUSINSA'
             and bool(order.source_url))
 

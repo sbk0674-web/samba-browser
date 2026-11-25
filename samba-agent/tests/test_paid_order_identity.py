@@ -249,3 +249,13 @@ def test_cross_color_conflict_blocks_other_color_same_model():
     # 노스페이스 '화이트라벨'은 색이 아니다
     assert cross_color_conflict('노스페이스 화이트라벨 클리프 로우 GRAY', '화이트라벨 클리프 로우 스니커즈 GRAY') is None
     assert cross_color_conflict('노스페이스 화이트라벨 BLACK', '화이트라벨 그레이') is not None
+
+
+def test_숫자와_글자_사이즈를_같이_적은_주문은_글자를_빼고_맞춘다() -> None:
+    # 실기 2026-11-25 21315230430023299: '라이트 베이지 100/L' ↔ 'LIGHT BEIGE · 100'
+    assert paid_option_matches('라이트 베이지 100/L', 'LIGHT BEIGE · 100')
+
+
+def test_사이즈_숫자가_글자_표에_없으면_여전히_다르다() -> None:
+    assert not paid_option_matches('라이트 베이지 100/L', 'LIGHT BEIGE · 105')
+    assert not paid_option_matches('라이트 베이지 100/L', 'LIGHT GREY · 100')

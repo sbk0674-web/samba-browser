@@ -7,7 +7,7 @@ import respx
 
 from samba_agent.agents.base import AgentFailure
 from samba_agent.agents.contracts import Assignment, OrderRef
-from samba_agent.agents.payer import PayerAgent
+from samba_agent.agents.payer import PayerAgent, order_form_mismatch
 from samba_agent.agents.registry import Registry
 from samba_agent.bridge.client import BridgeClient
 from samba_agent.failures import FailReason
@@ -1781,3 +1781,61 @@ def test_numeric_free_option_allows_site_size_letter():
         '노스페이스 앵클 삭스 260MM(L) 1개', '노스페이스 앵클 삭스 세트 NY4AS00B', '260MM FREE', '260MM FREE 260MM(L)'
     ) is None
     assert order_form_mismatch('지오다노 티셔츠 S', '지오다노 티셔츠', 'M', 'S') is not None
+
+
+def test_shoe_mm_mismatch_blocks_even_when_product_code_digits_appear():
+    # 실기 2026-11-22 롯데온 노스페이스: 270 주문인데 260 이 담겼고, 품번 NS94R72L 속 숫자 때문에 통과했다
+    page = '노스페이스 글렌클리프 로우 NS94R72L 선택 옵션 260 127,200 1개 남음 270MM 275 280'
+    msg = order_form_mismatch(
+        page, '노스페이스 글렌클리프 로우', 'BRW(BROWN) 270 NS94R72L', '260 127,200 1개 남음'
+    )
+    assert msg and '270' in msg and '260' in msg
+
+
+def test_shoe_mm_same_size_passes_and_price_digits_are_ignored():
+    page = '노스페이스 글렌클리프 로우 NS94R72L 선택 옵션 270MM 127,250'
+    assert (
+        order_form_mismatch(
+            page, '노스페이스 글렌클리프 로우', 'BRW(BROWN) 270 NS94R72L', '270MM 127,250'
+        )
+        is None
+    )
+
+
+def test_a_prefixed_size_line_mismatch_blocks_payment():
+    # 실기 2026-11-22 SSG 선물 아디다스: 블랙 / A3XL 주문인데 주문서엔 AS 가 담겼다
+    page = '아디다스 에센셜 인슐레이션 후드 재킷 KF2708 사이즈 AS 사이즈 : AS 삭제 100,170원 AS AXL A3XL'
+    name = '아디다스 에센셜 인슐레이션 후드 재킷 KF2708'
+    msg = order_form_mismatch(page, name, '블랙 / A3XL', '블랙')
+    assert msg and 'A3XL' in msg and 'AS' in msg
+    ok = page.replace('사이즈 : AS', '사이즈 : A3XL')
+    assert order_form_mismatch(ok, name, '블랙 / A3XL', '블랙') is None
+
+
+def test_color_mismatch_blocks_payment_even_when_size_word_one_matches():
+    # 실기 2026-11-23 6276 노스페이스 어반 패딩 토트: 'BLACK ONE' 주문에 'CRE(CREAM) ONE' 이 담겨 결제 → 사무실 도착
+    page = '주문서 옵션 : CRE(CREAM) ONE 수량 1개 NN2PR80B_CRE 어반 패딩 토트 스몰'
+    why = order_form_mismatch(page, '노스페이스 어반 패딩 토트 스몰 NN2PR80B', 'BLACK ONE', 'CRE(CREAM) ONE')
+    assert why and '색' in why
+
+
+def test_same_color_and_one_size_still_passes():
+    page = '주문서 옵션 : BLK(BLACK) ONE 수량 1개 NN2PR80B_BLK 어반 패딩 토트 스몰'
+    assert order_form_mismatch(page, '노스페이스 어반 패딩 토트 스몰 NN2PR80B', 'BLACK ONE', 'BLK(BLACK) ONE') is None
+
+
+def test_model_code_mismatch_blocks_even_when_a_name_word_overlaps():
+    # 실기 2026-11-23 6276: 주문 'NN2PS07J 린덴 토트백 BLACK' 인데 삼바에 연결된 상품은 'NN2PR80B 어반 패딩 토트 스몰 (크림)'
+    page = '주문서 노스페이스 어반 패딩 토트 스몰 NN2PR80B_CRE 옵션 CRE(CREAM) ONE 수량 1개'
+    why = order_form_mismatch(
+        page, '매장정품 노스페이스 THE NORTH FACE NN2PS07J 207J 화이트라벨 린덴 토트백 BLACK 방수백팩', 'BLACK ONE', ''
+    )
+    assert why and '품번' in why
+
+
+def test_same_model_code_passes_and_other_brand_line_is_not_judged():
+    page = '주문서 노스페이스 린덴 토트백 NN2PS07J_BLK 옵션 BLK(BLACK) ONE'
+    assert order_form_mismatch(page, '노스페이스 NN2PS07J 린덴 토트백 BLACK', 'BLACK ONE', '') is None
+    # 앞 네 글자가 다른 코드(다른 브랜드 라인)는 이 규칙으로 판정하지 않는다
+    other = '주문서 아디다스 슈퍼스타 JS4009 옵션 270'
+    assert order_form_mismatch(other, '아디다스 슈퍼스타 II EG4958 270', '270', '') is None

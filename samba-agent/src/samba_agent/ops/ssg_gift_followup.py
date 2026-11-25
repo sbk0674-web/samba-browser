@@ -406,10 +406,13 @@ class GiftFollowup:
             reason = mask_text(str(exc))[:200]
         task['reason'] = reason
         if task['state'] == 'pending' and any(
-            word in reason for word in ('폰 화면 사용 중', '다른 하네스 폰 작업', '통화 중')
+            word in reason
+            for word in ('폰 화면 사용 중', '다른 하네스 폰 작업', '통화 중', '폰 연결 없음')
         ):
             # 폰을 사람이 쓰는 중이면 시도로 세지 않고 3분 뒤 다시 본다 — 늘어나는 대기(최대 1시간)로
             # 선물 수락이 40분씩 밀렸다(실기 2026-11-04 53B45C, 사용자 "선물확인이 최우선")
+            # 폰 연결이 없는 것도 같다 — 연결 없음을 실패 8회로 세어 needs_ai 로 포기하면 폰이 다시 붙어도 아무도
+            # 수락하지 않았다(실기 2026-11-22 노호월 SSG 선물 2건이 12시간 방치, 사용자 "연결되면 다시 시도하면 되는데")
             task['attempts'] -= 1
             task['next_at'] = self.now() + 180
         if task['attempts'] >= 8:

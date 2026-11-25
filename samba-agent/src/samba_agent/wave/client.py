@@ -222,6 +222,11 @@ class WaveOrder(BaseModel):
             (value or '').strip().startswith('당근마켓')
             for value in (self.seller, self.channel_name)
         ):
+            # 소싱처 칸은 비었지만 무신사 상품 주소가 연결돼 있으면 그 연결 자체가 무신사 소싱이다(추정 아님).
+            # 이 모양의 당근 주문(상품주문번호 FMIB… · 판매자 당근마켓)이 소싱처 공란으로 접수 범위 밖이 돼 방치됐다
+            # (실기 2026-11-23 당근 나이키 카라 티셔츠 XL·아디다스 레드 삼선 후드 XL, 사용자 "당근은 항상 최우선")
+            if re.search(r'musinsa\.com/(?:app/)?products/\d+', self.source_url or ''):
+                self.source_site = 'MUSINSA'
             return self
         found = infer_source(self.product_name)
         if found:

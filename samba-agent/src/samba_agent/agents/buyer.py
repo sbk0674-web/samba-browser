@@ -25,7 +25,11 @@ from samba_agent.agents.base import (
     split_page_dialogs,
 )
 from samba_agent.agents.contracts import AgentResult, Assignment, OrderRef
-from samba_agent.agents.order_identity import color_code_conflict, cross_color_conflict
+from samba_agent.agents.order_identity import (
+    color_code_conflict,
+    cross_color_conflict,
+    option_color_filter,
+)
 from samba_agent.agents.registry import AgentSpec
 from samba_agent.failures import FailReason
 from samba_agent.ops.masking import mask_text
@@ -844,10 +848,13 @@ def decide_order_type(
 
 
 def shipping_fee_for(order: OrderRef, order_type: str) -> float:
-    """당근 바로판매·포이즌·직배는 0, 그 외 까대기는 2,300원."""
-    if re.fullmatch(r'당근\s*[0-9]+', order.order_no.strip()) and (
-        order.seller.strip().startswith('당근') or order.seller.strip().lower() == 'daangn'
-    ):
+    """판매자가 당근마켓인 주문(직배·까대기 모두)·포이즌·직배는 0, 그 외 까대기는 2,300원.
+
+    당근마켓 무신사 유즈드 주문은 까대기여도 배송비를 적지 않는다(사용자 2026-11-23). 주문번호가 '당근 N' 이든
+    상품주문번호(FMIB…)든 판매자가 당근마켓이면 같다 — FMIB 모양 당근 주문 2건에 2,300원이 적혔다.
+    """
+    seller = order.seller.strip()
+    if seller.startswith('당근') or seller.lower() == 'daangn':
         return 0.0
     if order_type == 'kkadaegi' and not is_poison_seller(order.seller):
         return float(KKADAEGI_SHIPPING_FEE)
@@ -986,6 +993,18 @@ def matching_options(options: list[str], wanted: str | None) -> list[str]:
         and not size_letters(wanted)
     ):
         return live
+    # 색상 칸은 이미 골랐고 사이즈 선택지가 하나뿐('00M')인데 주문 옵션은 색 이름·코드뿐('BEIGE(D01)')이면 그 하나다
+    # (실기 2026-11-22 무신사 네파 장갑 20261122102641787:001: 선택지 ['00M'] 를 옵션 불일치로 멈췄다. 색 일치는 주문서 대조가 본다)
+    distinct = {
+        re.sub(r'\s*[\d,]+\s*(?:원)?\s*(?:\d+\s*개\s*남음.*)?$', '', o).strip() for o in live
+    } - {''}
+    if (
+        len(distinct) == 1
+        and not size_letters(wanted)
+        and not size_numbers(re.sub(r'\([^)]*\)', '', wanted))
+        and not re.search(r'품절', ' '.join(live))
+    ):
+        return live
     # 주문 옵션에 한국 치수가 같이 적혀 있으면('EU 42 · KR 270') 그 치수로 맞춘다 — 외국 치수 숫자(42)가
     # 다른 선택지에 걸리지 않게 먼저 본다(사용자 결정 2026-09-29: 한국 치수가 있을 때만 그것으로 맞춘다)
     kr = kr_size(wanted)
@@ -1116,6 +1135,8 @@ def size_letters(text: str) -> set[str]:
     upper = re.sub(r'프리\s*사이즈|프리(?=\s|$)|원\s*사이즈', ' FREE ', text.upper())
     # 원사이즈 표기(OSFM·O/S·ONE SIZE·ONE)도 FREE 로 맞춘다(실기 2026-09-27 무신사 287: 주문 '프리 사이즈' ↔ 'OSFM')
     upper = re.sub(r'(?<![A-Z])(?:OSFM|O/S|ONE\s*SIZE|ONE)(?![A-Z])', ' FREE ', upper)
+    # 29CM 주문서는 L 사이즈를 'LG' 로 적는다('화이트-LG')(실기 2026-11-25 29CM 21315230448703299 '화이트 L' 주문이 불일치로 멈춤)
+    upper = re.sub(r'(?<![A-Z0-9])LG(?![A-Z0-9])', ' L ', upper)
     # 같은 사이즈의 다른 표기 — XXL = 2XL, XXXL = 3XL(실기 2026-09-30 무신사: 주문 '그레이 XXL' ↔ 선택지 '2XL' 을 불일치로 멈췄다)
     return {_SIZE_LETTER_SAME.get(x, x) for x in _SIZE_LETTER_RE.findall(upper)}
 
@@ -1667,7 +1688,7 @@ _COLOR_WORDS_EN = frozenset(
 _COLOR_WORDS_KO = frozenset(
     {
         '블랙', '검정', '화이트', '흰색', '네이비', '그레이', '회색', '베이지', '브라운', '레드', '블루', '그린',
-        '핑크', '옐로우', '카키', '아이보리', '크림', '퍼플', '오렌지', '실버', '골드', '차콜', '민트',
+        '핑크', '옐로우', '카키', '아이보리', '크림', '퍼플', '오렌지', '실버', '골드', '차콜', '민트', '마린',
     }
 )  # fmt: skip
 _COLOR_WORDS = _COLOR_WORDS_EN | _COLOR_WORDS_KO
@@ -1677,7 +1698,7 @@ _COLOR_WORDS = _COLOR_WORDS_EN | _COLOR_WORDS_KO
 _COLOR_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({'black', 'blk', 'bk', '블랙', '검정'}),
     frozenset({'white', 'wht', 'wh', '화이트', '흰색'}),
-    frozenset({'navy', 'nvy', '네이비'}),
+    frozenset({'navy', 'nvy', '네이비', '마린'}),
     frozenset({'grey', 'gray', 'gry', '그레이', '회색'}),
     frozenset({'beige', '베이지'}),
     frozenset({'brown', '브라운'}),
@@ -1858,6 +1879,19 @@ UNPAYABLE_SKIP = '결제 가능한 수단 없음'
 
 # 계정 견적 건너뜀 사유 중 '이 계정의 주문서를 못 읽었다'(_quote 가 붙인다) — 다음 계정은 열릴 수 있다(계정 사유)
 ORDER_FORM_UNREADABLE_SKIP = '주문서 옵션 못 읽음'
+
+
+def purchase_limit_suspected(snap: dict[str, object]) -> bool:
+    """옵션 칸이 없는 상품에서 '구매하기'가 주문서로 안 넘어가고 구매 한도 안내만 있는가(무신사).
+
+    선택지·원가·주문서 옵션이 모두 비었고 스냅샷이 '1인당 최대 N개' 안내(lim)를 봤을 때만 참이다.
+    """
+    return bool(
+        snap.get('lim')
+        and not snap.get('options')
+        and not snap.get('selected')
+        and not _as_float(snap.get('cost'))
+    )
 
 
 def is_account_failure(e: AgentFailure) -> bool:
@@ -2564,6 +2598,9 @@ class BuyerAgent(AgentBase):
         picked_size = getattr(self, '_reselected', {}).get(str(a.order.option or ''))
         if picked_size:
             args['size'] = picked_size
+        # 마린 = 네이비 — 상품 페이지엔 '네이비' 만 있어 '마린 95' 를 못 골랐다(실기 2026-11-21 롯데온 코오롱스포츠 21315228951313299)
+        if '마린' in str(args.get('size') or ''):
+            args['size'] = str(args['size']).replace('마린', '네이비')
         if source.allow_department:
             args['allow_department'] = (
                 True  # SSG: 신세계백화점(6009) 상품도 산다(사용자 2026-09-27)
@@ -3680,6 +3717,15 @@ class BuyerAgent(AgentBase):
             )
             return None
         options = [str(o) for o in (snap.get('options') or [])]
+        if purchase_limit_suspected(snap):
+            # 옵션 칸이 없는 상품(모자·지갑 등)은 주문서가 열려야 옵션 글자가 읽힌다. '구매하기'가 주문서로 안 넘어가고
+            # 상품 화면에 '7일간 1인당 최대 N개' 안내만 있으면 이 계정의 구매 한도다 — 옵션 불일치가 아니다.
+            # 옵션 불일치로 두면 다른 계정을 시도하지 않고 멈춘다
+            # (실기 2026-11-23 6302 노스페이스 로고 소프트 캡: edelvise06 이 7일 3개 한도인데 '옵션 불일치 []' 로 멈췄다)
+            why = f'{ORDER_FORM_UNREADABLE_SKIP}(구매 수량 한도 — 이 계정은 한도가 풀릴 때까지 못 삼)'
+            self.note('계정 견적', mask_text(f'{account}: 불가({why})'))
+            self._quote_skips.append(f'{account}: {why}')
+            return None
         if not self._match_options(options, a.order.option):
             self.note('계정 견적', mask_text(f'{account}: 불가(주문 옵션 품절)'))
             marked = sold_out_option_matches(options, a.order.option)
@@ -3759,6 +3805,11 @@ class BuyerAgent(AgentBase):
             return True
         if color_code_conflict(wanted, selected):
             return False
+        # 주문 옵션의 색과 주문서에 담긴 옵션의 색이 둘 다 있고 하나도 안 겹치면 다른 색이다.
+        # 'ONE' 만 골라 다시 열면 아래 재선택 글자 포함 검사('one' in 'cre(cream) one')가 색을 안 봐서 통과했다
+        # (실기 2026-11-23 6276 노스페이스 토트: 'BLACK ONE' 주문에 'CRE(CREAM) ONE' 이 담겨 결제·사무실 도착)
+        if cross_color_conflict(wanted, selected):
+            return False
         # 하네스가 매칭해 스크립트에 넘긴 선택지 글자(옵션 재선택)가 주문서에 그대로 담겼으면 같은 옵션이다
         picked = getattr(self, '_reselected', {}).get(wanted)
         if picked and ''.join(picked.split()).lower() in ''.join(selected.split()).lower():
@@ -3781,6 +3832,10 @@ class BuyerAgent(AgentBase):
         return bool(self._match_options([selected], wanted))
 
     def _match_options(self, options: list[str], wanted: str | None) -> list[str]:
+        """주문 옵션과 맞는 후보(규칙·AI) 중 주문 색과 다른 것은 버린다 — 색이 다른 옵션은 없는 옵션이다."""
+        return option_color_filter(wanted, options, self._match_options_raw(options, wanted))
+
+    def _match_options_raw(self, options: list[str], wanted: str | None) -> list[str]:
         """주문 옵션과 맞는 후보. 규칙 매칭이 실패하면 AI 가 표기만 다른 같은 옵션을 고른다.
 
         AI 에게는 사이즈 숫자가 겹치는 후보만 준다(numeric_overlap_options). 답은 후보 중 하나로 맞춰지지
@@ -5023,6 +5078,10 @@ class BuyerAgent(AgentBase):
         """
         source = source_of(self.spec.name)
         forced = source.order_type
+        # 당근마켓 주문은 손님 주소가 삼바에 없다 — 태그가 비어 직배로 읽히면 '배송지를 받지 못했다'로 멈춘다.
+        # 주소 없는 당근 주문은 사무실로 받는 까대기다(실기 2026-11-25 FMIB261125061555PGJD7P, 앞 주문 FMIB…ET0C 도 까대기)
+        if not forced and order.order_type == 'direct' and self._daangn_without_address(order):
+            return 'kkadaegi'
         # 판매 상품명에 브랜드가 빠져도(스케쳐스 '남녀 4종 울트라 플렉스 4 0 슬립인') 소싱처 상품명 줄로 고정 브랜드를 안다
         # (실기 2026-11-05 2026110557B626: 상품명만 보고 선물로 보냈다)
         head = lotteon_title_of_head(str(snap.get('product_head') or '')) if snap else ''
@@ -5087,6 +5146,17 @@ class BuyerAgent(AgentBase):
                 f'{"까대기" if kind == "kkadaegi" else "선물" if kind == "gift" else "직배"} — {why}',
             )
         return kind
+
+    def _daangn_without_address(self, order: OrderRef) -> bool:
+        """판매자가 당근마켓이고 삼바웨이브에 손님 주소가 없는가. 주소를 못 읽으면 False(예전 판정 그대로)."""
+        seller = str(order.seller or '').strip()
+        if not (seller.startswith('당근') or seller.lower() == 'daangn') or self._shipping_fn is None:
+            return False
+        try:
+            shipping = self._shipping_fn(order.wave_key, 'direct')
+        except (WaveError, AgentFailure):
+            return False
+        return not (shipping and str(shipping.get('address') or '').strip())
 
     def _is_forwarder(self, order: OrderRef) -> bool:
         """받는 곳이 라자다 해외 배대지인가(수취인·주소에 LAZADA). 포이즌·선물은 보지 않는다.

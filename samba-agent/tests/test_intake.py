@@ -38,6 +38,27 @@ def test_daangn_musinsa_single_stock_is_first_even_with_new_intake_cap(setup):
     assert job.options['_daangn_single_stock'] is True
 
 
+def test_당근마켓_판매자_FMIB_주문은_무신사_주소만으로_소싱처가_채워져_최우선이다(setup):
+    """실기 2026-11-23: 상품주문번호 FMIB… · 판매자 당근마켓 · 소싱처 공란 · 무신사 주소 있음 → 접수 범위 밖이라 방치됐다."""
+    queue, _slack, make = setup
+    urgent = wave_order('FMIB261121004021J2REXZ', source='', id='ord_daangn', seller='당근마켓',
+                        source_url='https://www.musinsa.com/products/7754116')
+    old = wave_order('old', minutes=60, id='ord_old')
+    assert urgent.source_site == 'MUSINSA'
+    assert not urgent.source_inferred
+    it, _wave = make([old, urgent])
+    it._max_new = 1
+    it.run_once()
+    job = queue.claim()
+    assert job.order_no == 'FMIB261121004021J2REXZ'
+    assert job.options['_daangn_single_stock'] is True
+
+
+def test_당근마켓_판매자라도_무신사_주소가_없으면_소싱처를_채우지_않는다():
+    order = wave_order('FMIB2611210000000000', source='', seller='당근마켓', product_name='보유 재고 신발 6079566')
+    assert not order.source_site
+
+
 class _FakeWave:
     """WaveClient 중 intake 가 쓰는 메서드 하나만 흉내 낸다."""
 

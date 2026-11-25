@@ -364,3 +364,22 @@ def test_accept_exception_returns_to_accept_phase_and_retries(tmp_path):
     clock[0] += 3600
     assert after.drain() is True
     assert tried == [1]
+
+
+def test_phone_not_connected_never_gives_up_and_accepts_when_phone_returns(tmp_path):
+    # 실기 2026-11-22 노호월 SSG 선물 2건: '선물 확인 폰 연결 없음'을 실패 8회로 세어 needs_ai 로 포기 → 폰이 다시 붙어도
+    # 아무도 수락하지 않았다(사용자 "연결되면 다시 시도하면 되는데 왜 한번 실패했다고 끝내냐")
+    q, job, worker, after, clock, calls, _source = harness(tmp_path)
+    after.accept = lambda job, out: (_ for _ in ()).throw(RuntimeError('선물 확인 폰 연결 없음'))
+    worker._apply(job, outcome())
+    for _ in range(20):  # 8회를 훨씬 넘겨도 포기하지 않는다
+        clock[0] += 600
+        after.drain()
+    task = q.get_by_id(job.id).options[GIFT_FOLLOWUP_KEY]
+    assert task['state'] == 'pending'
+    assert task['attempts'] < 8
+    tried = []
+    after.accept = lambda job, out: tried.append(1) or 'SSG 선물 수락 실패 — 폰 사용 중'
+    clock[0] += 600
+    assert after.drain() is True  # 폰이 다시 붙으면 바로 수락을 시도한다
+    assert tried == [1]

@@ -23,6 +23,9 @@ _KO_COLOR = {
     '초코': 'choco', '체스트넛': 'chestnut', '브라운': 'brown', '카키': 'khaki', '블루': 'blue', '그린': 'green',
     '핑크': 'pink', '레드': 'red', '차콜': 'charcoal', '퍼플': 'purple', '옐로우': 'yellow', '오렌지': 'orange',
     '민트': 'mint', '실버': 'silver', '골드': 'gold', 'gray': 'grey',
+    '올리브': 'olive', '라임': 'lime', '라일락': 'lilac', '라벤더': 'lavender', '코랄': 'coral', '버건디': 'burgundy',
+    '와인': 'wine', '카멜': 'camel', '머스타드': 'mustard', '틸': 'teal', '터쿼이즈': 'turquoise', '아쿠아': 'aqua',
+    '인디고': 'indigo', '데님': 'denim', '피치': 'peach', '살몬': 'salmon', '레몬': 'lemon', '마룬': 'maroon', '바이올렛': 'violet',
 }
 
 
@@ -75,6 +78,14 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
         return True
     # 낱말이 똑같으면 같은 옵션이다 — 'ONE'(원사이즈)처럼 사이즈 꼴이 아닌 값도(실기 2026-11-03 4111 'LIGHT BEIGE ONE 1개' ↔ 'LIGHT BEIGE · ONE')
     if got and sorted(got) == sorted(want):
+        return True
+    # 주문 '라이트 베이지 100/L' ↔ 상세 'LIGHT BEIGE · 100' — 숫자 사이즈와 글자 사이즈를 같이 적은 주문('100/L')은 글자를 빼고,
+    # 라이트·다크 같은 수식어는 영문으로 맞춰 본다. 숫자가 그 글자의 허용 표(L=85·90·100)에 있을 때만 뺀다
+    # (실기 2026-11-25 무신사 21315230430023299 노스페이스 맞게 샀는데 불일치로 멈춤)
+    mod = {'라이트': 'light', '다크': 'dark'}
+    nums_w = {int(t) for t in want if re.fullmatch(r'\d{2,3}', t)}
+    want2 = [mod.get(t, t) for t in want if not (t.upper() in _LETTER_KR_SIZES and nums_w & _LETTER_KR_SIZES[t.upper()])]
+    if got and want2 != want and sorted(got) == sorted(want2):
         return True
     # 상세가 한국 숫자 사이즈 하나('085')뿐이고 주문은 글자 사이즈('다크그레이 S') — 글자↔숫자 표에 맞으면 같다(색은 지정 상품이 정한다)
     # (실기 2026-11-14 롯데온 나이키 21315225647113299 'S' ↔ '085' 를 맞게 샀는데 불일치로 멈춤)
@@ -212,6 +223,8 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
 _EN_COLORS = (
     'black', 'white', 'blue', 'navy', 'grey', 'beige', 'ivory', 'red', 'green', 'pink', 'brown',
     'khaki', 'cream', 'charcoal', 'purple', 'yellow', 'orange', 'mint', 'silver', 'gold', 'sand',
+    'olive', 'lime', 'lilac', 'lavender', 'coral', 'burgundy', 'wine', 'camel', 'mustard', 'teal',
+    'turquoise', 'aqua', 'indigo', 'denim', 'peach', 'salmon', 'lemon', 'maroon', 'violet',
 )
 _COLOR_CODES = {
     'blk': 'black', 'wht': 'white', 'blu': 'blue', 'nvy': 'navy', 'gry': 'grey', 'gra': 'grey',
@@ -241,3 +254,29 @@ def cross_color_conflict(order_text: object, other_text: object) -> tuple[set[st
     if want and got and not (want & got):
         return want, got
     return None
+
+
+
+def option_color_filter(wanted: object, options: list[str], picked: list[str]) -> list[str]:
+    """주문 옵션에 색이 있으면 고른 후보도 그 색이어야 한다. 아니면 그 후보를 버린다(없는 옵션으로 본다).
+
+    - 고른 후보에 다른 색만 있으면 버린다('BLACK' 주문에 'CRE(CREAM) ONE').
+    - 고른 후보가 색 없이 사이즈뿐('ONE')인데 선택지 목록에 색이 보이고 주문 색이 하나도 없으면 버린다 —
+      그 'ONE' 은 다른 색 밑의 사이즈 칸이다. 목록에 색이 전혀 없는 상품(색이 하나뿐)은 사이즈만 맞으면 통과한다.
+    실기 2026-11-23 6276: AI 가 'BLACK ONE' 주문에 'ONE' 만 골라 'CRE(CREAM)' 이 결제됐다.
+    """
+    want = colors_in(wanted)
+    if not want:
+        return picked
+    listed: set[str] = set()
+    for o in options:
+        listed |= colors_in(o)
+    keep: list[str] = []
+    for c in picked:
+        got = colors_in(c)
+        if got:
+            if got & want:
+                keep.append(c)
+        elif not listed or (listed & want):
+            keep.append(c)
+    return keep

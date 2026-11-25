@@ -141,7 +141,11 @@ class VerifierAgent(AgentBase):
         if isinstance(applied, dict) and all(applied.get(k) for k in ('name', 'address')):
             actual_full = '|'.join(_identity_address_key(applied.get(k)) for k in ('address', 'address_detail'))
             if str(expected['name']).replace(' ', '') != str(applied['name']).replace(' ', ''):
-                if '*' in str(applied['name']):
+                # 롯데온은 직배 받는 분도 가운데 글자를 'O' 로 가려 보여 준다 — 가린 자리만 건너뛰고 같으면 같은 사람이다
+                # (실기 2026-11-25 롯데온 20261124070856: 맞게 보냈는데 받는 분 불일치로 멈춤)
+                if _same_name(str(expected['name']), str(applied['name'])):
+                    pass
+                elif '*' in str(applied['name']):
                     missing.append('recipient')
                 else:
                     mismatch.append('recipient')
