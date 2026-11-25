@@ -1210,5 +1210,13 @@
       "memo — 선택, 배송 요청사항",
       "phone — 선택. 없으면 비워두고 phone_field_ids 반환"
     ]
+  },
+  {
+    "name": "musinsa_signed_in",
+    "host": "musinsa.com",
+    "description": "무신사 로그인 여부(로그인 주소로 갔을 때 로그인 화면이 남으면 비로그인) — {signed_in, note}",
+    "params": [
+      "profile — 계정 프로필"
+    ]
   }
 ]

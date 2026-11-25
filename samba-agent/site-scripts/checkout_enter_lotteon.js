@@ -37,7 +37,8 @@ let disc=async()=>{let t=(await GQ('주문할인금액')).tree;let m=(t.split('P
 if(LC||!(await disc())){
 let hb=await IO('할인변경');var nd=hb<0;
 if(hb>=0){await PC(hb);await S(2000);
-let rs=(KP?await Q(KK,new RegExp('radio "'+KK+'\\d+%')):LC?await Q('롯데카드',/radio "롯데카드\s*\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:ID(l),p:+(l.match(/(\d+)%/)||[])[1],on:ON(l)}));let QK=KP?KK:'롯데카드',TX=(await GQ('즉시할인')).tree.replace(/\s+/g,' '),AM=r=>+((TX.match(QK+' ?'+r.p+'% 즉시할인.{0,9}-([0-9,]+)')||[])[1]||'0').replace(/,/g,'');
+for(let w=0;w<6&&!/radio/.test((await GQ('즉시할인')).tree);w++)await S(1000);
+let rs=(KP?await Q(KK,new RegExp('radio "'+KK+'\\s*\\d+%')):LC?await Q('롯데카드',/radio "롯데카드\s*\d+%/):await Q('장바구니',/radio "\d+% ?장바구니 ?쿠폰/)).map(l=>({id:ID(l),p:+(l.match(/(\d+)%/)||[])[1],on:ON(l)}));let QK=KP?KK:'롯데카드',TX=(await GQ('즉시할인')).tree.replace(/\s+/g,' '),AM=r=>+((TX.match(QK+' ?'+r.p+'% 즉시할인.{0,9}-([0-9,]+)')||[])[1]||'0').replace(/,/g,'');
 let mx=rs.length?Math.max(...rs.map(x=>x.id)):0;let cs=rs.filter(r=>r.id>mx-20).sort((a,b)=>(AM(b)-AM(a))||b.p-a.p);let best=cs[0];
 if(!best&&(KP||LC))return{ok:false,error:(KP?KK:'롯데카드')+' 할인없음'};
 if(!best){let c=hi(await Q('닫기',/button "닫기"/));if(c>0){await PC(c);await S(600)}}
@@ -56,10 +57,10 @@ await S(1200);
 let want=String(args.easy_card||(args.card==='간편결제'?args.issuer:'')||'롯데카드');
 let rl=(await GQ('L.PAY 카드')).tree.split('\n').find(l=>/^\[\d+\] radio "L\.PAY 카드"/.test(l));
 if(rl&&!ON(rl)){await PC(PI(rl.slice(1)));await S(1200)}
-let sel='';for(let k=0;k<8&&!sel;k++){let P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=/카드를 먼저 선택/.test(P)?'':((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700)}
+let GS=async n=>{let sel='';for(let k=0;k<n&&!sel;k++){let P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=/카드를 먼저 선택/.test(P)?'':((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700)}return sel};let sel=await GS(8);
 if(!sel.includes(want.replace('카드',''))){
 for(let o of ['textbox','label']){let g=await GQ('카드');let re=o==='textbox'?/^\[(\d+)\] (?:textbox|combobox) "카드(를 선택|선택)/:/^\[(\d+)\] label "카드선택"/;let l=g.tree.split('\n').find(x=>re.test(x));if(!l)continue;await PC(ID(l));await S(600);let f=(await GQ(want)).tree.split('\n').find(x=>/^\[\d+\] (option|listitem|clickable|button|link) /.test(x)&&x.includes(want));if(f){await PC(PI(f.slice(1)));await S(900);break}}
-sel='';for(let k=0;k<6&&!sel;k++){let P=((await AT()).split('PAGE TEXT')[1]||'').replace(/\s+/g,' ');sel=/카드를 먼저 선택/.test(P)?'':((P.match(/카드선택 ([^+]{2,30}?) L\.PAY/)||[])[1]||'').trim();if(!sel)await S(700)}
+sel=await GS(6);
 }
 if(!sel.includes(want.replace('카드','')))return{ok:false,error:'L.PAY '+want+'≠'+sel,method};
 method='간편결제/'+sel;
