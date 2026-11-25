@@ -39,7 +39,8 @@ class ChatEvidence:
 def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
                       inspect_phone: Callable, submit: Callable,
                       already_paid: Callable | None = None,
-                      on_saved_payment: Callable | None = None) -> dict:
+                      on_saved_payment: Callable | None = None,
+                      stage_order: Callable | None = None) -> dict:
     """한 채팅을 처리한다. 폰 접근과 저장은 해당 증거가 모두 맞을 때만 한다."""
     if not candidate.account or not candidate.room_id or not candidate.product_title:
         raise ValueError('계정과 채팅 상품 확인 필요')
@@ -68,6 +69,8 @@ def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
         phone = {**phone, 'product_image': candidate.product_image}
     if not phone.get('product_image'):
         return {'status': 'held', 'reason': '주문 사진 확인 필요'}
+    if stage_order is not None:
+        stage_order(candidate, chat, phone)
     result = submit(phone)
     if not isinstance(result, dict) or not result.get('id'):
         raise ValueError('저장 결과 확인 필요')
@@ -79,7 +82,8 @@ def collect_candidate(candidate: Candidate, *, inspect_chat: Callable,
 def collect_round(*, chat, inspect_phone: Callable, submit: Callable,
                   already_done: Callable, mark_done: Callable, limit: int = 15, offset: int = 0,
                   already_paid: Callable | None = None,
-                  on_saved_payment: Callable | None = None) -> list[dict]:
+                  on_saved_payment: Callable | None = None,
+                  stage_order: Callable | None = None) -> list[dict]:
     """계정별 채팅을 확인한다. 실패한 건은 재전송하지 않고 다음 주기에 다시 확인한다."""
     if not 1 <= limit <= 50:
         raise ValueError('한 번에 확인할 채팅 수가 잘못됐습니다')
@@ -105,7 +109,8 @@ def collect_round(*, chat, inspect_phone: Callable, submit: Callable,
         try:
             result = collect_candidate(candidate, inspect_chat=chat.inspect,
                                        inspect_phone=inspect_phone, submit=submit,
-                                       already_paid=already_paid, on_saved_payment=on_saved_payment)
+                                       already_paid=already_paid, on_saved_payment=on_saved_payment,
+                                       stage_order=stage_order)
             if result['status'] == 'saved':
                 mark_done(candidate, result)
             results.append(result)

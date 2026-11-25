@@ -153,7 +153,10 @@ def build_submission(order: dict) -> dict:
 
 def submit_collected_order(client, order: dict) -> dict:
     """기존 삼바 하네스 인증 연결로 주문을 한 번 전송한다."""
-    payload = build_submission(order)
+    return submit_collected_payload(client, build_submission(order))
+
+
+def submit_collected_payload(client, payload: dict) -> dict:
     response_error = None
     try:
         result = client._request("POST", "/daangn/collected-orders", json=payload)
@@ -174,7 +177,7 @@ def submit_collected_order(client, order: dict) -> dict:
                 and saved.get("product_name") == payload["product_name"]
                 and (saved.get("product_option") or "") == (payload.get("product_option") or "")
                 and saved.get("sale_price") == payload["sale_price"]
-                and (datetime.fromisoformat(saved.get("paid_at") or "") == order["paid_at"]
+                and (datetime.fromisoformat(saved.get("paid_at") or "") == datetime.fromisoformat(payload["paid_at"])
                      if "paid_at" in payload else
                      datetime.fromisoformat(saved.get("paid_at") or "").astimezone(timezone(timedelta(hours=9))).date().isoformat() == payload["paid_date"])
                 and all(saved.get(k) == payload[k] for k in ("source_url", "product_image") if k in payload))

@@ -16,7 +16,8 @@ from tools.daangn.account_switch import AndroidAccountPhone, switch_account
 from tools.daangn.android_phone import AndroidPhone
 from tools.daangn.chat_bridge import ChatBridge
 from tools.daangn.collector import collect_round
-from tools.daangn.order_record import submit_collected_order
+from samba_agent.wave.client import WaveError
+from tools.daangn.order_record import build_submission, submit_collected_order, submit_collected_payload
 from tools.daangn.phone_worker import read_phone_order
 from tools.daangn.reservation_journal import ReservationJournal
 
@@ -33,6 +34,36 @@ class CollectionState:
         with sqlite3.connect(path, timeout=10) as db:
             db.execute('CREATE TABLE IF NOT EXISTS collected (event_key TEXT PRIMARY KEY, order_id TEXT NOT NULL, pickup_number TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS cursor (id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL)')
+            db.execute('''CREATE TABLE IF NOT EXISTS pending_submission (
+                pickup_number TEXT PRIMARY KEY, event_key TEXT NOT NULL,
+                room_key TEXT NOT NULL, payment_key TEXT, payload TEXT NOT NULL)''')
+
+    def stage(self, candidate, chat, order):
+        payload = build_submission(order)
+        row = (str(payload['pickup_number']), self.key(candidate), self.room_key(candidate),
+               self.payment_key(candidate, chat.payment_event_at),
+               json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        with sqlite3.connect(self.path, timeout=10) as db:
+            db.execute('INSERT OR IGNORE INTO pending_submission VALUES (?, ?, ?, ?, ?)', row)
+            saved = db.execute('SELECT room_key, payment_key, payload FROM pending_submission WHERE pickup_number=?',
+                               (row[0],)).fetchone()
+            if saved != row[2:]:
+                raise ValueError('저장 대기 중인 수거번호 정보가 다릅니다')
+
+    def replay(self, wave):
+        with sqlite3.connect(self.path, timeout=10) as db:
+            rows = db.execute('SELECT pickup_number, event_key, room_key, payment_key, payload '
+                              'FROM pending_submission ORDER BY rowid').fetchall()
+        results = []
+        for number, event, room, payment, payload in rows:
+            try:
+                result = submit_collected_payload(wave, json.loads(payload))
+                self._mark(event, room, payment, number, str(result['id']))
+                results.append({'status': 'saved'})
+            except (WaveError, ValueError, OSError) as exc:
+                log.warning('당근 저장 대기 재전송 보류: %s', type(exc).__name__)
+                results.append({'status': 'held'})
+        return results
 
     def next_offset(self) -> int:
         with sqlite3.connect(self.path, timeout=10) as db:
@@ -61,6 +92,9 @@ class CollectionState:
 
     def done(self, candidate) -> bool:
         with sqlite3.connect(self.path, timeout=10) as db:
+            if db.execute('SELECT 1 FROM pending_submission WHERE room_key=?',
+                          (self.room_key(candidate),)).fetchone():
+                return True
             row = db.execute('SELECT order_id,pickup_number FROM collected WHERE event_key=?',
                              (self.key(candidate),)).fetchone()
             if row:
@@ -84,7 +118,11 @@ class CollectionState:
         return False
 
     def mark(self, candidate, result, *, payment_event_at=None):
-        number, order_id = str(result['pickup_number']), str(result['id'])
+        self._mark(self.key(candidate), self.room_key(candidate),
+                   self.payment_key(candidate, payment_event_at),
+                   str(result['pickup_number']), str(result['id']))
+
+    def _mark(self, event, room, payment, number, order_id):
         if not number.isdecimal() or not order_id.startswith('ord_'):
             raise ValueError('주문 저장 확인 실패')
         RECEIPTS.mkdir(parents=True, exist_ok=True)
@@ -98,18 +136,18 @@ class CollectionState:
                 if json.load(f) != receipt:
                     raise ValueError('기존 수거번호 기록이 다릅니다')
         with sqlite3.connect(self.path, timeout=10) as db:
-            payment = self.payment_key(candidate, payment_event_at)
             if payment:
                 previous = db.execute('SELECT order_id,pickup_number FROM collected WHERE event_key=?',
                                       (payment,)).fetchone()
                 if previous and previous != (order_id, number):
                     raise ValueError('같은 결제 이벤트의 저장 주문이 다릅니다')
-            db.execute('INSERT OR IGNORE INTO collected VALUES (?, ?, ?)', (self.key(candidate), order_id, number))
+            db.execute('INSERT OR IGNORE INTO collected VALUES (?, ?, ?)', (event, order_id, number))
             db.execute('INSERT INTO collected VALUES (?,?,?) ON CONFLICT(event_key) DO UPDATE '
                        'SET order_id=excluded.order_id,pickup_number=excluded.pickup_number',
-                       (self.room_key(candidate), order_id, number))
+                       (room, order_id, number))
             if payment:
                 db.execute('INSERT OR IGNORE INTO collected VALUES (?,?,?)', (payment, order_id, number))
+            db.execute('DELETE FROM pending_submission WHERE pickup_number=? AND room_key=?', (number, room))
 
 
 def _phone_identity(account: str) -> tuple[str, str]:
@@ -226,6 +264,7 @@ class CandidateSchedule:
     """앱의 캐시 목록만 빠르게 읽고, 같은 상세 화면은 반복해서 열지 않는다."""
 
     def __init__(self):
+        self.next_submission_retry = 0.0
         self.next_check = {}
         self.phone_next_check = {}
 
@@ -252,6 +291,14 @@ class CandidateSchedule:
 def run_round(settings, wave, schedule=None, on_saved=None):
     RECEIPTS.mkdir(parents=True, exist_ok=True)
     state = CollectionState(str(RECEIPTS / 'collection-state.sqlite'))
+    replayed = []
+    now = time.monotonic()
+    if schedule is None or now >= schedule.next_submission_retry:
+        if schedule is not None:
+            schedule.next_submission_retry = now + 30
+        replayed = state.replay(wave)
+        if on_saved is not None and any(row['status'] == 'saved' for row in replayed):
+            on_saved()
     journal = ReservationJournal(str(RECEIPTS / 'reservation-attempts.sqlite'))
     # 계정 이름은 브라우저의 로그인된 채팅 계정과 폰 등록 이름이 정확히 같아야 한다.
     path = Path(os.environ['APPDATA']) / 'SAMBA Browser' / 'data.db'
@@ -274,9 +321,9 @@ def run_round(settings, wave, schedule=None, on_saved=None):
             if on_saved is not None:
                 on_saved()
 
-        return collect_round(chat=selected_chat, inspect_phone=make_phone_reader(journal, schedule=schedule),
+        return replayed + collect_round(chat=selected_chat, inspect_phone=make_phone_reader(journal, schedule=schedule),
             submit=lambda order: submit_collected_order(wave, order), already_done=state.done,
-            already_paid=state.done_payment,
+            already_paid=state.done_payment, stage_order=state.stage,
             on_saved_payment=lambda candidate, chat, result: state.mark(
                 candidate, result, payment_event_at=chat.payment_event_at),
             mark_done=mark_saved, limit=15, offset=0 if schedule is not None else state.next_offset())
@@ -287,6 +334,9 @@ def run_round(settings, wave, schedule=None, on_saved=None):
 def run_forever(settings, wave, stop, on_saved=None):
     schedule = CandidateSchedule()
     while not stop.is_set():
+        if (Path(__file__).resolve().parents[2] / 'DAANGN_COLLECTION_PAUSED').exists():
+            stop.wait(5)
+            continue
         delay = 2
         try:
             results = run_round(settings, wave, schedule=schedule, on_saved=on_saved)

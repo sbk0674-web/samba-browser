@@ -36,11 +36,29 @@ function Test-Engine {
   if (-not (Test-Path $dk)) { $dk = (Get-Command docker -ErrorAction SilentlyContinue).Source }
   if (-not $dk) { return $false }
   # PowerShell 5.1 은 Start-Process 후 ExitCode 를 못 읽는다 — 작업(Job)으로 돌려 60초 안에 끝났는지·종료코드를 본다
-  $job = Start-Job -ScriptBlock { param($exe) & $exe info *> $null; $LASTEXITCODE } -ArgumentList $dk
-  if (-not (Wait-Job $job -Timeout 60)) { Stop-Job $job; Remove-Job $job -Force; return $false }
-  $code = Receive-Job $job
-  Remove-Job $job -Force
-  return (@($code)[-1] -eq 0)
+  $start = New-Object System.Diagnostics.ProcessStartInfo
+  $start.FileName = $dk
+  $start.Arguments = 'info'
+  $start.UseShellExecute = $false
+  $start.CreateNoWindow = $true
+  $start.RedirectStandardOutput = $true
+  $start.RedirectStandardError = $true
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $start
+  try {
+    if (-not $process.Start()) { return $false }
+    $null = $process.StandardOutput.ReadToEndAsync()
+    $null = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(60000)) {
+      try { $process.Kill() } catch { }
+      return $false
+    }
+    return ($process.ExitCode -eq 0)
+  } catch {
+    return $false
+  } finally {
+    $process.Dispose()
+  }
 }
 function Show-Toast([string]$title, [string]$body) {
   try {

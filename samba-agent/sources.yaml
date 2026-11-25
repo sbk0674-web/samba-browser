@@ -18,6 +18,7 @@ sources:
     label: 무신사
     home: https://www.musinsa.com/
     login_host: musinsa.com
+    signed_in_check: true  # 2026-11-22 musinsa_signed_in(로그인된 계정을 홈 화면 표시로 못 읽어 'fields not found' 로 막았다)
     shipping_confirm: true
     status: active
     quick_compare: true  # 2026-09-26 musinsa_quick_price — 상품 페이지 '나의 할인가'·'최대 적립'으로 계정 하나만 고른다
