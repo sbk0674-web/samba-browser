@@ -925,6 +925,11 @@ ${raw}`
         // 이력을 못 읽어도 opener 방식은 그대로 동작한다
       }
     }
+    // 무신사머니 사이트(money.musinsapayments.com)에서 직접 연 결제창(인출)은 opener 사슬에 무신사 쇼핑몰이 없다 —
+    // 무신사 계정의 결제 비밀번호를 쓰도록 쇼핑몰 호스트를 후보에 더한다(실기 2026-11-26: 인출 키패드 계정 못 고름)
+    if (hosts.some((h) => sameRegistrableDomain(h, 'musinsapayments.com')) && !hosts.some((h) => sameRegistrableDomain(h, 'musinsa.com'))) {
+      hosts.push('www.musinsa.com')
+    }
     return hosts.filter((h) => h !== '')
   }
 
