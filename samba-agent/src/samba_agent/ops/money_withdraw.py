@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from samba_agent.bridge.client import BridgeClient, BridgeError
 
 log = logging.getLogger(__name__)
 LANE = 'money-withdraw'
-TOOLS = ('run_js', 'find_elements', 'fill_secret', 'close_tab', 'list_tabs')
+TOOLS = ('run_js', 'find_elements', 'fill_secret', 'close_tab', 'list_tabs', 'switch_tab', 'get_page')
 _LOCK = threading.Lock()  # 한 번에 한 계정씩 — 같은 앱·같은 키패드
 
 OPEN_JS = r'''
@@ -67,6 +68,14 @@ return JSON.stringify({text:tx.slice(0,300), url:await page.url()})
 '''
 
 
+WINDOW = 'withdraw'  # 주문처리 창(기본 창)과 떼어 낸 별도 앱 창 — 거기 탭 정리가 닿지 않는다(docs/bridge.md 다중 창)
+
+
+class _WindowBridge(BridgeClient):
+    def _headers(self) -> dict[str, str]:
+        return {**super()._headers(), 'X-Samba-Window': WINDOW}
+
+
 def _bridge() -> BridgeClient:
     token = os.environ.get('SAMBA_BRIDGE_TOKEN', '')
     port = os.environ.get('SAMBA_BRIDGE_PORT', '47811')
@@ -76,8 +85,8 @@ def _bridge() -> BridgeClient:
         env = dotenv_values(Path(__file__).resolve().parents[3] / '.env')
         token = str(env.get('SAMBA_BRIDGE_TOKEN') or '')
         port = str(env.get('SAMBA_BRIDGE_PORT') or port)
-    return BridgeClient(
-        f'http://127.0.0.1:{port}', token, allowed=TOOLS, lane=LANE, busy_retries=30, busy_wait_s=2.0
+    return _WindowBridge(
+        f'http://127.0.0.1:{port}', token, allowed=TOOLS, lane=LANE, busy_retries=150, busy_wait_s=1.0
     )
 
 
@@ -91,6 +100,14 @@ def _json(raw: str) -> dict:
             return json.loads(m.group(0)) if m else {}
         except ValueError:
             return {}
+
+
+def _json_list(raw: str) -> list[dict]:
+    try:
+        v = json.loads(raw)
+        return [t for t in v if isinstance(t, dict)] if isinstance(v, list) else []
+    except ValueError:
+        return []
 
 
 def withdraw_all(account: str, bridge: BridgeClient | None = None) -> str:
@@ -109,7 +126,19 @@ def withdraw_all(account: str, bridge: BridgeClient | None = None) -> str:
         r2 = _json(c.call('run_js', code=CLICK_JS).result)
         if not r2.get('ok'):
             return f'⚠️ {account} 출금 못 함: {r2.get("why")}'
-        found = c.call('find_elements', query='비밀번호').result
+        # 비밀번호 키패드는 ePAY(niceepay) 팝업 창에 뜬다 — 그 창으로 옮겨 앱이 키패드를 누르게 한다
+        popup = None
+        for _ in range(20):
+            tabs = _json_list(c.call('list_tabs').result)
+            popup = next((t for t in tabs if t.get('kind') == 'popup' and t.get('openerId') == tab), None)
+            if popup:
+                break
+            time.sleep(1)
+        if not popup:
+            return f'⚠️ {account} 출금 비밀번호 창이 안 뜸(사람 확인 필요)'
+        c.call('switch_tab', id=popup['id'])
+        time.sleep(2)
+        found = c.call('find_elements', query='가상키패드').result
         m = re.search(r'\[(\d+)\]', found)
         out = c.call(
             'fill_secret',
@@ -119,6 +148,11 @@ def withdraw_all(account: str, bridge: BridgeClient | None = None) -> str:
         ).result
         if out.lstrip().startswith(('handoff', 'refused')):
             return f'⚠️ {account} 출금 비밀번호 입력 실패(사람 확인 필요): {out[:80]}'
+        time.sleep(3)
+        try:
+            c.call('switch_tab', id=tab)
+        except BridgeError:
+            pass
         r3 = _json(c.call('run_js', code=DONE_JS).result)
         text = str(r3.get('text') or '')
         ok = bool(re.search(r'완료|인출이 (신청|접수)|성공', text))
