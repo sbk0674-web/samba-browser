@@ -107,6 +107,12 @@ def paid_option_matches(wanted: object, actual: object) -> bool:
             nums = [t for t in rest if re.search(r'\d', t)]
             if all(t.lstrip('0') == m.group(2).lstrip('0') for t in nums):
                 return True
+    # 주문 옵션이 사이즈 숫자뿐('095+095')이고 상세는 거기에 색 낱말만 더 붙은 꼴('DARKGREEN · 095+095') — 색은 지정 상품이 정한다
+    # (실기 2026-11-25 무신사 20261125102877675:001 맞게 샀는데 불일치로 멈춤)
+    if want and all(re.fullmatch(r'[\d+/]+', t) for t in want):
+        extra = [t for t in got if t not in want]
+        if extra and all(re.fullmatch(r'[a-z가-힣]+', t) for t in extra) and sorted(t for t in got if t in want) == sorted(want):
+            return True
     # 라코스테: 주문 'XFJ/크림 화이트 5' ↔ 상세 'XFJ(크림) / 005(105)' — 색 코드(영문 3자)가 같고 한 자리 사이즈가 '00N(…)' 이면 같다
     # (실기 2026-11-16 롯데온 21315226568623299 맞게 샀는데 불일치로 멈춤)
     codes_w = {t for t in want if re.fullmatch(r'[a-z]{3}', t)}
@@ -238,6 +244,8 @@ def colors_in(text: object) -> set[str]:
     """글 속 색(한글 색 이름·영어 색·'BLU0'·'WHT0_WHITE' 같은 색코드)을 영어 색 집합으로."""
     # '화이트라벨'(노스페이스 라인 이름)은 색이 아니다
     t = re.sub(r'화이트\s*라벨|white\s*label', ' ', str(text or '').casefold()).replace('gray', 'grey')
+    # 마린 블루는 네이비를 달리 부르는 이름이다 — 무신사 상품이 '네이비' 하나뿐인데 주문이 '마린 블루'로 와 막혔다(실기 2026-11-25 21315230657793299)
+    t = re.sub(r'마린\s*블루|marine\s*blue', ' 네이비 ', t)
     out = {c for ko, c in _KO_COLOR.items() if ko in t and c in _EN_COLORS}
     out |= {c for c in _EN_COLORS if re.search(r'(?<![a-z])' + c + r'(?![a-z])', t)}
     out |= {_COLOR_CODES[m] for m in re.findall(r'(?<![a-z])([a-z]{3})\d(?![a-z0-9])', t) if m in _COLOR_CODES}

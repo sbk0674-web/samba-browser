@@ -259,3 +259,10 @@ def test_숫자와_글자_사이즈를_같이_적은_주문은_글자를_빼고_
 def test_사이즈_숫자가_글자_표에_없으면_여전히_다르다() -> None:
     assert not paid_option_matches('라이트 베이지 100/L', 'LIGHT BEIGE · 105')
     assert not paid_option_matches('라이트 베이지 100/L', 'LIGHT GREY · 100')
+
+
+def test_주문이_사이즈숫자뿐이면_상세의_색_낱말은_무시한다():
+    # 실기 2026-11-25 무신사 20261125102877675:001 — '095+095' ↔ 'DARKGREEN · 095+095'
+    assert paid_option_matches('095+095', 'DARKGREEN · 095+095')
+    assert not paid_option_matches('095+095', 'DARKGREEN · 100+100')
+

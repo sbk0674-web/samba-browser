@@ -14,10 +14,13 @@ else if(__ofs.length>1&&args.profile){const pf=__ofs.filter(t=>t.profile===args.
 const orderTab=__ofs.length>=1?__ofs[0]:null;
 if(!orderTab){out.note='no order-form tab open';return out;}
 let popup=list.find(t=>t.kind==='popup'&&/address/.test(t.url||''));const hadPopup=!!popup;
+// 이름에 '수정'·'삭제' 글자가 든 손님도 있다 — 버튼 글자('수정'·'삭제' 딱 그 글자)만 걸러야 한다(실기 2026-11-25 6543 강수정)
 async function pickRow(){
   const l2=await tabs.list();const p=l2.find(t=>t.kind==='popup');
   if(!p)return false;
   await tabs.switch(p.id);
+  // 목록이 수십 줄이면 느리고 어긋난다 — 검색창에 이름을 넣어 줄인다(실기 2026-11-25 6543)
+  try{const g00=await G({interactive:true});const sb0=g00.tree.match(/^\[(\d+)\] textbox "[^"]*검색[^"]*"(?: value="([^"]*)")?/m);if(sb0&&sb0[2]!==NM&&!/name=address/.test(g00.tree)){await page.type(parseInt(sb0[1]),NM,false);await sleep(1300);}}catch(e){}
   const minK=Math.min(5,NM.length);
   let rowId=null;
   for(let w=0;w<14&&!rowId;w++){
@@ -25,7 +28,7 @@ async function pickRow(){
     if(/name=address2/.test(g0.tree))return false;
     for(let k=Math.min(NM.length,20);k>=minK&&k>0&&!rowId;k--){
       const pre=NM.slice(0,k);
-      const ln=g0.tree.split('\n').find(l=>/^\[\d+\] (clickable|radio|button)/.test(l)&&!/수정|삭제/.test(l)&&l.includes(pre));
+      const ln=g0.tree.split('\n').find(l=>/^\[\d+\] (clickable|radio|button)/.test(l)&&!/"(?:수정|삭제)"/.test(l)&&l.includes(pre));
       if(ln)rowId=parseInt(ln.match(/^\[(\d+)\]/)[1]);
     }
     if(!rowId)await sleep(700);

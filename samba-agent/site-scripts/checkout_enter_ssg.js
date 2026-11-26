@@ -44,7 +44,9 @@ const mismatch = seg => {
   if (nz(ex.name) && !key(seg).includes(key(ex.name))) return 'product name not in order item'
   const opt = (seg.match(/옵션\s*:\s*(.*?)\s*판매가격/) || [])[1]
   const sel = nz(ex.selected)
-  if (sel) {
+  // 선택란 없는 단일 상품('대표단품 FREE')은 주문서에도 옵션 칸이 없다 — 옵션 대조를 건너뛴다(실기 2026-11-26 SSG 엠포리오아르마니 타이)
+  const noChoice = /^(?:대표단품|단일상품|단일|free|f|one|onesize|프리사이즈|프리|[\s()\/·,\[\]])+$/i.test(sel)
+  if (sel && !(opt == null && noChoice)) {
     if (opt == null) return 'option segment not found'
     if (!key(opt).includes(key(sel))) return `selected "${sel}" not in option "${opt}"`
   }

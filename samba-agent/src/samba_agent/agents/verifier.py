@@ -165,7 +165,9 @@ class VerifierAgent(AgentBase):
             name_only = kind == 'gift' and (source.get('gift_order') is True or bool(gift_name_only))
             keys = ('name',) if name_only else ('name', 'address', 'address_detail')
             for key in keys:
-                value = str(expected.get(key) or '')
+                # 이름 끝에 공백이 붙은 주문이 있다('홍길동 ') — 그대로 찾으면 화면 글자와 안 맞아 미확인으로 멈춘다
+                # (실기 2026-11-26 무신사 20261126102888121:001)
+                value = str(expected.get(key) or '').strip()
                 if not value:
                     continue
                 if key == 'name' and kind == 'gift':

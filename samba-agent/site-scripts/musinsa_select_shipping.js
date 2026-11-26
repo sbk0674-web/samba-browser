@@ -30,21 +30,23 @@ try{await page.waitFor('배송지 추가하기',8000);}catch(e){}
 // 버튼 목록(interactive) 읽기에는 화면 글자가 비어 온다(실기 2026-11-04 hwangnol06 4136: 칸마다 글자 '' → 사무실 칸을 못 찾음) — 글자는 따로 읽어 붙인다
 async function rowsOf(o){const g=await G(o);const t=await G(o.query?{query:o.query}:{});return rowsFrom({tree:g.tree.split('PAGE TEXT:')[0]+'PAGE TEXT:'+(t.tree.split('PAGE TEXT:')[1]||'')});}
 function rowsFrom(g){
-  const lines=g.tree.split('\n');const ids=[];
+  const lines=g.tree.split('\n');const ids=[];const lbs=[];
   for(let i=0;i<lines.length;i++){
     if(!/^\[\d+\] (?:button|clickable) "수정"/.test(lines[i]))continue;
     for(let j=i-1;j>=Math.max(0,i-5);j--){
-      const m=lines[j].match(/^\[(\d+)\] clickable/);
-      if(m){ids.push(parseInt(m[1]));break;}
+      const m=lines[j].match(/^\[(\d+)\] clickable(?: "([^"]*)")?/);
+      if(m){ids.push(parseInt(m[1]));lbs[ids.length-1]=m[2]||'';break;}
       if(/^\[\d+\] button "(?:수정|삭제)"/.test(lines[j]))break;
     }
   }
   let tx=g.tree.split('PAGE TEXT:')[1]||'';
   const a=tx.indexOf('배송지 추가하기');if(a>=0)tx=tx.slice(a+8);
-  const ch=tx.split(/수정/).map(s=>s.replace(/^\s*삭제/,'').trim());
-  return ids.map((id,i)=>({id,tx:(ch[i]||'').replace(/\s+/g,' ')}));
+  const ch=tx.split(/(?<![가-힣])수정(?![가-힣])/).map(s=>s.replace(/^\s*삭제/,'').trim());
+  return ids.map((id,i)=>({id,lb:lbs[i]||'',tx:(ch[i]||'').replace(/\s+/g,' ')}));
 }
 function pick(rs,needName){
+  // 행 글자는 '수정' 으로 쪼개 순번을 맞추므로 줄이 어긋난다(목록이 길면 엉뚱한 사람 행을 골랐다, 실기 2026-11-25 6543) — 행 이름표가 이름과 똑같은 행을 먼저 쓴다
+  if(needName&&nm){const ex=rs.filter(r=>r.lb&&r.lb.trim()===nm);if(ex.length)return ex[0];}
   let best=null,bs=-1;
   for(const r of rs){
     const t=r.tx,first=(t.split(' ')[0]||'');
@@ -70,7 +72,9 @@ async function search(q){
   await sleep(600);return await G({query:q});
 }
 let fb=false;
-let best=pick(await rowsOf({interactive:true,query:nm}),true);
+// 목록이 수십~수백 줄이면 순번이 어긋나 엉뚱한 행을 고른다 — 검색창에 이름을 넣어 줄인 뒤 고른다(실기 2026-11-25 6543)
+let best=null;if(nm){try{if(await search(nm))best=pick(await rowsOf({interactive:true}),true);}catch(e){}}
+if(!best)best=pick(await rowsOf({interactive:true,query:nm}),true);
 if(!best){const key=toks.filter(t=>/[0-9]/.test(t)||t.length>=3).slice(-2).join(' ')||ad;
   // 검색칸이 없으면 전체 목록에서 고른다(무신사는 이름을 '임*희' 로 가려 이름 검색이 안 걸린다, 실기 2026-11-03)
   {const rs=await rowsOf({interactive:true});best=pick(rs,true);if(!best){best=pick(rs,false);if(best)fb=true;}}

@@ -874,6 +874,8 @@ _FREE_SIZE_TOKENS = frozenset(
         '프리사이즈',
         '단일',
         '단일사이즈',
+        # SSG 가 선택란 없는 상품을 '대표단품' 으로 적는다(실기 2026-11-26 SSG 엠포리오아르마니 타이 '대표단품 FREE')
+        '대표단품',
         'freesize',
     }
 )
@@ -5777,6 +5779,25 @@ class BuyerAgent(AgentBase):
                 else f'확정 실패: note={o.get("note")}'
             ),
         )
+        # 배송지 목록이 수십~수백 줄이면 무신사가 '변경하기' 뒤 한참(1분 안팎) 멈췄다가 주문서를 바꾼다 — 확정 스크립트가
+        # 그동안 못 기다려 '되읽기 불일치'로 끝나도, 팝업이 닫힌 뒤 다시 읽으면 맞게 반영돼 있다(실기 2026-11-25 6543 직접 확인)
+        for _again in (1, 2):
+            if confirmed.get('ok') and shipping_matches(shipping, confirmed):
+                break
+            if '되읽기 불일치' not in str(confirmed.get('note') or ''):
+                break
+            self.note('배송지 확정', f'주문서가 늦게 바뀌는 중이라 20초 뒤 다시 읽는다({_again}/2)')
+            time.sleep(20)
+            confirmed = self.script_json(
+                spec.confirm_shipping_script,
+                {k: v for k, v in args.items() if k in ('name', 'address', 'profile', 'tab')},
+                goal='배송지 폼을 저장·적용해 주문서에 반영하고, 주문서에서 되읽은 이름·주소를 ok:true 와 함께 돌려준다.',
+                check=lambda o: (
+                    None
+                    if o.get('ok') and shipping_matches(shipping, o)
+                    else f'확정 실패: note={o.get("note")}'
+                ),
+            )
         if not confirmed.get('ok') or not shipping_matches(shipping, confirmed):
             # 저장은 됐는데(사이트 '등록 완료') 목록에서 방금 항목을 못 찾은 경우 — 기존 배송지 선택으로 한 번 더 고른다
             # (실기 2026-09-30 롯데온 선물: 다시 돌리면 선택으로 통과했다)

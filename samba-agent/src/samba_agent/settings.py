@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     slack_app_token: SecretStr | None = Field(default=None, alias='SLACK_APP_TOKEN')
     slack_channel: str = Field(default='#sambaorder', alias='SLACK_CHANNEL')
     money_alert_receiver: str | None = Field(default=None, alias='SAMBA_MONEY_ALERT_RECEIVER')
+    # 잔액 알림은 주문 봇(poizon2 앱, 삭제 예정)이 아니라 andrew 슬랙 앱으로 보낸다(사용자 2026-11-25)
+    money_alert_slack_bot_token: SecretStr | None = Field(
+        default=None, alias='SAMBA_MONEY_ALERT_SLACK_BOT_TOKEN'
+    )
+    money_alert_slack_channel: str = Field(
+        default='#daily_brief', alias='SAMBA_MONEY_ALERT_SLACK_CHANNEL'
+    )
     sms_container: str = Field(default='local-samba-api-1', alias='SAMBA_SMS_CONTAINER')
     # NoDecode: 환경변수 값을 JSON 으로 풀지 않고 아래 검증기가 쉼표로 나눈다(예: U1,U2)
     slack_allowed_users: Annotated[tuple[str, ...], NoDecode] = Field(

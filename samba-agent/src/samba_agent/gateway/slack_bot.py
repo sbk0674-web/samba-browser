@@ -151,18 +151,20 @@ class SambaBot:
             return
         if self.app is None:
             return
-        cursor: str | None = None
-        while True:
-            resp = self.app.client.conversations_list(
-                types='public_channel,private_channel', cursor=cursor, limit=200
-            )
-            for ch in resp.get('channels', []):
-                if ch.get('name') == name:
-                    self._channel_id = ch['id']
-                    return
-            cursor = (resp.get('response_metadata') or {}).get('next_cursor')
-            if not cursor:
-                break
+        for kind in ('public_channel', 'private_channel'):
+            cursor: str | None = None
+            try:
+                while True:
+                    resp = self.app.client.conversations_list(types=kind, cursor=cursor, limit=200)
+                    for ch in resp.get('channels', []):
+                        if ch.get('name') == name:
+                            self._channel_id = ch['id']
+                            return
+                    cursor = (resp.get('response_metadata') or {}).get('next_cursor')
+                    if not cursor:
+                        break
+            except Exception as exc:  # noqa: BLE001 — 권한 없는 종류(groups:read)는 건너뛴다
+                log.info('채널 목록 조회 건너뜀(%s): %s', kind, type(exc).__name__)
         log.warning('대상 채널을 찾지 못했다: %s', name)
 
     def handle_mention(self, text: str, user: str, thread_ts: str | None) -> str | None:

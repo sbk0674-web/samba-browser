@@ -46,9 +46,9 @@ from samba_agent.ops.events import EventLog
 from samba_agent.ops.lotteon_gift_tracking import start_lotteon_gift_tracking_loop
 from samba_agent.ops.masking import mask_text
 from samba_agent.ops.money_alerts import MoneyBalanceAlerts
+from samba_agent.ops.slack_post import SlackChannelPoster
 from samba_agent.ops.releases import ReleaseStore
 from samba_agent.ops.site_scripts import install_missing
-from samba_agent.ops.sms_alerts import SambaSmsSender
 from samba_agent.ops.source_audit import (
     DETAIL_JS,
     LIST_JS,
@@ -600,11 +600,27 @@ def main() -> None:
                 state_dir=settings.db_path.parent,
             )
     bot = SambaBot(slack_app, worker, queue, settings, _diagnose_text)
-    if settings.money_alert_receiver and settings.wave_tenant_id:
-        sms = SambaSmsSender(
-            settings.money_alert_receiver, settings.wave_tenant_id, container=settings.sms_container
+    money_slack_app = None
+    if settings.money_alert_slack_bot_token is not None:
+        # 전용 열쇠가 있으면 그 앱으로 보낸다
+        from slack_sdk import WebClient
+
+        class _MoneySlack:
+            client = WebClient(token=settings.money_alert_slack_bot_token.get_secret_value())
+
+        money_slack_app = _MoneySlack
+    elif slack_app is not None:
+        # 전용 열쇠가 없으면 주문 봇과 같은 앱(andrew)으로 보낸다
+        money_slack_app = slack_app
+    if money_slack_app is None:
+        log.warning('무신사머니 잔액 알림 꺼짐 — 슬랙 열쇠가 없다')
+    else:
+        # 무신사머니 잔액 알림은 문자(알리고)에서 슬랙 #daily_brief 로 옮겼다(사용자 2026-11-25).
+        # 슬랙에 못 올리면 False 라 구간을 '보냄'으로 기록하지 않고 다음 확인 때 다시 시도한다
+        money_alerts = MoneyBalanceAlerts(
+            settings.db_path.parent / 'money-alerts.sqlite',
+            SlackChannelPoster(money_slack_app, settings.money_alert_slack_channel).post,
         )
-        money_alerts = MoneyBalanceAlerts(settings.db_path.parent / 'money-alerts.sqlite', sms.send)
         for agent in agents.values():
             if isinstance(agent, PayerAgent):
                 agent.money_balance_alert = money_alerts.observe

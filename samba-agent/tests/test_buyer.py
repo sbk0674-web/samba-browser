@@ -2545,3 +2545,24 @@ def test_당근_주문은_손님_주소가_없으면_까대기로_본다():
     other = OrderRef(order_no='A2', source='무신사', seller='쿠팡', sku='SKU', qty=1)
     agent._shipping_fn = lambda key, kind: {'name': '', 'address': ''}
     assert agent._daangn_without_address(other) is False
+
+
+def test_마린_블루_주문은_네이비_주문서와_같은_색이다():
+    # 실기 2026-11-25 21315230657793299: 무신사 리복 패딩(네이비 단색)에 '마린 블루 S' 주문이 색 불일치로 멈췄다
+    agent = object.__new__(BuyerAgent)
+    agent._reselected = {}
+    agent.evidence = []
+    agent.spec = type('S', (), {'name': 'buyer.musinsa'})()
+    assert agent._selected_matches('네이비 S', '마린 블루 S') is True
+    # 진짜 다른 색·사이즈는 여전히 막는다
+    assert agent._selected_matches('블랙 S', '마린 블루 S') is False
+    assert agent._selected_matches('네이비 M', '마린 블루 S') is False
+
+
+def test_SSG_대표단품은_선택란_없는_단일상품으로_본다():
+    # 실기 2026-11-26 SSG 엠포리오아르마니 타이 — 주문 옵션 '대표단품 FREE'
+    from samba_agent.agents.buyer import single_item_ok
+
+    snap = {'order_tab': True, 'cost': 178200, 'product_name': '매장정품 엠포리오아르마니 남성 도트 패턴 실크 타이'}
+    assert single_item_ok('대표단품 FREE', snap)
+    assert not single_item_ok('대표단품 FREE', {**snap, 'order_tab': False})
