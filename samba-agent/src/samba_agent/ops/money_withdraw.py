@@ -144,9 +144,10 @@ def withdraw_all(account: str, bridge: BridgeClient | None = None) -> str:
             'fill_secret',
             elementId=int(m.group(1)) if m else 0,
             itemType='password',
+            provider='site',  # 무신사머니(사이트 자체 결제) 비밀번호
             accountLabel=account,
         ).result
-        if out.lstrip().startswith(('handoff', 'refused')):
+        if out.lstrip().lower().startswith(('handoff', 'refused', 'ambiguous', 'account not found', 'error')):
             return f'⚠️ {account} 출금 비밀번호 입력 실패(사람 확인 필요): {out[:80]}'
         time.sleep(3)
         try:
