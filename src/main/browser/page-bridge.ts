@@ -457,7 +457,14 @@ function opToCode(op: AgentOp): string {
 // 클릭이 포커스로 안 이어질 때 다시 누르는 횟수·간격(시험에서는 기다리지 않는다)
 const FOCUS_RETRIES = 2
 const FOCUS_RETRY_MS = process.env['VITEST'] ? 0 : 600
-const HUMAN_TYPING_HOSTS = ['gsshop.com', 'payco.com', 'shoemarker.co.kr', 'partner.hmall.com']
+// 롯데온: 비밀번호 칸에 값만 넣으면 화면에는 채워져도 컴포넌트 값은 비어 "비밀번호를 입력해 주세요." 가 뜬다(실기 2026-11-26 edelvise06)
+const HUMAN_TYPING_HOSTS = [
+  'gsshop.com',
+  'payco.com',
+  'shoemarker.co.kr',
+  'partner.hmall.com',
+  'lotteon.com'
+]
 
 function safeHost(wc: WebContents): string {
   try {

@@ -62,4 +62,9 @@ describe('needsHumanTyping — 한 글자씩 키 입력은 GS샵·페이코만',
     expect(needsHumanTyping('partner.hmall.com')).toBe(true)
     expect(needsHumanTyping('www.hmall.com')).toBe(false)
   })
+  it('롯데온 로그인은 진짜 키 입력(값만 넣으면 비밀번호 칸이 비어 있다고 나옴, 실기 2026-11-26)', () => {
+    expect(needsHumanTyping('www.lotteon.com')).toBe(true)
+    expect(needsHumanTyping('member.lotteon.com')).toBe(true)
+    expect(needsHumanTyping('notlotteon.com')).toBe(false)
+  })
 })
