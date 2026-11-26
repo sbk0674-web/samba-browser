@@ -359,7 +359,7 @@ function isSocialButton(el: HTMLElement): boolean {
 
 // 로그인 낱말이 섞여도 제출이 아닌 버튼 — 아이디·비밀번호 찾기, 회원가입, 비회원, 로그인 상태 유지 등
 export const NOT_SUBMIT_TEXT_RE =
-  /찾기|회원\s?가입|가입하기|비회원|find|forgot|reset|join|sign\s?up|register|로그인\s?상태|자동\s?로그인|로그아웃|logout|log\s?out/i
+  /찾기|회원\s?가입|가입하기|비회원|find|forgot|reset|join|sign\s?up|register|로그인\s?상태|자동\s?로그인|로그아웃|logout|log\s?out|비밀번호\s?(?:숨기기|보기|표시)|show\s?pass|hide\s?pass/i
 
 /**
  * 폼 안의 type="button" 로그인 버튼인가 — 한국 쇼핑몰은 form 안이어도 제출 버튼 대신
@@ -395,15 +395,19 @@ export function findSubmit(
 ): number | undefined {
   const form = anchor ? formOf(anchor) : null
   if (form) {
-    for (const el of registry) {
-      if (formOf(el) !== form) continue
-      if (!isSubmitLike(el)) continue
-      if (isSocialButton(el)) continue
-      // 아이디·비밀번호 찾기 버튼은 type 이 없으면 기본이 submit 이라 여기 걸린다 — 제출로 보면 비밀번호 찾기 화면으로 넘어간다
-      // (실기 2026-11-26 롯데온 edelvise06: 로그인하기가 div 로 바뀐 뒤 '비밀번호 찾기' 가 눌려 로그인 못 함)
-      if (NOT_SUBMIT_TEXT_RE.test(buttonTextOf(el))) continue
-      return idOf(el)
-    }
+    // 폼 안의 type 없는 button 은 기본이 submit 이라 '비밀번호 숨기기'·'아이디 찾기' 도 후보에 든다 — 제출로 보면 엉뚱한 곳이 눌린다
+    // (실기 2026-11-26 롯데온 edelvise06: 비밀번호 보기 토글·찾기 버튼이 로그인하기보다 앞에 있어 로그인 못 함)
+    // 찾기·가입·비밀번호 보기 버튼은 빼고, 남은 후보 중 글자가 로그인류인 것을 먼저 쓴다. 글자로 못 고르면 예전처럼 첫 후보.
+    const submitCandidates = registry.filter(
+      (el) =>
+        formOf(el) === form &&
+        isSubmitLike(el) &&
+        !isSocialButton(el) &&
+        !NOT_SUBMIT_TEXT_RE.test(buttonTextOf(el))
+    )
+    const byText = submitCandidates.find((el) => SUBMIT_TEXT_RE.test(buttonTextOf(el)))
+    const firstCandidate = byText ?? submitCandidates[0]
+    if (firstCandidate) return idOf(firstCandidate)
     // 폼에 제출 버튼이 없으면 같은 폼 안의 로그인 글자 버튼(type="button")을 쓴다 — 문서 전체로 넘어가면
     // 캐러셀 '다음' 같은 엉뚱한 버튼이 먼저 걸린다(실기: 패션플러스 로그인이 배너 '다음'을 눌러 실패)
     for (const el of registry) {

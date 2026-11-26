@@ -40,14 +40,17 @@ describe('findLoginFields 픽스처', () => {
     expect(f.submit).toBe(go?.id)
   })
 
-  it('롯데온: 폼 안의 아이디·비밀번호 찾기 button(기본 submit)이 아니라 div 로그인하기를 제출로 고른다', () => {
+  it('롯데온: 폼 안 기본 submit 인 비밀번호 숨기기·찾기 button 이 아니라 로그인하기를 제출로 고른다', () => {
     const snap = snapshotWith(`
       <form>
         <input type="text" name="uid" id="lid">
         <input type="password" name="upw" id="lpw">
+        <button>비밀번호 숨기기</button>
+        <button>로그인하기</button>
         <button>아이디 찾기</button>
         <button>비밀번호 찾기</button>
-        <div id="go" tabindex="0" style="cursor:pointer">로그인하기</div>
+        <button>카카오</button>
+        <button>본인인증</button>
       </form>
     `)
     const f = findLoginFields()
