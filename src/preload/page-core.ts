@@ -869,6 +869,16 @@ export function releaseTextFocus(next: HTMLElement): void {
   active.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: next }))
 }
 
+/**
+ * 요소를 클릭한다. SVG·MathML 요소는 HTMLElement 와 달리 click() 이 없어 "el.click is not a function" 으로 죽는다
+ * (실기 2026-11-26 무신사 6724547 주문서 옵션 선택). 그럴 때는 click 이벤트를 직접 보낸다
+ */
+function clickElement(el: Element): void {
+  const anyEl = el as { click?: () => void }
+  if (typeof anyEl.click === 'function') anyEl.click()
+  else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+}
+
 export async function performClick(id: number): Promise<string> {
   const el = get(id)
   if (!el) return missingMessage(id)
@@ -886,7 +896,7 @@ export async function performClick(id: number): Promise<string> {
   fireMouseEvent(el, 'mousedown')
   fireMouseEvent(el, 'pointerup')
   fireMouseEvent(el, 'mouseup')
-  el.click()
+  clickElement(el)
   const handled = watch.handled()
   watch.stop()
   if (handled) return withCoverNote('ok', covered)
@@ -897,7 +907,7 @@ export async function performClick(id: number): Promise<string> {
   const afterFocus = readClickBaseline(el)
   fireEnter(el)
   const tag = el.tagName.toLowerCase()
-  if (tag === 'button' || tag === 'a') el.click()
+  if (tag === 'button' || tag === 'a') clickElement(el)
   if (await waitForChange(el, afterFocus)) return withCoverNote('ok (via Enter)', covered)
   // 3차 폴백 — 좌표 기준 클릭.
   //
@@ -932,7 +942,7 @@ export function pressOnce(id: number): string {
   fireMouseEvent(el, 'mousedown')
   fireMouseEvent(el, 'pointerup')
   fireMouseEvent(el, 'mouseup')
-  el.click()
+  clickElement(el)
   return 'ok'
 }
 
