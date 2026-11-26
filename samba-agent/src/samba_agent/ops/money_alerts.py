@@ -107,6 +107,11 @@ class MoneyBalanceAlerts:
             return False
         balance = values.pop()
         band = money_band(balance)
+        # 사용자 2026-11-26: 무신사머니 결제가 끝날 때마다 인출 가능 금액이 있으면 연결계좌로 전액 인출한다
+        # (알림 구간과 무관, SAMBA_MONEY_AUTO_WITHDRAW=1 일 때만). 0원이면 조용히 넘어간다
+        from samba_agent.ops.money_withdraw import start_after_payment
+
+        start_after_payment(account, self.send)
         now = self.now().astimezone(KST)
         quiet = now.hour < 7
         try:
@@ -150,11 +155,6 @@ class MoneyBalanceAlerts:
                     'ON CONFLICT(account) DO UPDATE SET band=excluded.band,balance=excluded.balance',
                     (account, saved_band, balance),
                 )
-            if posted:
-                # 사용자 2026-11-26: 알림이 나가면 같은 계정 무신사머니를 연결계좌로 전액 인출한다(SAMBA_MONEY_AUTO_WITHDRAW=1 일 때만)
-                from samba_agent.ops.money_withdraw import start_after_alert
-
-                start_after_alert(account, self.send)
             return posted
         except (OSError, sqlite3.Error) as exc:
             log.warning('무신사머니 알림 상태 저장 실패: %s', type(exc).__name__)

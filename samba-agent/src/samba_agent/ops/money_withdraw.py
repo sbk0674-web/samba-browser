@@ -188,3 +188,34 @@ def start_after_alert(account: str, send: Callable[[str], object]) -> None:
     threading.Thread(
         target=withdraw_after_alert, args=(account, send), name='money-withdraw', daemon=True
     ).start()
+
+
+_RUNNING: set[str] = set()
+_LAST: dict[str, float] = {}
+MIN_GAP_S = 120.0  # 같은 계정은 2분 안에 다시 확인하지 않는다(결제가 연달아 끝나도 한 번만)
+
+
+def _check_and_withdraw(account: str, send: Callable[[str], object]) -> None:
+    try:
+        with _LOCK:
+            msg = withdraw_all(account)
+        # 0원이라 건너뛴 경우(ℹ️)는 조용히 — 출금했거나 문제가 있을 때만 슬랙에 남긴다
+        if not msg.startswith('ℹ️'):
+            try:
+                send(f'💸 무신사머니 출금 결과\n{msg}')
+            except Exception as e:  # noqa: BLE001
+                log.warning('무신사머니 인출 결과 전송 실패: %s', type(e).__name__)
+    finally:
+        _RUNNING.discard(account)
+        _LAST[account] = time.monotonic()
+
+
+def start_after_payment(account: str, send: Callable[[str], object]) -> None:
+    if os.environ.get('SAMBA_MONEY_AUTO_WITHDRAW') != '1':
+        return
+    if account in _RUNNING or time.monotonic() - _LAST.get(account, -1e9) < MIN_GAP_S:
+        return
+    _RUNNING.add(account)
+    threading.Thread(
+        target=_check_and_withdraw, args=(account, send), name='money-withdraw', daemon=True
+    ).start()
