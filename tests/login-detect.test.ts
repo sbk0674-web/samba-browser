@@ -40,6 +40,22 @@ describe('findLoginFields 픽스처', () => {
     expect(f.submit).toBe(go?.id)
   })
 
+  it('롯데온: 폼 안의 아이디·비밀번호 찾기 button(기본 submit)이 아니라 div 로그인하기를 제출로 고른다', () => {
+    const snap = snapshotWith(`
+      <form>
+        <input type="text" name="uid" id="lid">
+        <input type="password" name="upw" id="lpw">
+        <button>아이디 찾기</button>
+        <button>비밀번호 찾기</button>
+        <div id="go" tabindex="0" style="cursor:pointer">로그인하기</div>
+      </form>
+    `)
+    const f = findLoginFields()
+    const go = snap.elements.find((e) => e.text === '로그인하기' || e.name === '로그인하기')
+    expect(go).toBeDefined()
+    expect(f.submit).toBe(go?.id)
+  })
+
   it('네이버: 아이디 또는 전화번호 라벨', () => {
     const snap = snapshotWith(`
       <form id="frmNIDLogin">

@@ -399,6 +399,9 @@ export function findSubmit(
       if (formOf(el) !== form) continue
       if (!isSubmitLike(el)) continue
       if (isSocialButton(el)) continue
+      // 아이디·비밀번호 찾기 버튼은 type 이 없으면 기본이 submit 이라 여기 걸린다 — 제출로 보면 비밀번호 찾기 화면으로 넘어간다
+      // (실기 2026-11-26 롯데온 edelvise06: 로그인하기가 div 로 바뀐 뒤 '비밀번호 찾기' 가 눌려 로그인 못 함)
+      if (NOT_SUBMIT_TEXT_RE.test(buttonTextOf(el))) continue
       return idOf(el)
     }
     // 폼에 제출 버튼이 없으면 같은 폼 안의 로그인 글자 버튼(type="button")을 쓴다 — 문서 전체로 넘어가면
