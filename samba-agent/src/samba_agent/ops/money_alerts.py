@@ -150,7 +150,12 @@ class MoneyBalanceAlerts:
                     'ON CONFLICT(account) DO UPDATE SET band=excluded.band,balance=excluded.balance',
                     (account, saved_band, balance),
                 )
-                return posted
+            if posted:
+                # 사용자 2026-11-26: 알림이 나가면 같은 계정 무신사머니를 연결계좌로 전액 인출한다(SAMBA_MONEY_AUTO_WITHDRAW=1 일 때만)
+                from samba_agent.ops.money_withdraw import start_after_alert
+
+                start_after_alert(account, self.send)
+            return posted
         except (OSError, sqlite3.Error) as exc:
             log.warning('무신사머니 알림 상태 저장 실패: %s', type(exc).__name__)
             return False
