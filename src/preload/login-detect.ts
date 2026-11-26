@@ -394,6 +394,27 @@ export function findSubmit(
   idOf: IdLookup = indexLookup(registry)
 ): number | undefined {
   const form = anchor ? formOf(anchor) : null
+  // 보이는 글자가 정확히 '로그인'·'로그인하기' 인 button 이 있으면 그것을 맨 먼저 쓴다 — 클래스·id 글자나 앞선 버튼 순서에
+  // 휘둘리지 않게(실기 2026-11-26 롯데온 edelvise06: 같은 폼의 찾기·비밀번호 숨기기 button 때문에 엉뚱한 곳이 눌렸다)
+  const exactLoginButton = registry.find(
+    (el) =>
+      (!form || formOf(el) === form) &&
+      isButtonish(el) &&
+      !isSocialButton(el) &&
+      !NOT_SUBMIT_TEXT_RE.test(buttonTextOf(el)) &&
+      EXACT_LOGIN_TEXT_RE.test(
+        (
+          el.getAttribute('aria-label') ||
+          el.innerText ||
+          el.textContent ||
+          (el as HTMLInputElement).value ||
+          ''
+        )
+          .replace(/\s+/g, ' ')
+          .trim()
+      )
+  )
+  if (exactLoginButton) return idOf(exactLoginButton)
   if (form) {
     // 폼 안의 type 없는 button 은 기본이 submit 이라 '비밀번호 숨기기'·'아이디 찾기' 도 후보에 든다 — 제출로 보면 엉뚱한 곳이 눌린다
     // (실기 2026-11-26 롯데온 edelvise06: 비밀번호 보기 토글·찾기 버튼이 로그인하기보다 앞에 있어 로그인 못 함)
