@@ -861,6 +861,9 @@ def shipping_fee_for(order: OrderRef, order_type: str) -> float:
     return 0.0
 
 
+# 옵션이 아닌 추가 신청 칸(선물포장·쇼핑백)
+_ADDON_OPTION_RE = re.compile(r'선물\s*포장|쇼핑백\s*신청')
+
 _FREE_SIZE_TOKENS = frozenset(
     {
         'free',
@@ -4743,6 +4746,9 @@ class BuyerAgent(AgentBase):
             )
 
         options = [str(o) for o in (snap.get('options') or [])]
+        # SSG 상품 페이지의 '선물포장 & 쇼핑백 신청' 은 옵션이 아니라 추가 신청 칸이다 — 옵션 후보로 치면 '대표단품 FREE' 주문에
+        # 그 칸이 골라진다(실기 2026-11-26 SSG 엠포리오아르마니 타이 758108632514579, 결제 직전 대조가 막아 결제는 안 됐다)
+        options = [o for o in options if not _ADDON_OPTION_RE.search(o)]
         if not options and single_item_ok(a.order.option, snap):
             # 옵션 선택란이 없는 단일 상품(프리사이즈 한 가지) — 주문서가 열렸고 색상이 상품명과 맞으면 그 상품이다
             # (실기 2026-09-30 롯데온 노스페이스 힙색 'BLK(BLACK) FREE')

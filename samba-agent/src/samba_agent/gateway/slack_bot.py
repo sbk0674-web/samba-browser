@@ -107,6 +107,8 @@ class SambaBot:
         슬랙이 없거나 채널을 못 풀었으면 None — 부르는 쪽은 스레드 없이 큐에만 넣는다.
         슬랙 오류로 수집 고리가 죽으면 안 되므로 여기서 삼킨다(개인정보는 마스킹을 한 번 더 거친다).
         """
+        if getattr(self.settings, 'slack_top_post_off', False):  # 사장님 지시 2026-11-26: 접수·교차검증 최상위 글 중지
+            return None
         if self.app is None or self._channel_id is None:
             return None
         try:

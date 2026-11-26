@@ -2566,3 +2566,11 @@ def test_SSG_대표단품은_선택란_없는_단일상품으로_본다():
     snap = {'order_tab': True, 'cost': 178200, 'product_name': '매장정품 엠포리오아르마니 남성 도트 패턴 실크 타이'}
     assert single_item_ok('대표단품 FREE', snap)
     assert not single_item_ok('대표단품 FREE', {**snap, 'order_tab': False})
+
+
+def test_SSG_선물포장_쇼핑백_신청_칸은_옵션_후보가_아니다():
+    # 실기 2026-11-26 SSG 엠포리오아르마니 타이 — 옵션 후보로 잡혀 '대표단품 FREE' 주문에 골라졌다
+    from samba_agent.agents.buyer import _ADDON_OPTION_RE
+
+    assert _ADDON_OPTION_RE.search('신세계백화점 엠포리오아르마니 남성 도트 패턴 실크 타이/A516151007 선물포장 & 쇼핑백 신청')
+    assert not _ADDON_OPTION_RE.search('BLACK 270')

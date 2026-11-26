@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     slack_bot_token: SecretStr | None = Field(default=None, alias='SLACK_BOT_TOKEN')
     slack_app_token: SecretStr | None = Field(default=None, alias='SLACK_APP_TOKEN')
     slack_channel: str = Field(default='#sambaorder', alias='SLACK_CHANNEL')
+    slack_top_post_off: bool = Field(default=False, alias='SAMBA_SLACK_TOP_POST_OFF')
     money_alert_receiver: str | None = Field(default=None, alias='SAMBA_MONEY_ALERT_RECEIVER')
     # 잔액 알림은 주문 봇(poizon2 앱, 삭제 예정)이 아니라 andrew 슬랙 앱으로 보낸다(사용자 2026-11-25)
     money_alert_slack_bot_token: SecretStr | None = Field(
