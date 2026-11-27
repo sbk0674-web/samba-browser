@@ -60,7 +60,7 @@ const fakeTab = {
   mobile: false
 }
 
-function build(withMemory = true): {
+function build(withMemory = true, active: () => unknown = () => fakeTab): {
   tools: ToolStub[]
   calls: AgentToolCall[]
   remembered: Array<{ host: string; note: string }>
@@ -68,7 +68,7 @@ function build(withMemory = true): {
   const calls: AgentToolCall[] = []
   const remembered: Array<{ host: string; note: string }> = []
   const tabs = {
-    active: () => fakeTab,
+    active,
     create: vi.fn(() => ({ id: 't2' })),
     activate: vi.fn(),
     close: vi.fn(),
@@ -116,6 +116,19 @@ describe('행동 도구만 사이트 기억으로 흘러간다', () => {
     })
     // Enter 폴백 표식이 결과 그대로 실려 와야 자동 메모를 만들 수 있다
     expect(calls[0].result).toContain('pressed Enter')
+  })
+
+  it.each([
+    ['closed tab', undefined],
+    ['destroyed tab', { isDestroyed: () => true, getURL: () => { throw new Error('Object has been destroyed') } }]
+  ])('returns script result even when its work tab is a %s', async (_state, webContents) => {
+    const { tools, calls } = build(true, () => ({ ...fakeTab, view: { webContents } }))
+    const result = await tools.find((t) => t.name === 'run_js')!.handler({
+      code: 'return "script completed"',
+      safety: 'no_pay'
+    })
+    expect(result.content[0].text).toBe('script completed')
+    expect(calls).toEqual([expect.objectContaining({ tool: 'run_js', ok: true, url: '' })])
   })
 
   it('관찰 도구(get_page·list_tabs)는 넘기지 않는다', async () => {

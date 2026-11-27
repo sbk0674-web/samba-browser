@@ -771,7 +771,8 @@ ${raw}`
   // 비밀 채움 경로는 반드시 진입 시 탭을 넘겨서 "검사한 탭 ≠ 채우는 탭" 이 되지 않게 한다
   const currentUrl = (target?: Tab): string => {
     const tab = target ?? activeOr(ctx)
-    return tab ? tab.view.webContents.getURL() : ''
+    const wc = tab?.view.webContents
+    return wc && !wc.isDestroyed?.() ? wc.getURL() : ''
   }
 
   // 대상 탭의 호스트(정규화). 탭이 없거나 정규화에 실패하면 빈 문자열
