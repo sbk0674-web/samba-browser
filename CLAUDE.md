@@ -6,7 +6,7 @@
 ## 앱 빌드·교체·재시작
 - **앱 `out/` 은 `scripts/deploy-app.ps1` 로만 만든다.** 이 스크립트는 깨끗한 워크트리(`samba_browser-mastersync`)를 최신 origin/master 로 맞춰 빌드하고 메인 `out/` 에 복사한다. 메인 체크아웃에서 직접 `npm run build` 후 재시작하지 않는다.
 - `npm run build` 는 `scripts/check-build-source.mjs` 가 먼저 돈다 — 소스가 origin/master 보다 뒤처졌으면 빌드를 막는다. `SAMBA_ALLOW_STALE_BUILD=1` 로 우회하지 않는다(옛 판을 일부러 만들 때만).
-- **재시작은 하네스 큐가 5분 비었을 때만** 한다(`deploy-app.ps1 -Restart` 가 확인한다). 주문 결제 중에 앱을 끄면 결제 여부가 불명해진다.
+- **재시작은 하네스 큐가 30초 비었을 때만** 한다(`deploy-app.ps1 -Restart` 가 확인한다). 주문 결제 중에 앱을 끄면 결제 여부가 불명해진다.
 - 재시작 전에 삼바 브라우저를 쓰는 세션(SAMBASNS·선녀체크인 등)에 한 줄로 알리고, 끝난 뒤 한 줄로 다시 알린다. 앱 창(`video`·`collect` 등)은 재시작하면 사라지니 별칭으로 다시 만든다.
 - 로그인 화면 아래 "최종 수정 <해시.날짜>[+] · 빌드 <시각>" 으로 떠 있는 판을 확인한다. 해시가 origin/master 최신과 다르거나 `+` 가 붙어 있으면 의도한 빌드인지 본다.
 

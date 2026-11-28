@@ -3,10 +3,10 @@
 # 1) 깨끗한 워크트리(samba_browser-mastersync)를 최신 origin/master 로 맞춘다
 # 2) 거기서 빌드한다(미커밋 변경·옛 소스가 섞일 수 없다)
 # 3) 메인 폴더 out/ 에 복사한다(기존 out/ 은 out.bak-<시각> 으로 옮기고 최신 3개만 남긴다)
-# 4) -Restart 를 주면 하네스 큐가 5분 비었을 때만 앱을 껐다 켠다
+# 4) -Restart 를 주면 하네스 큐가 30초 비었을 때만 앱을 껐다 켠다
 #
 # 사용: powershell -File scripts\deploy-app.ps1            (빌드·복사만, 실행 중인 앱은 그대로)
-#       powershell -File scripts\deploy-app.ps1 -Restart   (큐가 5분 비면 재시작까지)
+#       powershell -File scripts\deploy-app.ps1 -Restart   (큐가 30초 비면 재시작까지)
 #
 # 재시작 전에 사람·세션에게 알린다: 삼바 브라우저를 쓰는 세션(SAMBASNS·선녀체크인 등)에 한 줄 통지 → 답/무응답 확인.
 param([switch]$Restart, [switch]$Force)
@@ -38,7 +38,7 @@ Get-ChildItem $main -Directory -Filter 'out.bak-*' | Sort-Object Name -Descendin
 
 if (-not $Restart) { Write-Host '[4/4] 재시작 안 함(-Restart 로 재시작). 앱은 다음 시작부터 새 판이다.'; exit 0 }
 
-Write-Host '[4/4] 하네스 큐가 5분 비면 재시작'
+Write-Host '[4/4] 하네스 큐가 30초 비면 재시작'
 # 큐 검사 파이썬 조각은 파일로 만들어 부른다 — -c 에 여러 줄·따옴표를 넘기면 PowerShell 이 따옴표를 벗겨 SyntaxError 로 끝났다(2026-10-21)
 $idleCheck = Join-Path $env:TEMP 'samba-queue-idle-check.py'
 @'
@@ -47,7 +47,7 @@ j = sqlite3.connect(sys.argv[1], timeout=30)
 n = j.execute("select count(*) from jobs where state in ('queued','running')").fetchone()[0]
 m = j.execute('select max(updated_at) from jobs').fetchone()[0]
 age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(m)).total_seconds()
-print('ok' if n == 0 and age >= 300 else 'wait')
+print('ok' if n == 0 and age >= 30 else 'wait')
 '@ | Set-Content -Encoding UTF8 $idleCheck
 for ($i = 0; $i -lt 180; $i++) {
   $r = (& $py $idleCheck $jobs | Select-Object -Last 1)
