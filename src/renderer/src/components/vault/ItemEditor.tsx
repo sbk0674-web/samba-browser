@@ -123,8 +123,8 @@ const FORM_SPECS: Record<VaultItemType, SectionSpec[]> = {
 const CUSTOM_SECTION_KEY = 'custom'
 
 /**
- * 비밀 입력칸 + [보이기] 눈 버튼. 지금 치고 있는 글자를 확인하는 용도다 —
- * 편집기는 저장된 비밀값을 불러오지 않으므로(빈 칸 = 그대로 둠) 이 버튼으로 기존 값이 드러나지는 않는다.
+ * 비밀 입력칸 + [보이기] 눈 버튼. 기본은 마스킹(••••)이고 눈 버튼으로 값을 보거나 다시 가린다.
+ * 편집 중인 항목의 기존 값은 편집기가 열릴 때 불러와 채운다(읽기 실패 시 빈 칸 = 그대로 둠).
  * 칸을 벗어나 다른 항목을 열면 컴포넌트가 새로 만들어져 다시 가려진다
  */
 function SecretInput({
@@ -257,6 +257,27 @@ export function ItemEditor({
       alive = false
     }
     // 원본 항목은 마운트 시점 값만 쓴다(부모가 key 로 새로 마운트한다)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // 편집 중인 기존 항목의 비밀값(비밀번호·카드번호 등)을 한 번 읽어 채운다 — 입력칸은 마스킹(••••)된 채 보이고
+  // 눈 버튼으로 보기/숨김을 바꾼다. 읽기에 실패하면(잠김 등) 빈 칸 = 기존 값 유지로 남는다.
+  // 읽는 사이에 사용자가 이미 친 값은 덮어쓰지 않는다
+  useEffect(() => {
+    if (!item) return
+    let alive = true
+    for (const section of item.sections) {
+      for (const field of section.fields) {
+        if (field.kind !== 'secret') continue
+        void reveal(item.id, field.key).then((secret) => {
+          if (!alive || !secret) return
+          setValues((prev) => (prev[field.key] ? prev : { ...prev, [field.key]: secret }))
+        })
+      }
+    }
+    return () => {
+      alive = false
+    }
+    // 편집 대상은 마운트 시점 항목만 쓴다(부모가 key 로 새로 마운트한다)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // 결제 비밀번호의 기본 라벨은 결제 수단 이름이다(사용자가 '무신사머니'처럼 바꿀 수 있다)
