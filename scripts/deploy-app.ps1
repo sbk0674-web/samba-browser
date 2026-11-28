@@ -5,8 +5,9 @@
 # 3) 메인 폴더 out/ 에 복사한다(기존 out/ 은 out.bak-<시각> 으로 옮기고 최신 3개만 남긴다)
 # 4) -Restart 를 주면 하네스 큐가 30초 비었을 때만 앱을 껐다 켠다
 #
-# 사용: powershell -File scripts\deploy-app.ps1            (빌드·복사만, 실행 중인 앱은 그대로)
-#       powershell -File scripts\deploy-app.ps1 -Restart   (큐가 30초 비면 재시작까지)
+# 사용(Windows PowerShell 5.1 은 BOM 없는 한글 스크립트를 잘못 읽어 못 돈다 — 반드시 pwsh 로):
+#       pwsh -File scripts\deploy-app.ps1            (빌드·복사만, 실행 중인 앱은 그대로)
+#       pwsh -File scripts\deploy-app.ps1 -Restart   (큐가 30초 비면 재시작까지)
 #
 # 재시작 전에 사람·세션에게 알린다: 삼바 브라우저를 쓰는 세션(SAMBASNS·선녀체크인 등)에 한 줄 통지 → 답/무응답 확인.
 param([switch]$Restart, [switch]$Force)
