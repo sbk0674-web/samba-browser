@@ -69,7 +69,9 @@ describe('persistedCookie', () => {
 })
 
 describe('keepSessionCookies', () => {
-  function jar(): {
+  // 되쓰기는 DELAY 만큼 기다렸다가 쿠키가 아직 있는지 다시 읽고 나서 한다 — 가짜 시계로 시간을 흘린다
+  const DELAY = 500
+  function jar(stored?: Cookie[]): {
     fire: (c: Cookie, removed?: boolean) => void
     set: ReturnType<typeof vi.fn>
     jar: Parameters<typeof keepSessionCookies>[0]
@@ -81,36 +83,122 @@ describe('keepSessionCookies', () => {
         handler = l
         return j
       },
-      set
+      set,
+      // stored 를 주면 저장소를 흉내 낸다(없으면 get 이 없는 대역)
+      ...(stored
+        ? { get: async (f: { name?: string }) => stored.filter((c) => c.name === f.name) }
+        : {})
     }
     return { fire: (c, removed = false) => handler?.(null, c, 'explicit', removed), set, jar: j }
   }
+  const tick = async (ms: number): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(ms)
+  }
 
-  it('세션 쿠키가 생기면 만료를 얹어 되쓴다', () => {
-    const { fire, set, jar: j } = jar()
-    keepSessionCookies(j, { now: () => 1_700_000_000_000 })
-    fire(cookie())
-    expect(set).toHaveBeenCalledTimes(1)
-    expect(set.mock.calls[0][0]).toMatchObject({ name: 'app_atk', domain: '.musinsa.com' })
-    expect((set.mock.calls[0][0] as CookiesSetDetails).expirationDate).toBeGreaterThan(0)
+  it('세션 쿠키가 생기면 잠시 뒤 만료를 얹어 되쓴다', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fire, set, jar: j } = jar()
+      keepSessionCookies(j, { now: () => 1_700_000_000_000 })
+      fire(cookie())
+      expect(set).not.toHaveBeenCalled() // 바로 쓰지 않는다(로그아웃 삭제와 겹치지 않게)
+      await tick(DELAY)
+      expect(set).toHaveBeenCalledTimes(1)
+      expect(set.mock.calls[0][0]).toMatchObject({ name: 'app_atk', domain: '.musinsa.com' })
+      expect((set.mock.calls[0][0] as CookiesSetDetails).expirationDate).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('되쓴 쿠키(만료 있음)·지워진 쿠키에는 반응하지 않는다(무한 반복 없음)', () => {
-    const { fire, set, jar: j } = jar()
-    keepSessionCookies(j)
-    fire(cookie({ session: false, expirationDate: 9_999_999_999 }))
-    fire(cookie(), true)
-    expect(set).not.toHaveBeenCalled()
+  it('되쓴 쿠키(만료 있음)·지워진 쿠키에는 반응하지 않는다(무한 반복 없음)', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fire, set, jar: j } = jar()
+      keepSessionCookies(j)
+      fire(cookie({ session: false, expirationDate: 9_999_999_999 }))
+      fire(cookie(), true)
+      await tick(DELAY * 2)
+      expect(set).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('저장이 실패해도 던지지 않고 이름만 알린다', async () => {
-    const { fire, set, jar: j } = jar()
-    set.mockRejectedValueOnce(new Error('boom'))
-    const errors: string[] = []
-    keepSessionCookies(j, { onError: (n) => errors.push(n) })
-    fire(cookie())
-    await new Promise((r) => setTimeout(r, 0))
-    expect(errors).toEqual(['app_atk'])
+    vi.useFakeTimers()
+    try {
+      const { fire, set, jar: j } = jar()
+      set.mockRejectedValueOnce(new Error('boom'))
+      const errors: string[] = []
+      keepSessionCookies(j, { onError: (n) => errors.push(n) })
+      fire(cookie())
+      await tick(DELAY)
+      expect(errors).toEqual(['app_atk'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('로그아웃 응답처럼 세션 쿠키 설정 직후 삭제가 오면 되살리지 않는다(무신사 app_atk 실기 2026-11-28)', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fire, set, jar: j } = jar()
+      keepSessionCookies(j)
+      fire(cookie({ name: 'app_atk' })) // Set-Cookie: app_atk=…; Domain=musinsa.com (세션)
+      fire(cookie({ name: 'app_atk' }), true) // 이어서 Max-Age=0 삭제
+      fire(cookie({ name: 'app_rtk' }))
+      fire(cookie({ name: 'app_rtk' }), true)
+      await tick(DELAY * 2)
+      expect(set).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('기다리는 사이 저장소에서 이미 사라진 쿠키는 되쓰지 않는다', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fire, set, jar: j } = jar([]) // get 이 빈 목록을 돌려준다
+      keepSessionCookies(j)
+      fire(cookie())
+      await tick(DELAY)
+      expect(set).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('같은 쿠키가 연달아 바뀌면 마지막 값 하나만 되쓴다', async () => {
+    vi.useFakeTimers()
+    try {
+      const latest = cookie({ value: 'new-token' })
+      const { fire, set, jar: j } = jar([latest])
+      keepSessionCookies(j)
+      fire(cookie({ value: 'old-token' }))
+      fire(latest)
+      await tick(DELAY)
+      expect(set).toHaveBeenCalledTimes(1)
+      expect((set.mock.calls[0][0] as CookiesSetDetails).value).toBe('new-token')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('삭제 뒤에 다시 로그인해 새로 생긴 쿠키는 되쓴다', async () => {
+    vi.useFakeTimers()
+    try {
+      const { fire, set, jar: j } = jar()
+      keepSessionCookies(j)
+      fire(cookie())
+      fire(cookie(), true)
+      fire(cookie({ value: 'relogin-token' }))
+      await tick(DELAY)
+      expect(set).toHaveBeenCalledTimes(1)
+      expect((set.mock.calls[0][0] as CookiesSetDetails).value).toBe('relogin-token')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

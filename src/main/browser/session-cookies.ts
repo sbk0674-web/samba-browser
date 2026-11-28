@@ -25,7 +25,17 @@ export interface CookieJarLike {
     listener: (event: unknown, cookie: Cookie, cause: string, removed: boolean) => void
   ): unknown
   set(details: CookiesSetDetails): Promise<void>
+  /** 되쓰기 직전에 쿠키가 아직 있는지 다시 읽는 데 쓴다(없으면 이벤트 시점 값을 그대로 쓴다) */
+  get?(filter: { name?: string; domain?: string }): Promise<Cookie[]>
 }
+
+/**
+ * 세션 쿠키를 보고 되쓰기까지 기다리는 시간(ms).
+ * 로그아웃 응답이 같은 쿠키를 '세션 쿠키로 다시 설정 → 곧바로 만료 삭제' 순서로 보내는 사이트가 있다
+ * (무신사 /auth/logout: app_atk·app_rtk). 바로 되쓰면 비동기 되쓰기가 삭제 뒤에 도착해 로그인 토큰이
+ * 되살아나 로그아웃이 안 된다(실기 2026-11-28 rbf15). 잠깐 기다리는 동안 삭제 이벤트가 오면 취소한다
+ */
+export const SESSION_COOKIE_KEEP_DELAY_MS = 500
 
 const SESSION_KEEP_EXCLUDED_DOMAINS = [
   'google.com',
@@ -83,13 +93,53 @@ export function persistedCookie(
  */
 export function keepSessionCookies(
   cookies: CookieJarLike,
-  deps: { now?: () => number; keepDays?: number; onError?: (name: string) => void } = {}
+  deps: {
+    now?: () => number
+    keepDays?: number
+    delayMs?: number
+    onError?: (name: string) => void
+  } = {}
 ): void {
-  cookies.on('changed', (_e, cookie, _cause, removed) => {
-    if (removed) return
-    const details = persistedCookie(cookie, (deps.now ?? Date.now)(), deps.keepDays)
+  // 되쓰기를 기다리는 쿠키(도메인·경로·이름 단위). 같은 쿠키가 다시 오면 마지막 것만, 삭제가 오면 취소한다
+  const pending = new Map<string, ReturnType<typeof setTimeout>>()
+  const keyOf = (c: Pick<Cookie, 'domain' | 'path' | 'name'>): string =>
+    `${(c.domain ?? '').toLowerCase()}|${c.path ?? '/'}|${c.name}`
+
+  const persist = async (cookie: Cookie): Promise<void> => {
+    let current = cookie
+    if (cookies.get) {
+      // 기다리는 사이 지워졌거나 다른 값·만료로 바뀌었으면 그 상태를 따른다 — 지워졌으면 되쓰지 않는다
+      const found = await cookies.get({ name: cookie.name, domain: cookie.domain })
+      const same = found.find(
+        (c) => keyOf(c) === keyOf(cookie) && c.session === true && c.hostOnly === cookie.hostOnly
+      )
+      if (!same) return
+      current = same
+    }
+    const details = persistedCookie(current, (deps.now ?? Date.now)(), deps.keepDays)
     if (!details) return
-    void cookies.set(details).catch(() => deps.onError?.(cookie.name))
+    await cookies.set(details)
+  }
+
+  cookies.on('changed', (_e, cookie, _cause, removed) => {
+    const key = keyOf(cookie)
+    if (removed) {
+      // 로그아웃·만료로 지워졌다 — 아직 기다리는 되쓰기가 있으면 취소한다(되살리지 않는다)
+      const timer = pending.get(key)
+      if (timer !== undefined) clearTimeout(timer)
+      pending.delete(key)
+      return
+    }
+    if (!persistedCookie(cookie, (deps.now ?? Date.now)(), deps.keepDays)) return
+    const previous = pending.get(key)
+    if (previous !== undefined) clearTimeout(previous)
+    pending.set(
+      key,
+      setTimeout(() => {
+        pending.delete(key)
+        void persist(cookie).catch(() => deps.onError?.(cookie.name))
+      }, deps.delayMs ?? SESSION_COOKIE_KEEP_DELAY_MS)
+    )
   })
 }
 
